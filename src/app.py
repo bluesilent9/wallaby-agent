@@ -91,6 +91,8 @@ def serve(preview=False):
     finally:(root/'ui.json').unlink(missing_ok=True)
 
 def bootstrap():
+    names=[key for key in ('DISPLAY','WAYLAND_DISPLAY','XAUTHORITY','DBUS_SESSION_BUS_ADDRESS','SSH_AUTH_SOCK') if key in os.environ]
+    if names:ctl('import-environment',*names)
     ctl('daemon-reload');ctl('enable','--now','wallaby-agent-monitor.service')
 
 def launch():
