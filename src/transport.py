@@ -9,7 +9,7 @@ def ssh_command(config,kind,local_port,control):
           '-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ExitOnForwardFailure=yes',
           '-o','ConnectTimeout=12','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=2',
           '-o','ControlPersist=no','-o','GatewayPorts=no','-o','ForwardAgent=no','-o','ForwardX11=no',
-          '-L',f'127.0.0.1:{local_port}:localhost:{SERVICES[kind]}']
+          '-L',f'127.0.0.1:{local_port}:[::1]:{SERVICES[kind]}']
     if config['identity_file']:args+=['-i',str(Path(config['identity_file']).expanduser()),'-o','IdentitiesOnly=yes']
     return args+['--',host]
 
