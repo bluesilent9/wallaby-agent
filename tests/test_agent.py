@@ -35,7 +35,7 @@ class ConfigurationTests(unittest.TestCase):
    calls=[x.args for x in ctl.call_args_list];self.assertIn(('enable','wallaby-agent-ddns.service'),calls);self.assertIn(('restart','wallaby-agent-ddns.service'),calls);self.assertIn(('disable','--now','wallaby-agent-node.service'),calls)
  def test_ssh_forces_ipv6_trust_and_loopback(self):
   c=Config().values;c['hostname']='server.test';args=ssh_command(c,'jellyfin',8096,'/tmp/test.sock')
-  self.assertIn('-6',args);self.assertIn('StrictHostKeyChecking=yes',args);self.assertIn('127.0.0.1:8096:127.0.0.1:8096',args);self.assertEqual(args[-2:],['--','server.test']);self.assertNotIn('0.0.0.0',args)
+  self.assertIn('-6',args);self.assertIn('StrictHostKeyChecking=yes',args);self.assertIn('127.0.0.1:8096:[::1]:8096',args);self.assertEqual(args[-2:],['--','server.test']);self.assertNotIn('0.0.0.0',args)
  def test_busy_local_port_fails_before_ssh(self):
   with socket.socket() as s,tempfile.TemporaryDirectory() as root:
    s.bind(('127.0.0.1',0));t=Tunnel(Config().values,'jellyfin',root);t.port=s.getsockname()[1]
