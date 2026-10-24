@@ -19,12 +19,12 @@ def decode(raw):
 class HTTPFailure(Exception):
     def __init__(self,status):self.status=status;super().__init__('HTTP request failed (%d).'%status)
 
-def http_json(port,path,body=None,token=None,timeout=30,auth=None):
+def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1'):
     headers={'Content-Type':'application/json','X-Wallaby-Agent':'1'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
-    conn=http.client.HTTPConnection('127.0.0.1',port,timeout=timeout)
+    conn=http.client.HTTPConnection(host,port,timeout=timeout)
     try:
         conn.request('GET' if raw is None else 'POST',path,raw,headers)
         response=conn.getresponse();data=response.read(LIMIT+1)
@@ -52,7 +52,7 @@ class Core:
         cookie=Path(self.config['cookie']).expanduser().read_text().strip()
         if ':' not in cookie or '\n' in cookie:raise ValueError('Invalid Core cookie.')
         path='/' if wallet is None else '/wallet/'+quote(wallet,safe='')+'/'
-        response=http_json(self.config['rpc_port'],path,{'jsonrpc':'2.0','id':ident,'method':method,'params':params},timeout=timeout,auth=cookie)
+        response=http_json(self.config['rpc_port'],path,{'jsonrpc':'2.0','id':ident,'method':method,'params':params},timeout=timeout,auth=cookie,host='127.0.0.1')
         if not isinstance(response,dict) or response.get('id')!=ident:raise ValueError('Core response ID mismatch.')
         if response.get('error') is not None:return {'error':response['error']}
         if 'result' not in response:raise ValueError('Missing Core result.')

@@ -77,14 +77,14 @@ def worker(kind):
                         if not event.is_set():write_status(kind,'red','Bitcoin Core or Dashboard unavailable; retrying shortly.',tunnel=ready.is_set())
                         event.set()
                 thread=threading.Thread(target=run_node,daemon=True);thread.start()
-            else:write_status(kind,'green',f'Connected · localhost:{tunnel.port}',tunnel=True)
+            else:write_status(kind,'green',f'Connected · [::1]:{tunnel.port}',tunnel=True)
             while not stop.wait(2):
                 if not tunnel.alive():raise ConnectionError()
                 if time.monotonic()-stable_since>=60:delay=15
                 if kind=='node':
                     if session_stop.is_set():raise ConnectionError()
                     current=read_status(kind);write_status(kind,current['color'],current['message'],tunnel=True)
-                else:write_status(kind,'green',f'Connected · localhost:{tunnel.port}',tunnel=True)
+                else:write_status(kind,'green',f'Connected · [::1]:{tunnel.port}',tunnel=True)
         except Exception:
             write_status(kind,'red','Connection failed. Check IPv6, SSH key and trusted server key. Retrying shortly.',tunnel=False)
         finally:

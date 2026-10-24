@@ -9,7 +9,7 @@ def ssh_command(config,kind,local_port,control):
           '-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ExitOnForwardFailure=yes',
           '-o','ConnectTimeout=12','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=2',
           '-o','ControlPersist=no','-o','GatewayPorts=no','-o','ForwardAgent=no','-o','ForwardX11=no',
-          '-L',f'127.0.0.1:{local_port}:[::1]:{SERVICES[kind]}']
+          '-L',f'[::1]:{local_port}:[::1]:{SERVICES[kind]}']
     if config['identity_file']:args+=['-i',str(Path(config['identity_file']).expanduser()),'-o','IdentitiesOnly=yes']
     return args+['--',host]
 
@@ -17,11 +17,11 @@ class Tunnel:
     def __init__(self,config,kind,root):
         self.control=Path(root)/f'{kind}.sock';self.kind=kind;self.config=config;self.process=None
         if kind=='node':
-            with socket.socket() as s:s.bind(('127.0.0.1',0));self.port=s.getsockname()[1]
+            with socket.socket(socket.AF_INET6) as s:s.bind(('::1',0));self.port=s.getsockname()[1]
         else:self.port=SERVICES[kind]
     def start(self):
         # Fail visibly on port collisions; never mistake another app's listener for our tunnel.
-        with socket.socket() as s:s.bind(('127.0.0.1',self.port))
+        with socket.socket(socket.AF_INET6) as s:s.bind(('::1',self.port))
         self.control.unlink(missing_ok=True)
         self.process=subprocess.Popen(ssh_command(self.config,self.kind,self.port,self.control),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     def alive(self):
