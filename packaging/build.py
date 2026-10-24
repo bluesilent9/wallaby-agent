@@ -25,10 +25,9 @@ for folder in ('src','web'):
 (stage/'usr/bin').mkdir(parents=True,exist_ok=True)
 subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-fPIE','-pie','-Wl,-z,relro,-z,now','-o',str(stage/'usr/bin/wallaby-agent'),str(root/'packaging/launcher.c')],check=True)
 for kind in ('jellyfin','ddns','node','monitor','ui'):
- extra='NoNewPrivileges=yes\nPrivateTmp=yes\n' if kind!='ui' else ''
+ extra='NoNewPrivileges=yes\n' if kind!='ui' else ''
  put(f'usr/lib/systemd/user/wallaby-agent-{kind}.service',f'''[Unit]
 Description=Wallaby Agent V1 — {kind}
-After=default.target
 StartLimitIntervalSec=0
 
 [Service]
