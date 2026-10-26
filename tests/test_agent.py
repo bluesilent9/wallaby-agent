@@ -10,6 +10,15 @@ from runtime import apply_config
 from agent_rpc import request
 from app import Server,Handler
 
+def setUpModule():
+ global test_root,test_environment
+ test_root=tempfile.TemporaryDirectory()
+ test_environment=patch.dict(os.environ,{'XDG_CONFIG_HOME':test_root.name,'XDG_RUNTIME_DIR':test_root.name})
+ test_environment.start()
+
+def tearDownModule():
+ test_environment.stop();test_root.cleanup()
+
 class ConfigurationTests(unittest.TestCase):
  def test_hostname_rejects_ip_and_injection(self):
   for value in ['127.0.0.1','::1','[::1]','192.168.1.2','2130706433','http://host','host:22','-option','host;whoami','1.2.3','server/name']:
@@ -18,8 +27,8 @@ class ConfigurationTests(unittest.TestCase):
   self.assertEqual(hostname('myserver'),'myserver')
  def test_first_install_and_persistence(self):
   with tempfile.TemporaryDirectory() as root:
-   c=Config(root);self.assertEqual(c.values['enabled'],dict(jellyfin=False,ddns=False,node=False));self.assertEqual(c.values['hostname'],'')
-   v=copy.deepcopy(c.values);v['hostname']='example.test';v['enabled']['jellyfin']=True;c.save(v)
+   c=Config(root);self.assertEqual(c.values['enabled'],dict(ddns=False,node=False));self.assertEqual(c.values['hostname'],'')
+   v=copy.deepcopy(c.values);v['hostname']='example.test';v['enabled']['ddns']=True;c.save(v)
    self.assertEqual(Config(root).values,v);self.assertEqual(c.path.stat().st_mode&0o777,0o600)
  def test_snap_cookie_discovery(self):
   with tempfile.TemporaryDirectory() as root:
@@ -34,11 +43,11 @@ class ConfigurationTests(unittest.TestCase):
    c=Config(root);v=copy.deepcopy(c.values);v['hostname']='server.test';v['enabled']['ddns']=True;apply_config(c,v)
    calls=[x.args for x in ctl.call_args_list];self.assertIn(('enable','wallaby-agent-ddns.service'),calls);self.assertIn(('restart','wallaby-agent-ddns.service'),calls);self.assertIn(('disable','--now','wallaby-agent-node.service'),calls)
  def test_ssh_forces_ipv6_trust_and_loopback(self):
-  c=Config().values;c['hostname']='server.test';args=ssh_command(c,'jellyfin',8096,'/tmp/test.sock')
-  self.assertIn('-6',args);self.assertIn('StrictHostKeyChecking=yes',args);self.assertIn('[::1]:8096:[::1]:8096',args);self.assertEqual(args[-2:],['--','server.test']);self.assertNotIn('0.0.0.0',args)
+  c=Config().values;c['hostname']='server.test';args=ssh_command(c,'ddns',9876,'/tmp/test.sock')
+  self.assertIn('-6',args);self.assertIn('StrictHostKeyChecking=yes',args);self.assertIn('[::1]:9876:[::1]:9876',args);self.assertEqual(args[-2:],['--','server.test']);self.assertNotIn('0.0.0.0',args)
  def test_busy_local_port_fails_before_ssh(self):
   with socket.socket(socket.AF_INET6) as s,tempfile.TemporaryDirectory() as root:
-   s.bind(('::1',0));t=Tunnel(Config().values,'jellyfin',root);t.port=s.getsockname()[1]
+   s.bind(('::1',0));t=Tunnel(Config().values,'ddns',root);t.port=s.getsockname()[1]
    with self.assertRaises(OSError):t.start()
 
 class RPCTests(unittest.TestCase):
@@ -87,6 +96,12 @@ class WebSecurityTests(unittest.TestCase):
   self.assertEqual(self.call('/api/hostname',headers,json.dumps({'hostname':'::1'}))[0],400)
   self.assertEqual(self.call('/api/hostname',headers,json.dumps({'hostname':'server.test'}))[0],200)
   self.assertEqual(Config().values['hostname'],'server.test')
+ def test_retired_service_is_not_exposed_or_accepted(self):
+  headers={'Authorization':'Bearer secret','Content-Type':'application/json'}
+  code,data=self.call('/api/state',headers)
+  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development')
+  self.assertEqual(set(data['config']['enabled']),{'ddns','node'});self.assertNotIn('jellyfin',data['status'])
+  self.assertEqual(self.call('/api/toggle',headers,json.dumps({'service':'jellyfin','enabled':True}))[0],400)
 
 if __name__=='__main__':unittest.main()
 
@@ -113,6 +128,6 @@ class LifecycleTests(unittest.TestCase):
   stop=Stop();v=Config().values;v['hostname']='server.test'
   # First iteration has a tunnel; then all transports drop for the following two iterations.
   def status(kind):return {'tunnel':stop.count==0 and kind=='ddns'}
-  with patch('runtime.signal.signal'),patch('runtime.threading.Event',return_value=stop),patch('runtime.Config') as config,patch('runtime.read_status',side_effect=status),patch('runtime.ping',return_value=True) as ping,patch('runtime.time.monotonic',side_effect=[0,0,10]),patch('runtime.write_status') as writes:
+  with patch('runtime.retire_jellyfin'),patch('runtime.signal.signal'),patch('runtime.threading.Event',return_value=stop),patch('runtime.Config') as config,patch('runtime.read_status',side_effect=status),patch('runtime.ping',return_value=True) as ping,patch('runtime.time.monotonic',side_effect=[0,0,10]),patch('runtime.write_status') as writes:
    config.return_value.values=v;runtime.monitor()
    self.assertEqual(ping.call_count,1);self.assertEqual(ping.call_args.args,('server.test',));self.assertIn('amber',[c.args[1] for c in writes.call_args_list])

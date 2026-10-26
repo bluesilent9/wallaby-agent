@@ -15,6 +15,15 @@ from nodes import NodeRegistry,create_agent_server
 from node_client import NodeClient
 from configuration import Config
 
+def setUpModule():
+ global test_root,test_environment
+ test_root=tempfile.TemporaryDirectory()
+ test_environment=patch.dict(os.environ,{'XDG_CONFIG_HOME':test_root.name,'XDG_RUNTIME_DIR':test_root.name})
+ test_environment.start()
+
+def tearDownModule():
+ test_environment.stop();test_root.cleanup()
+
 class FakeCore(http.server.BaseHTTPRequestHandler):
  calls=[]
  def log_message(self,*_):pass
