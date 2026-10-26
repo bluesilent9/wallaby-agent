@@ -2,7 +2,7 @@
 import configparser, ipaddress, json, os, re, shlex, tempfile
 from pathlib import Path
 
-SERVICES={'ddns':9876,'node':56443}
+SERVICES={'ddns':9876,'dashboard':38951,'node':56443}
 
 def hostname(value):
     value=value.strip().rstrip('.')
