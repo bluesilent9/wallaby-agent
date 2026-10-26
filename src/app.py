@@ -1,10 +1,10 @@
 #!/usr/bin/python3
-"""Wallaby Agent V1 entry point and authenticated loopback configuration page."""
+"""Wallaby Agent V2 entry point and authenticated loopback configuration page."""
 import argparse, copy, fcntl, hmac, json, os, secrets, shutil, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from configuration import Config,hostname,discover_cookie,SERVICES
-from runtime import runtime_dir,read_status,write_status,apply_config,ctl,worker,monitor
+from runtime import runtime_dir,read_status,write_status,apply_config,ctl,worker,monitor,retire_jellyfin
 
 ASSETS=Path(__file__).resolve().parent.parent/'web'
 
@@ -43,7 +43,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not v['cookie']:
                     cookie=discover_cookie()
                     if cookie:v['cookie']=cookie;c.save(v)
-                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V1 Development'})
+                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development'})
         paths={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
         if self.path not in paths:return self.reply(404,{'error':'Not found.'})
         f=ASSETS/paths[self.path];mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml'}[f.suffix]
@@ -91,6 +91,7 @@ def serve(preview=False):
     finally:(root/'ui.json').unlink(missing_ok=True)
 
 def bootstrap():
+    retire_jellyfin()
     names=[key for key in ('DISPLAY','WAYLAND_DISPLAY','XAUTHORITY','DBUS_SESSION_BUS_ADDRESS','SSH_AUTH_SOCK') if key in os.environ]
     if names:ctl('import-environment',*names)
     ctl('daemon-reload');ctl('enable','--now','wallaby-agent-monitor.service')
@@ -110,7 +111,7 @@ def launch():
 
 if __name__=='__main__':
     os.umask(0o077)
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['configure','ui','bootstrap','monitor','jellyfin','ddns','node','preview'],nargs='?',default='configure');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['configure','ui','bootstrap','monitor',*SERVICES,'preview'],nargs='?',default='configure');a=p.parse_args()
     if a.mode=='configure':launch()
     elif a.mode=='bootstrap':bootstrap()
     elif a.mode=='monitor':monitor()

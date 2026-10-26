@@ -29,6 +29,25 @@ def ctl(*args):
     p=subprocess.run(['systemctl','--user',*args],capture_output=True,text=True,timeout=20)
     if p.returncode:raise RuntimeError('User service manager could not apply the change. Check the session supports systemd --user.')
 
+def retire_jellyfin():
+    """Stop V1's retired tunnel in the current user's session, including cached units."""
+    unit='wallaby-agent-jellyfin.service'
+    # Stop separately: disable may fail first if dpkg has already removed the unit file.
+    result=subprocess.run(['systemctl','--user','stop',unit],capture_output=True,text=True,timeout=20)
+    if result.returncode:
+        # A fresh installation has no such unit. A bus/stop failure must not be hidden.
+        state=subprocess.run(['systemctl','--user','is-active',unit],capture_output=True,text=True,timeout=20)
+        if state.returncode not in (3,4):raise RuntimeError('Could not stop the retired Jellyfin user service.')
+    result=subprocess.run(['systemctl','--user','disable',unit],capture_output=True,text=True,timeout=20)
+    if result.returncode:
+        state=subprocess.run(['systemctl','--user','is-enabled',unit],capture_output=True,text=True,timeout=20)
+        if state.returncode not in (1,4):raise RuntimeError('Could not disable the retired Jellyfin user service.')
+    link=Path(os.environ.get('XDG_CONFIG_HOME',Path.home()/'.config'))/'systemd/user/default.target.wants'/unit
+    if link.is_symlink():link.unlink()
+    ctl('daemon-reload')
+    Config()  # Persist migration of a V1 config, without enabling either remaining service.
+    (runtime_dir()/'jellyfin.json').unlink(missing_ok=True)
+
 def apply_config(config,new):
     """Persist desired state first; report service failures so they are never hidden."""
     old=copy.deepcopy(config.values);config.save(new)
@@ -96,6 +115,7 @@ def worker(kind):
     write_status(kind,'red','Off',tunnel=False)
 
 def monitor():
+    retire_jellyfin()
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());last_host=None;due=0;color='red';message='Server name not configured.'
     while not stop.is_set():
         host=Config().values['hostname'];active=any(read_status(k).get('tunnel',False) for k in SERVICES)

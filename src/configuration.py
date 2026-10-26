@@ -2,7 +2,7 @@
 import configparser, ipaddress, json, os, re, shlex, tempfile
 from pathlib import Path
 
-SERVICES={'jellyfin':8096,'ddns':9876,'node':56443}
+SERVICES={'ddns':9876,'node':56443}
 
 def hostname(value):
     value=value.strip().rstrip('.')
@@ -20,12 +20,16 @@ class Config:
         self.root=Path(root or Path(os.environ.get('XDG_CONFIG_HOME',Path.home()/'.config'))/'wallaby-agent')
         self.path=self.root/'config.cfg'
         self.values={'hostname':'','ssh_user':os.environ.get('USER',''),'ssh_port':22,'identity_file':'','cookie':'','rpc_port':8332,'enabled':{k:False for k in SERVICES}}
+        retired=False
         if self.path.exists():
             c=configparser.ConfigParser(interpolation=None);c.read(self.path)
             for k in ('hostname','ssh_user','identity_file','cookie'):self.values[k]=c.get('agent',k,fallback=self.values[k])
             for k in ('ssh_port','rpc_port'):self.values[k]=c.getint('agent',k,fallback=self.values[k])
             self.values['enabled']={k:c.getboolean('services',k,fallback=False) for k in SERVICES}
+            retired=c.has_option('services','jellyfin')
         self.validate(self.values)
+        # Drop the retired V1 switch while preserving both remaining service settings.
+        if retired:self.save(self.values)
     def validate(self,v):
         if v['hostname']:v['hostname']=hostname(v['hostname'])
         if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}',v['ssh_user']):raise ValueError('Invalid SSH username.')
