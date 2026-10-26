@@ -1,76 +1,92 @@
 # Wallaby Agent V2 — Development
 
-Wallaby Agent connects a Linux desktop to the family's server with **IPv6-only SSH tunnels**. The HTML5 configuration page has the Wallaby gear emblem and a black sidebar. There is one workspace label rather than a redundant navigation button.
+Wallaby Agent manages per-user **IPv6 SSH tunnels** from a Linux desktop to your server. Its local HTML5 configuration page uses the Wallaby gear emblem and black sidebar.
 
-**This is V2 Development. Stable contains no released application yet.** V2 source and the Ubuntu 26.04 LTS amd64 installer are available in this Development branch. Older V1 installers in `dist/` do not contain these changes. The DEB contains a compiled native launcher and the Python service runtime; it is not a self-contained static executable.
+**V2 Development build 3 source is prepared; its installer has not been built.** The published V2 dev1 DEB predates Dashboard browser access and the improved diagnostics. Stable has no application release. Building is paused for the requested reboot.
+
+## Three independent services
+
+| Configuration switch | Local endpoint | Server destination | Requires Bitcoin Core? |
+| --- | --- | --- | --- |
+| DDNS-GO Administration | `http://[::1]:9876` | `[::1]:9876` | No |
+| Wallaby Dashboard | `http://[::1]:38951` | `[::1]:38951` | No |
+| Bitcoin Core Node Dashboard Interface | private ephemeral IPv6 loopback port | `[::1]:56443` | Yes |
+
+**Wallaby Dashboard** supplies browser access. Switch it on, then use **Open Dashboard**. It can be enabled on a computer with no Bitcoin Core installation. The **Node Dashboard Interface** separately connects local Core RPC to the Dashboard's Agent listener; it does not provide browser access on port 38951. Enable either or both according to the computer's role.
+
+All three switches default OFF for a new user. Upgrading an existing V1/V2 configuration preserves DDNS-GO and node choices and adds Dashboard access OFF. ON connects immediately, reconnects automatically and starts at the next user login. OFF stops and disables only that user's corresponding service. Jellyfin administration remains removed.
 
 ## Install and configure
 
-Download [wallaby-agent_2.0.0~dev1_amd64.deb](dist/wallaby-agent_2.0.0~dev1_amd64.deb) and verify it against [SHA256SUMS.txt](dist/SHA256SUMS.txt), then:
+After build 3 is built and published, install `dist/wallaby-agent_2.0.0~dev3_amd64.deb`, verifying it against `dist/SHA256SUMS.txt` first:
 
 ```sh
-sudo apt install ./wallaby-agent_2.0.0~dev1_amd64.deb
+sudo apt install ./wallaby-agent_2.0.0~dev3_amd64.deb
 ```
 
-Package installation uses the usual administrator permission. Configuration, toggles, tunnels, and login startup subsequently use **your user account**, with no sudo, system services, or lingering required. Open **Utilities → Wallaby Agent Configuration** (or Settings on desktops that group applications differently). `wallaby-agent configure` opens the same page.
+Installing a DEB uses normal administrator permission. Tunnels, settings and login startup subsequently run as your user, without sudo, system services or lingering. Open **Utilities → Wallaby Agent Configuration**, or run `wallaby-agent configure`.
 
-1. Enter and accept your server hostname/domain. IP literals are rejected. An AAAA record and working IPv6 route are required.
-2. Enter your SSH username and optional private-key path. Before enabling a tunnel, use a terminal to verify the server's fingerprint against a trusted source and establish key authentication: `ssh -6 -p 22 USER@HOSTNAME`. Encrypted keys should be unlocked in your desktop's SSH agent. Agent never accepts an unverified host key automatically, stores an SSH password, or opens password prompts in the background. Its explicit forwarding configuration ignores `~/.ssh/config`; it uses your normal `known_hosts` and SSH agent.
-3. Save settings and enable only the services you want. Both switches start OFF on a new user account. ON persists across reboot and starts at your next login. OFF stops and disables that user's service immediately.
-4. For the node service, enable RPC (`server=1`) in Bitcoin Core and restart Core. Agent searches owned Core processes (`-datadir`/`-rpccookiefile`), Snap `~/snap/bitcoin-core/common/.bitcoin` and `current/.bitcoin`, and `~/.bitcoin`, including local config/settings datadir hints. Bitcoin Core has no standard datadir environment variable; invented environment variables are not used. A native **Choose file** dialog selects `.cookie` if discovery fails. Save settings after selecting it. Non-mainnet cookies/custom RPC ports can be selected explicitly.
+1. Enter a server hostname/domain and click **Accept server**. IP literals are rejected; the server requires an AAAA record and a working IPv6 route.
+2. Enter the **server SSH account**, which can differ from your desktop login. For example, desktop user `dave` on wallet-laptop uses server SSH account `wallet-laptop`. Verify the trusted server fingerprint and key authentication with `ssh -6 -F /dev/null USER@HOSTNAME` before enabling services. Encrypted keys must be unlocked in the desktop SSH agent. An optional absolute private-key path can be selected.
+3. Click **Save settings** after editing SSH/RPC fields. Accepting a server name and toggling services do not save those fields. Unsaved edits now display a reminder. Saving connection changes restarts enabled services with those settings.
+4. Enable the services needed on this computer. Dashboard browser access and DDNS-GO need no RPC cookie.
+5. For the node interface, enable RPC (`server=1`) and restart Bitcoin Core. Agent checks owned Core processes, custom datadir/cookie options, Snap `~/snap/bitcoin-core/common/.bitcoin` and `current/.bitcoin`, then `~/.bitcoin`, with local config/settings hints. Bitcoin Core has no standard datadir environment variable. If needed, select the local `.cookie` with **Choose file**, then save settings. Only its path is saved, and its contents are reread for each RPC call.
 
-## Services and status
+## IPv6 and SSH forwarding
 
-| Service | Local endpoint | Server destination |
-| --- | --- | --- |
-| DDNS-GO Administration | `http://[::1]:9876` | server [::1]:9876 |
-| Bitcoin Core Node Dashboard Interface | private ephemeral loopback port | server [::1]:56443 |
+SSH always uses `ssh -6`; local listeners and remote forward destinations use IPv6 loopback `[::1]`. The tunnel command ignores `~/.ssh/config` forwarding directives, uses normal `known_hosts` and the SSH agent, and enforces host-key verification. It never stores an SSH password or accepts an unknown server key automatically. The configuration page and local Core RPC use IPv4 loopback independently of SSH.
 
-Every SSH transport uses `ssh -6`, and every remote forwarded destination is IPv6 loopback `[::1]`. Forwarded local listeners also use IPv6 loopback `[::1]`, because OpenSSH applies `-6` to listener address resolution as well as its server connection. The configuration page and local Bitcoin Core RPC client use IPv4 loopback independently of SSH. Tunnel listeners never bind all network interfaces. Your SSH server must permit these exact forward destinations. For example, a dedicated SSH key can use `restrict,port-forwarding,permitopen="[::1]:9876",permitopen="[::1]:56443"` in `authorized_keys`, subject to your existing server account restrictions. The server must listen on IPv6 loopback and permit these exact IPv6 destinations. Existing SSH rules permitting only `127.0.0.1` must be updated to `[::1]` by the server administrator; an IPv4-only rule does not authorize an IPv6 destination. No server configuration is modified by the installer.
+Server forwarding rules must permit the exact destinations. A restricted key that uses all three services can permit `[::1]:9876`, `[::1]:38951` and `[::1]:56443`, subject to existing account restrictions. An IPv4-only `PermitOpen 127.0.0.1:PORT` rule does not permit `[::1]:PORT`. The installer does not alter server SSH rules or expose public listeners.
 
-Red means off/disconnected, amber connecting/checking, green connected. A toggle's colour records the requested ON/OFF setting; the separate dot records actual connection state. Tunnel green confirms an authenticated OpenSSH transport with its forwarding listener installed; it does not promise the DDNS-GO application behind it is healthy. Node green requires **SSH + successful local Core RPC + Dashboard registration/heartbeat**. A failure produces red before retry, then amber during the next attempt. Reconnects use 15–300 second exponential backoff with jitter. SSH keepalives detect dead transports. When any SSH tunnel exists, server ping stops. Without tunnels, `ping -6` checks immediately and every 60 seconds, including after a failed check. Servers blocking ICMP can show red while SSH still works.
+Remove an old Dashboard startup forward before enabling the Agent's Dashboard switch if it occupies port 38951. Identify the exact legacy unit and inspect its command before retiring it; do not disable the new `wallaby-agent-node.service` or a storage mount. See [LEGACY_DASHBOARD_TUNNEL.md](LEGACY_DASHBOARD_TUNNEL.md).
 
-Desired settings: `$XDG_CONFIG_HOME/wallaby-agent/config.cfg` (normally `~/.config/wallaby-agent/config.cfg`), mode 0600 in a 0700 directory. Cookie location is saved, never cookie contents. Runtime tokens and status use a private directory under `$XDG_RUNTIME_DIR`. The config page binds only `127.0.0.1`, uses a short-lived launch token, checks Host/Origin and uses no third-party assets. Browser access without the menu-launch token is rejected.
+## Status and diagnostics
 
-## Dashboard compatibility and RPC
+Red means off/disconnected, amber means connecting/checking, and green means connected. The switch records desired ON/OFF; the separate dot reports actual state. DDNS-GO and Dashboard browser tunnel green confirms authenticated SSH and its forwarding listener, not the application's HTTP health. Node green requires **SSH, healthy local Core RPC, and successful Dashboard registration/heartbeat**.
 
-Implements the Dashboard V155 Agent v1 contract on **56443**; see [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md). Register → heartbeat + long poll → acknowledge → local JSON-RPC → correlated result. Heartbeats continue independently during slow Core operations. Credentials remain local and the cookie is reread for every call so Core restarts work. Duplicate commands are not executed again. Acknowledgement loss and RPC timeouts are not automatically replayed. Reconcile actual Core state before manually repeating a write.
+Reconnects use 15–300 second exponential backoff with jitter. SSH keepalives detect lost transports. A connected SSH transport suppresses server ping; without one, IPv6 ping runs immediately and every 60 seconds. ICMP blocking can make ping red while SSH works.
 
-The Agent independently uses the Dashboard's method and public descriptor policy, including watch-only wallet creation/import. Signing, unlocking, private exports, broadcasting and arbitrary RPC methods are excluded. Decimal monetary values travel as exact decimal strings, with integer counts unchanged. Core always uses the locally configured loopback port; the hub cannot select a host, credentials or filesystem path. The self-reported adapter MAC and hostname are identity hints; SSH provides authentication. No software can make RPC exactly-once across arbitrary network failures.
-
-## Build and test
-
-On Ubuntu 26.04 with `gcc`, `dpkg-dev` and Python 3:
+Errors distinguish SSH/DNS/IPv6 routing, server-key verification, key authentication, local port conflicts, denied server forwarding, a refused remote target, Core cookie discovery/readability/format, RPC authentication/port/warmup, and Dashboard HTTP/protocol/session failures. RPC/Dashboard errors are no longer overwritten with a generic SSH-key warning. The original failure remains visible during long retry waits and is shown as the previous failure during the next connection attempt.
 
 ```sh
-python3 -m unittest discover -s tests -v
-python3 packaging/build.py
+journalctl --user -u wallaby-agent-dashboard.service -n 50 --no-pager
+journalctl --user -u wallaby-agent-node.service -n 50 --no-pager
 ```
 
-Build needs no root or network. Sources include the vendored embit public descriptor parser and its MIT license. `src/agent_rpc.py` and `descriptor_policy.py` derive from the companion Dashboard V155 source. Build output is `dist/*.deb`.
+The journal includes classified stage/code and actionable messages. Raw SSH error lines are drained into bounded private memory for classification, not copied to the page or journal. Cookies, authentication headers, session tokens and raw RPC responses are not logged.
 
-Inspect: `systemctl --user status wallaby-agent-{monitor,ddns,node}.service` and `journalctl --user -u wallaby-agent-node.service`. To stop all enabled connections before uninstalling: switch them off, then `systemctl --user disable --now wallaby-agent-monitor.service; systemctl --user stop wallaby-agent-ui.service`. Uninstall with `sudo apt remove wallaby-agent`. Your private configuration is retained. Users already logged in should stop their own services before removal; package scripts do not manipulate another user's session.
+Configuration is `$XDG_CONFIG_HOME/wallaby-agent/config.cfg` (normally `~/.config/wallaby-agent/config.cfg`), mode 0600 in a private directory. Status and launch tokens use `$XDG_RUNTIME_DIR`. The UI binds only to `127.0.0.1`, requires its menu-launch token, checks Host/Origin and loads no third-party assets.
 
-Development validation uses mock SSH/Core/hub endpoints and the real Dashboard protocol. Live server authentication, your Snap installation, and reconnects on your network still require a check on the target computer. This version has not been promoted to Stable.
+## Node protocol and RPC
 
-Reference defaults and discovery: [DDNS-GO](https://github.com/jeessy2/ddns-go), [Bitcoin Core file locations](https://github.com/bitcoin/bitcoin/blob/master/doc/files.md), [official Core Snap packaging](https://github.com/bitcoin-core/packaging/blob/main/snap/snapcraft.yaml).
+Application V2 retains the **Dashboard V155 Agent v1 protocol on port 56443**. See [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md). Registration, independent heartbeats/long polling, acknowledgements and correlated results carry approved local Core RPC requests. Duplicate commands are not rerun; lost acknowledgements and RPC timeouts are not automatically replayed. Reconcile local state before repeating a write.
 
-## V2 Development changes and upgrading from V1
+The Agent independently enforces the Dashboard method/public-descriptor policy, including watch-only wallet setup. Private exports, unlocking, signing, broadcasting and arbitrary methods are excluded. Monetary decimals travel exactly, without binary-float conversion. Core is contacted only on its configured local loopback port; the hub cannot choose credentials or filesystem paths. MAC/hostname values are identity hints; SSH supplies authentication. Exactly-once RPC is not guaranteed across arbitrary network failures.
 
-Jellyfin SSH Administration has been removed from the configuration page, service API, command-line modes and generated package units. V2 retains **DDNS-GO Administration** and the **Bitcoin Core Node Dashboard Interface**. The Dashboard wire protocol remains Agent v1 / Dashboard V155; the application version V2 does not change that contract.
+## Upgrade and build
 
-On the first V2 startup, the current user's retired `wallaby-agent-jellyfin.service` is stopped and disabled, its old startup link and status are removed, and `jellyfin` is removed from `config.cfg`. Existing server, SSH, cookie and RPC settings, plus the DDNS-GO/node ON/OFF choices, are preserved. New installations still start with both switches OFF. Cleanup runs at login bootstrap and monitor startup, entirely under the user's account. No Jellyfin server software or other apps are removed.
+Close old configuration tabs before upgrading. V2 startup stops/disables the current user's retired V1 Jellyfin unit and removes its old startup link/status/config switch. DDNS-GO and node settings are preserved; Dashboard browser access starts OFF.
 
-Before upgrading, close existing Agent configuration tabs. To retire an already running V1 tunnel before upgrading, run as your normal desktop user:
+After installing the future build 3 package:
 
 ```sh
-systemctl --user disable --now wallaby-agent-jellyfin.service
-sudo apt install ./wallaby-agent_2.0.0~dev1_amd64.deb
 systemctl --user daemon-reload
-systemctl --user try-restart wallaby-agent-monitor.service wallaby-agent-ddns.service wallaby-agent-node.service wallaby-agent-ui.service
+systemctl --user try-restart wallaby-agent-monitor.service wallaby-agent-ddns.service wallaby-agent-dashboard.service wallaby-agent-node.service wallaby-agent-ui.service
 wallaby-agent configure
 ```
 
-The remaining services restart only if they were already running. Their saved enabled/disabled settings are retained. Other logged-in users receive cleanup when they next launch V2 or log in; package installation does not control other users' sessions.
+This only restarts units already running. The new Dashboard unit is enabled when its switch is turned on. Package scripts do not control another logged-in user's session.
 
-The V2 DEB has been built and its contents checked; all 26 automated tests pass. Live package installation/upgrade and wallet-laptop node validation are still pending. See [VALIDATION.md](VALIDATION.md) for the current preparation status.
+Source checks:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
+Build after the requested reboot, using Ubuntu 26.04 with Python 3, `gcc` and `dpkg-dev`:
+
+```sh
+python3 packaging/build.py
+```
+
+No root or network is needed for building. The DEB includes a compiled native launcher and Python runtime sources; it is not a static standalone executable. Sources include the vendored embit public descriptor parser and its MIT license. RPC policy derives from Dashboard V155. See [VALIDATION.md](VALIDATION.md) for checks and remaining live tests.

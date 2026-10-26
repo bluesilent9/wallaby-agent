@@ -1,19 +1,13 @@
-# Wallaby Agent V2 Development — build validation
+# V2 Development build 3 — pre-build validation
 
-Built 27 October 2026 on Ubuntu 26.04.1 LTS amd64 with Python 3.14 and GCC. Package version: `2.0.0~dev1`.
+Prepared 27 October 2026. Intended package version: `2.0.0~dev3`. **Build 3 has not been built or installed; compilation is paused until the requested reboot.**
 
-26 automated tests pass (`python3 -m unittest discover -s tests -v`). Coverage includes the Dashboard V155 HTTP/RPC integration over IPv6, exact decimal results and disconnect handling, V1 configuration migration across every combination of the two retained service switches, retired service shutdown and startup-link cleanup, first-install absence of the old unit, service-manager failure reporting, bootstrap cleanup ordering, the two-service HTML page, and API rejection of the removed toggle. Tests use temporary configuration/runtime directories and mocked user-unit controls; they do not alter the installed Agent or connect to the real Bitcoin node.
+Source retains the staged dev2 diagnostics work and adds the independent Dashboard browser tunnel: local [::1]:38951 to server [::1]:38951. The node RPC interface remains on server port 56443. Upgrades preserve DDNS-GO/node choices and add Dashboard OFF. Fresh installs default all three switches OFF. Dashboard access does not load a cookie or start a node RPC client.
 
-The DEB builds successfully using `python3 packaging/build.py`. Extracted package checks confirm version/architecture/dependencies, the compiled ELF amd64 PIE launcher, DDNS-GO/node/monitor/UI user units only, the V2 UI and runtime sources, V1 configuration migration, and the included README. The post-install script only refreshes desktop entries; it does not start or enable tunnels. SHA-256 checksums are published beside the installer in `dist/`.
+All 42 automated tests pass. Tests cover V1/V2 configuration migration, persistence and user-unit enable/disable commands; separate Dashboard/node IPv6 targets; browser/API controls; a Dashboard worker with no Core dependency; diagnostics/redaction and retry retention; and the real V155 HTTP/RPC protocol with a simulated Core endpoint. Temporary config/runtime directories and mocked service controls protect the installed Agent.
 
-Still pending: live package installation/upgrade, login-session lifecycle checks and wallet-laptop node/Dashboard testing. The local Core endpoint used by integration tests is simulated. The package has not been installed on the build laptop as part of this build, and Stable is unchanged.
+Live read-only server inspection confirmed both browser port 38951 and Agent port 56443 listen on IPv4 and IPv6 loopback. The user's earlier wallet-laptop issue was resolved by saving SSH username wallet-laptop. The user confirmed that Dashboard then detects the node. No new wallet-laptop or server configuration was changed during this preparation.
 
-## Historical V1 validation
+An isolated browser preview verified all three controls, Dashboard toggle persistence with node OFF, the Open Dashboard IPv6 link, and the unsaved-settings reminder. JavaScript syntax was checked with Node. Preview configuration was isolated from the installed Agent.
 
-Built on Ubuntu 26.04.1 LTS amd64 with Python 3.14 and GCC.
-
-19 automated tests pass, including real Dashboard V155 HTTP registration over an IPv6 local listener, correlated RPC request delivery, exact decimal results and graceful disconnect. Other tests cover hostname/IP validation, Snap/custom datadir discovery, private atomic config persistence, rootless systemd commands, SSH IPv6 transport, IPv6 local/remote destinations and host-key enforcement, port collisions, bounded retry backoff, resumption of ping after tunnel loss, RPC restrictions, duplicate deliveries, lost acknowledgements, and loopback UI token/Origin/Host protection.
-
-The HTML5 workspace was inspected in a browser. The DEB was built and its metadata/content checked; the package does not start or enable tunnels during installation.
-
-Build 2 was also tested against the live family SSH server using the existing authenticated account: both IPv6 tunnel masters established successfully, Jellyfin /health returned HTTP 200, and DDNS-GO returned its expected HTTP 307 redirect. Temporary test tunnels were closed afterwards. The saved Agent username was corrected through its configuration page; SSH credentials were not changed. The real Bitcoin Core Snap process, desktop session startup, network failure recovery and package upgrade still require a live check. The local Core endpoint in integration tests is simulated.
+Pending: build 3 launcher/DEB generation and package inspection; installation/upgrade; live Dashboard browser tunnel and login-startup testing on the two laptops. The legacy wallet-laptop unit was identified as ~/.config/systemd/user/ssh-tunnels.service from the user-provided unit listing and contents; exact retirement commands are documented in LEGACY_DASHBOARD_TUNNEL.md. No cleanup command was executed remotely.
