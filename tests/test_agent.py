@@ -27,7 +27,7 @@ class ConfigurationTests(unittest.TestCase):
   self.assertEqual(hostname('myserver'),'myserver')
  def test_first_install_and_persistence(self):
   with tempfile.TemporaryDirectory() as root:
-   c=Config(root);self.assertEqual(c.values['enabled'],dict(ddns=False,node=False));self.assertEqual(c.values['hostname'],'')
+   c=Config(root);self.assertEqual(c.values['enabled'],dict(ddns=False,dashboard=False,node=False));self.assertEqual(c.values['hostname'],'')
    v=copy.deepcopy(c.values);v['hostname']='example.test';v['enabled']['ddns']=True;c.save(v)
    self.assertEqual(Config(root).values,v);self.assertEqual(c.path.stat().st_mode&0o777,0o600)
  def test_snap_cookie_discovery(self):
@@ -100,8 +100,13 @@ class WebSecurityTests(unittest.TestCase):
   headers={'Authorization':'Bearer secret','Content-Type':'application/json'}
   code,data=self.call('/api/state',headers)
   self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development')
-  self.assertEqual(set(data['config']['enabled']),{'ddns','node'});self.assertNotIn('jellyfin',data['status'])
+  self.assertEqual(set(data['config']['enabled']),{'ddns','dashboard','node'});self.assertNotIn('jellyfin',data['status'])
   self.assertEqual(self.call('/api/toggle',headers,json.dumps({'service':'jellyfin','enabled':True}))[0],400)
+ def test_dashboard_toggle_does_not_require_cookie_or_enable_node(self):
+  headers={'Authorization':'Bearer secret','Content-Type':'application/json'}
+  self.assertEqual(self.call('/api/hostname',headers,json.dumps({'hostname':'server.test'}))[0],200)
+  self.assertEqual(self.call('/api/toggle',headers,json.dumps({'service':'dashboard','enabled':True}))[0],200)
+  config=Config().values;self.assertTrue(config['enabled']['dashboard']);self.assertFalse(config['enabled']['node']);self.assertEqual(config['cookie'],'')
 
 if __name__=='__main__':unittest.main()
 

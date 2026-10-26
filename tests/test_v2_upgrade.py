@@ -24,7 +24,7 @@ class UpgradeTests(unittest.TestCase):
                     values.update(hostname='server.example', ssh_user='wallet-laptop',
                                   ssh_port=2222, identity_file='/keys/id_ed25519',
                                   cookie='/bitcoin/.cookie', rpc_port=18332)
-                    values['enabled'] = {'ddns': ddns, 'node': node}
+                    values['enabled'] = {'ddns': ddns, 'dashboard': False, 'node': node}
                     config.save(values)
                     with config.path.open('a') as stream:
                         stream.write('jellyfin = true\n')
@@ -79,7 +79,7 @@ class UpgradeTests(unittest.TestCase):
         self.assertEqual(calls[0], 'retire')
         self.assertIn(('enable', '--now', 'wallaby-agent-monitor.service'), calls)
 
-    def test_configuration_page_has_only_the_two_supported_services(self):
+    def test_configuration_page_has_the_three_supported_services(self):
         class Page(HTMLParser):
             services = []
             def handle_starttag(self, tag, attrs):
@@ -89,4 +89,4 @@ class UpgradeTests(unittest.TestCase):
         page = Page()
         page.feed((Path(__file__).resolve().parents[1] / 'web/index.html').read_text())
         self.assertEqual(page.services, list(SERVICES))
-        self.assertEqual(list(SERVICES), ['ddns', 'node'])
+        self.assertEqual(list(SERVICES), ['ddns', 'dashboard', 'node'])
