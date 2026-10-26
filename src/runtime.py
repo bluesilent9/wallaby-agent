@@ -1,9 +1,10 @@
 """Per-user worker, private status files and rootless systemd control."""
-import copy, json, os, random, signal, subprocess, tempfile, threading, time
+import copy, json, os, random, signal, subprocess, tempfile, threading, time, sys
 from pathlib import Path
 from configuration import Config,SERVICES,discover_cookie
 from transport import Tunnel,ping
 from node_client import NodeClient
+from diagnostics import ConnectionFailure,describe
 
 def runtime_dir():
     base=Path(os.environ.get('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}'))
@@ -21,7 +22,7 @@ def write_status(kind,color,message,**extra):
 def read_status(kind):
     try:
         d=json.loads((runtime_dir()/(kind+'.json')).read_text())
-        if time.time()-d['updated']<50:return d
+        if time.time()-d['updated']<50 or time.time()<d.get('retry_at',0)+10:return d
     except (OSError,ValueError,KeyError):pass
     return {'color':'red','message':'Off' if kind!='server' else 'Server name not configured.'}
 
@@ -64,55 +65,63 @@ def apply_config(config,new):
 
 def worker(kind):
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
-    delay=15
+    delay=15;last_failure=None
+    def publish(color,message,**extra):
+        nonlocal last_failure
+        if color=='green':last_failure=None
+        write_status(kind,color,message,last_error=last_failure,**extra)
     while not stop.is_set():
-        config=Config().values
-        if not config['enabled'][kind]:return
-        if not config['hostname']:
-            write_status(kind,'red','Set the server name first.',tunnel=False);stop.wait(5);continue
-        if kind=='node' and not config['cookie']:
-            cookie=discover_cookie()
-            if cookie:
-                config['cookie']=cookie
-        tunnel=Tunnel(config,kind,runtime_dir())
-        connected=threading.Event()
+        tunnel=None;session_stop=None;stage='configuration';failure=None
         try:
-            write_status(kind,'amber','Connecting over IPv6…',tunnel=False);tunnel.start()
+            config=Config().values
+            if not config['enabled'][kind]:break
+            if not config['hostname']:
+                publish('red','Set the server name first.',tunnel=False);stop.wait(5);continue
+            if kind=='node' and not config['cookie']:
+                config['cookie']=discover_cookie()
+            stage='ssh'
+            publish('amber','Connecting SSH over IPv6…',tunnel=False,stage=stage)
+            tunnel=Tunnel(config,kind,runtime_dir());tunnel.start()
             deadline=time.monotonic()+16
             while not stop.is_set() and not tunnel.alive():
-                if tunnel.process.poll() is not None or time.monotonic()>deadline:raise ConnectionError()
+                if tunnel.process.poll() is not None or time.monotonic()>deadline:raise tunnel.failure()
                 stop.wait(.3)
             if stop.is_set():break
-            connected.set();stable_since=time.monotonic()
+            stable_since=time.monotonic()
             if kind=='node':
-                session_stop=threading.Event()
-                def status(color,message,event=session_stop,ready=connected):
-                    if not event.is_set():write_status(kind,color,message,tunnel=ready.is_set())
-                status('amber','SSH connected. Checking Bitcoin Core and Dashboard…')
+                stage='node';session_stop=threading.Event();node_errors=[]
+                def status(color,message,event=session_stop):
+                    if not event.is_set():publish(color,message,tunnel=True,stage='node')
+                status('amber','SSH connected. Checking local Bitcoin Core RPC…')
                 node=NodeClient(config,tunnel.port,session_stop,status)
-                def run_node(client=node,event=session_stop,ready=connected):
+                def run_node(client=node,event=session_stop,errors=node_errors):
                     try:client.run()
-                    except Exception:
-                        if not event.is_set():write_status(kind,'red','Bitcoin Core or Dashboard unavailable; retrying shortly.',tunnel=ready.is_set())
-                        event.set()
+                    except Exception as error:errors.append(describe('dashboard',error))
+                    finally:event.set()
                 thread=threading.Thread(target=run_node,daemon=True);thread.start()
-            else:write_status(kind,'green',f'Connected · [::1]:{tunnel.port}',tunnel=True)
+            else:publish('green',f'Connected · [::1]:{tunnel.port}',tunnel=True,stage='ssh')
             while not stop.wait(2):
-                if not tunnel.alive():raise ConnectionError()
+                if not tunnel.alive():raise tunnel.failure()
                 if time.monotonic()-stable_since>=60:delay=15
                 if kind=='node':
-                    if session_stop.is_set():raise ConnectionError()
-                    current=read_status(kind);write_status(kind,current['color'],current['message'],tunnel=True)
-                else:write_status(kind,'green',f'Connected · [::1]:{tunnel.port}',tunnel=True)
-        except Exception:
-            write_status(kind,'red','Connection failed. Check IPv6, SSH key and trusted server key. Retrying shortly.',tunnel=False)
+                    if session_stop.is_set():raise node_errors[0] if node_errors else ConnectionFailure('dashboard','session','Dashboard node session ended unexpectedly.')
+                    current=read_status(kind);publish(current['color'],current['message'],tunnel=True,stage='node')
+                else:publish('green',f'Connected · [::1]:{tunnel.port}',tunnel=True,stage='ssh')
+        except Exception as error:
+            failure=describe(stage,error)
+            if failure.stage=='dashboard' and tunnel is not None:
+                forwarded=tunnel.failure()
+                if forwarded.stage=='ssh_forward':failure=forwarded
+            last_failure=failure.detail()
+            print(f'Wallaby Agent: stage={failure.stage} code={failure.code} type={type(error).__name__}: {failure}',file=sys.stderr,flush=True)
         finally:
-            connected.clear()
-            if kind=='node' and 'session_stop' in locals():session_stop.set()
-            tunnel.close()
+            if session_stop is not None:session_stop.set()
+            if tunnel is not None:tunnel.close()
         if stop.is_set():break
-        stop.wait(delay+random.uniform(0,3));delay=min(300,delay*2)
-    write_status(kind,'red','Off',tunnel=False)
+        retry=delay+random.uniform(0,3)
+        publish('red',str(failure)+' Retrying automatically.',tunnel=False,stage=failure.stage,code=failure.code,retry_at=time.time()+retry)
+        stop.wait(retry);delay=min(300,delay*2)
+    publish('red','Off',tunnel=False)
 
 def monitor():
     retire_jellyfin()

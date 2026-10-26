@@ -4,6 +4,7 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.parse import quote
 from agent_rpc import METHODS,clean_json,request,MAX_RESULT_BYTES
+from diagnostics import ConnectionFailure,describe
 
 LIMIT=16*1024*1024+4096
 
@@ -49,27 +50,45 @@ class Core:
     def __init__(self,config):self.config=config
     def call(self,ident,method,params,wallet=None,timeout=30):
         # Read the cookie again on every request: Core rotates it on restart.
-        cookie=Path(self.config['cookie']).expanduser().read_text().strip()
-        if ':' not in cookie or '\n' in cookie:raise ValueError('Invalid Core cookie.')
+        if not self.config['cookie']:raise ConnectionFailure('rpc','cookie_missing','Bitcoin Core RPC cookie was not found. Choose the local .cookie file in Connection settings and save.')
+        try:cookie=Path(self.config['cookie']).expanduser().read_text().strip()
+        except FileNotFoundError:raise ConnectionFailure('rpc','cookie_missing','The selected Bitcoin Core RPC cookie does not exist. Check the data directory, network and whether Core has restarted with RPC enabled.') from None
+        except (PermissionError,IsADirectoryError):raise ConnectionFailure('rpc','cookie_access','The Bitcoin Core cookie cannot be read by this desktop user. Choose the correct .cookie file and check its permissions.') from None
+        except UnicodeError:raise ConnectionFailure('rpc','cookie_invalid','The selected file is not a Bitcoin Core text cookie. Choose the correct .cookie file.') from None
+        if ':' not in cookie or '\n' in cookie:raise ConnectionFailure('rpc','cookie_invalid','The selected file is not a valid Bitcoin Core RPC cookie. Choose the .cookie file; do not enter its contents.')
         path='/' if wallet is None else '/wallet/'+quote(wallet,safe='')+'/'
-        response=http_json(self.config['rpc_port'],path,{'jsonrpc':'2.0','id':ident,'method':method,'params':params},timeout=timeout,auth=cookie,host='127.0.0.1')
-        if not isinstance(response,dict) or response.get('id')!=ident:raise ValueError('Core response ID mismatch.')
+        try:response=http_json(self.config['rpc_port'],path,{'jsonrpc':'2.0','id':ident,'method':method,'params':params},timeout=timeout,auth=cookie,host='127.0.0.1')
+        except Exception as error:raise describe('rpc',error) from None
+        if not isinstance(response,dict) or response.get('id')!=ident:raise ConnectionFailure('rpc','response_id','Bitcoin Core returned an unexpected RPC response ID. Check the local RPC port and service.')
         if response.get('error') is not None:return {'error':response['error']}
-        if 'result' not in response:raise ValueError('Missing Core result.')
+        if 'result' not in response:raise ConnectionFailure('rpc','response','Bitcoin Core returned no RPC result. Check the local RPC service and version.')
         value,_=clean_json(response['result'],MAX_RESULT_BYTES)
         return {'result':value}
     def ready(self):
         r=self.call('wallaby-health','getblockchaininfo',[],timeout=5)
-        if 'error' in r:raise ValueError('Bitcoin Core RPC is not ready.')
+        if 'error' in r:
+            code=r['error'].get('code') if isinstance(r['error'],dict) else None
+            if code==-28:raise ConnectionFailure('rpc','warming_up','Bitcoin Core RPC is still starting or loading the blockchain. Wait for Core to finish; Agent will retry.')
+            suffix=f' (RPC code {code})' if type(code) is int else ''
+            raise ConnectionFailure('rpc','rpc_error',f'Bitcoin Core rejected its RPC readiness check{suffix}. Check Core’s local debug log.')
 
 class NodeClient:
     def __init__(self,config,port,stop,status):
         self.core=Core(config);self.port=port;self.stop=stop;self.status=status;self.token=None
-        self.failed=threading.Event();self.seen=set();self.lock=threading.Lock()
+        self.failed=threading.Event();self.seen=set();self.lock=threading.Lock();self.error=None
         self.pool=concurrent.futures.ThreadPoolExecutor(max_workers=2,thread_name_prefix='core-rpc')
         self.pending=threading.BoundedSemaphore(2);self.threads=[]
+    def check_core(self):
+        try:self.core.ready()
+        except Exception as error:raise describe('rpc',error) from None
     def post(self,path,body,timeout=30):
-        return http_json(self.port,'/agent/v1/'+path,body,self.token,timeout)
+        try:return http_json(self.port,'/agent/v1/'+path,body,self.token,timeout)
+        except Exception as error:raise describe('dashboard',error) from None
+    def fail(self,error):
+        with self.lock:
+            if self.error is not None:return
+            self.error=describe('dashboard',error);self.failed.set()
+        self.status('red',str(self.error))
     def consume(self,response):
         if not isinstance(response,dict):raise ValueError('Invalid Dashboard response.')
         commands=response.get('commands',[])
@@ -96,29 +115,36 @@ class NodeClient:
             try:result=self.core.call(ident,c['method'],params,c['wallet'],timeout=max(1,float(expiry)-(time.monotonic()-received)))
             except Exception:result={'error':{'code':'local_rpc_failed','message':'Local Core request failed; execution outcome may be unknown. It was not replayed.'}}
             self.post('result',{'id':ident,**result})
-        except Exception:self.failed.set()
+        except Exception as error:self.fail(error)
         finally:self.pending.release()
     def heartbeat(self):
         while not self.stop.wait(15) and not self.failed.is_set():
             try:
-                self.core.ready()
+                self.check_core()
                 if self.stop.is_set() or self.failed.is_set():return
                 self.consume(self.post('heartbeat',{}));self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
-            except Exception:self.failed.set();self.status('red','Bitcoin Core or Dashboard connection lost.')
+            except Exception as error:self.fail(error)
     def run(self):
-        self.core.ready()
-        if self.stop.is_set():return
-        r=self.post('register',{'mac':adapter_mac(),'hostname':socket.gethostname().split('.')[0],'rpc':{'version':1,'methods':sorted(METHODS)}})
-        if self.stop.is_set():return
-        if r.get('protocol')!='wallaby-agent' or r.get('version')!=1 or not isinstance(r.get('connection_token'),str) or not r['connection_token']:raise ValueError('Unsupported Dashboard protocol.')
-        self.token=r['connection_token'];self.consume(r)
-        self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
-        thread=threading.Thread(target=self.heartbeat,daemon=True);self.threads.append(thread);thread.start()
         try:
+            self.check_core()
+            if self.stop.is_set():return
+            self.status('amber','Local Bitcoin Core RPC connected. Registering with Wallaby Dashboard…')
+            try:mac=adapter_mac()
+            except Exception:raise ConnectionFailure('node_identity','adapter','No usable local network adapter identity was found. Check the network interface before registering this node.') from None
+            r=self.post('register',{'mac':mac,'hostname':socket.gethostname().split('.')[0],'rpc':{'version':1,'methods':sorted(METHODS)}})
+            if self.stop.is_set():return
+            if not isinstance(r,dict) or r.get('protocol')!='wallaby-agent' or r.get('version')!=1 or not isinstance(r.get('connection_token'),str) or not r['connection_token']:
+                raise ConnectionFailure('dashboard','protocol','Dashboard registration returned an incompatible Agent protocol or no session token. Check the Dashboard Agent service/version on port 56443.')
+            self.token=r['connection_token'];self.consume(r)
+            self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
+            thread=threading.Thread(target=self.heartbeat,daemon=True);self.threads.append(thread);thread.start()
             while not self.stop.is_set() and not self.failed.is_set():self.consume(self.post('poll',{'wait_seconds':20},timeout=25))
-            if self.failed.is_set():raise ConnectionError('Node session failed.')
+            if self.failed.is_set():raise self.error or ConnectionFailure('dashboard','session','Dashboard node session ended unexpectedly. Check the Dashboard Agent service.')
+        except Exception as error:
+            raise self.error or describe('dashboard',error) from None
         finally:
             self.failed.set()
-            try:self.post('disconnect',{},timeout=2)
-            except Exception:pass
+            if self.token:
+                try:self.post('disconnect',{},timeout=2)
+                except Exception:pass
             self.pool.shutdown(wait=False,cancel_futures=True)
