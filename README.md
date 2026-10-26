@@ -2,11 +2,11 @@
 
 Wallaby Agent connects a Linux desktop to the family's server with **IPv6-only SSH tunnels**. The HTML5 configuration page has the Wallaby gear emblem and a black sidebar. There is one workspace label rather than a redundant navigation button.
 
-**This is V2 Development. Stable contains no released application yet.** V2 source is prepared; its Ubuntu 26.04 LTS amd64 installer has not been built yet. Older V1 installers in `dist/` do not contain these changes. The DEB contains a compiled native launcher and the Python service runtime; it is not a self-contained static executable.
+**This is V2 Development. Stable contains no released application yet.** V2 source and the Ubuntu 26.04 LTS amd64 installer are available in this Development branch. Older V1 installers in `dist/` do not contain these changes. The DEB contains a compiled native launcher and the Python service runtime; it is not a self-contained static executable.
 
 ## Install and configure
 
-After V2 has been built and published, download `dist/wallaby-agent_2.0.0~dev1_amd64.deb`, then:
+Download [wallaby-agent_2.0.0~dev1_amd64.deb](dist/wallaby-agent_2.0.0~dev1_amd64.deb) and verify it against [SHA256SUMS.txt](dist/SHA256SUMS.txt), then:
 
 ```sh
 sudo apt install ./wallaby-agent_2.0.0~dev1_amd64.deb
@@ -61,7 +61,7 @@ Jellyfin SSH Administration has been removed from the configuration page, servic
 
 On the first V2 startup, the current user's retired `wallaby-agent-jellyfin.service` is stopped and disabled, its old startup link and status are removed, and `jellyfin` is removed from `config.cfg`. Existing server, SSH, cookie and RPC settings, plus the DDNS-GO/node ON/OFF choices, are preserved. New installations still start with both switches OFF. Cleanup runs at login bootstrap and monitor startup, entirely under the user's account. No Jellyfin server software or other apps are removed.
 
-When the V2 installer is available, close existing Agent configuration tabs. To retire an already running V1 tunnel before upgrading, run as your normal desktop user:
+Before upgrading, close existing Agent configuration tabs. To retire an already running V1 tunnel before upgrading, run as your normal desktop user:
 
 ```sh
 systemctl --user disable --now wallaby-agent-jellyfin.service
@@ -73,4 +73,4 @@ wallaby-agent configure
 
 The remaining services restart only if they were already running. Their saved enabled/disabled settings are retained. Other logged-in users receive cleanup when they next launch V2 or log in; package installation does not control other users' sessions.
 
-V2 package build, installation and live node validation are pending. See [VALIDATION.md](VALIDATION.md) for the current preparation status.
+The V2 DEB has been built and its contents checked; all 26 automated tests pass. Live package installation/upgrade and wallet-laptop node validation are still pending. See [VALIDATION.md](VALIDATION.md) for the current preparation status.
