@@ -1,9 +1,7 @@
-# V2 Development installer
+# Development installers
 
-Download [wallaby-agent_2.0.0~dev1_amd64.deb](wallaby-agent_2.0.0~dev1_amd64.deb) for Ubuntu 26.04 LTS amd64. Verify it against [SHA256SUMS.txt](SHA256SUMS.txt).
+The latest published installer is V2 dev1 (`wallaby-agent_2.0.0~dev1_amd64.deb`). It supports DDNS-GO and the node interface, but not the new independent Dashboard browser tunnel or the staged diagnostics improvements.
 
-V2 retains DDNS-GO Administration and the Bitcoin Core Node Dashboard Interface. Jellyfin SSH Administration has been removed. See the repository README for configuration and the V1 upgrade procedure.
+**Build 3 source is prepared; `wallaby-agent_2.0.0~dev3_amd64.deb` has not been built.** Compilation is paused for the requested reboot. No checksum for build 3 exists yet. Older packages remain historical artifacts and must not be presented as containing build 3 changes.
 
-The older V1 dev2 installer is retained for historical reference and still includes Jellyfin. V1 dev1 is superseded because of its IPv6 local-forwarding bug. Neither V1 package includes the V2 changes.
-
-The V2 package and native launcher were built on 27 October 2026; package contents and all 26 automated tests passed. Live installation/upgrade and wallet-laptop node testing remain pending. This is a Development build, not a Stable release.
+After the build, this directory will contain the new DEB and updated checksums. See the repository README for service roles, configuration, and legacy Dashboard startup removal.
