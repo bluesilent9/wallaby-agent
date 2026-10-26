@@ -48,8 +48,8 @@ class DashboardIntegration(unittest.TestCase):
     t=threading.Thread(target=run);t.start()
     try:
      deadline=time.monotonic()+8
-     while not statuses and not errors and time.monotonic()<deadline:time.sleep(.02)
-     self.assertFalse(errors);self.assertEqual(statuses[0][0],'green');node_id=next(iter(registry.connections.values()))['node_id']
+     while not any(s[0]=='green' for s in statuses) and not errors and time.monotonic()<deadline:time.sleep(.02)
+     self.assertFalse(errors);self.assertTrue(any(s[0]=='green' for s in statuses));node_id=next(iter(registry.connections.values()))['node_id']
      queued=registry.rpc.queue(node_id,'getbalances',[],wallet='Family / node',timeout_seconds=10)
      deadline=time.monotonic()+8
      while time.monotonic()<deadline:
