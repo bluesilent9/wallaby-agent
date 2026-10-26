@@ -9,25 +9,25 @@ def put(path,text,mode=0o644):
  p=stage/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);p.chmod(mode)
 arch=subprocess.check_output(['dpkg','--print-architecture'],text=True).strip()
 put('DEBIAN/control',f'''Package: wallaby-agent
-Version: 1.0.0~dev2
+Version: 2.0.0~dev1
 Section: utils
 Priority: optional
 Architecture: {arch}
 Maintainer: Wallaby Suite <347047153+bluesilent9@users.noreply.github.com>
 Depends: python3 (>= 3.11), openssh-client, iputils-ping, systemd, xdg-utils
 Recommends: kdialog | zenity
-Description: Wallaby Agent V1 Development
- Per-user IPv6 SSH tunnels and Bitcoin Core RPC transport for Wallaby Dashboard.
+Description: Wallaby Agent V2 Development
+ Per-user IPv6 DDNS-GO administration and Bitcoin Core RPC transport for Wallaby Dashboard.
  All tunnels are off on first install. Includes an HTML5 configuration page.
 ''')
 for folder in ('src','web'):
  shutil.copytree(root/folder,stage/'usr/lib/wallaby-agent'/folder,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
 (stage/'usr/bin').mkdir(parents=True,exist_ok=True)
 subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-fPIE','-pie','-Wl,-z,relro,-z,now','-o',str(stage/'usr/bin/wallaby-agent'),str(root/'packaging/launcher.c')],check=True)
-for kind in ('jellyfin','ddns','node','monitor','ui'):
+for kind in ('ddns','node','monitor','ui'):
  extra='NoNewPrivileges=yes\n' if kind!='ui' else ''
  put(f'usr/lib/systemd/user/wallaby-agent-{kind}.service',f'''[Unit]
-Description=Wallaby Agent V1 — {kind}
+Description=Wallaby Agent V2 — {kind}
 StartLimitIntervalSec=0
 
 [Service]
@@ -68,6 +68,6 @@ set -e
 if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q || true; fi
 exit 0
 ''',0o755)
-out=root/'dist'/f'wallaby-agent_1.0.0~dev2_{arch}.deb';out.parent.mkdir(exist_ok=True)
+out=root/'dist'/f'wallaby-agent_2.0.0~dev1_{arch}.deb';out.parent.mkdir(exist_ok=True)
 subprocess.run(['dpkg-deb','--root-owner-group','--build',str(stage),str(out)],check=True)
 print(out)
