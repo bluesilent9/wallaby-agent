@@ -1,6 +1,6 @@
 # Wallaby Agent protocol — v1 with RPC capability v1 (V155)
 
-Dashboard is the hub. The future Wallaby Agent initiates every connection through its authorised SSH tunnel, polls for commands, calls its local Bitcoin Core, and posts results. No server-initiated connection to a laptop is required. The production Agent application is **not** bundled with V155; the server contract is implemented and integration-tested with a protocol simulator and a simulated Core HTTP endpoint.
+Dashboard is the hub. Wallaby Agent initiates every connection through its authorised SSH tunnel, polls for commands, calls its local Bitcoin Core, and posts results. No server-initiated connection to a laptop is required. The production Agent application is **not** bundled with V155; the server contract is implemented and integration-tested with the actual Agent client and a simulated Core HTTP endpoint.
 
 ## Transport
 
@@ -108,3 +108,9 @@ Signing, wallet unlocking, private exports, broadcast, arbitrary method names an
 States are queued → delivered → running → succeeded/failed, with timed_out also terminal. Pending requests fail on connection expiry/disconnect, identity conflict, profile replacement or server shutdown. They are **not automatically replayed** on reconnect. A failure/timeout after delivery does not prove Core cancelled the operation: the local operation may still finish. Reconcile the actual Core state before deliberately issuing a new write request.
 
 The queue is bounded (16 pending requests per node, 256 retained requests and 64 MiB aggregate request/result storage). Terminal results expire after 10 minutes. Live requests/results are memory-only; they do not survive service restart or enter profile backups. Remembered node identities still reside in `data/nodes.json` and profile.7z.
+
+## Exact Core wallet routing and dispatch capacity
+
+Wallet-scoped requests use `/wallet/` plus the URL-encoded exact Core wallet name, without appending a slash. A null wallet is node-wide; an empty string denotes Core's default wallet. Names are never inferred from display labels.
+
+Dashboard V1 Build 1 limits delivered/running work to two commands per Agent connection, with queued work released as results arrive. Agent V2 Development Build 4 independently bounds execution to two workers and tolerates a brief completion/slot-release race. Multiple nodes can execute concurrently, and equivalent public-descriptor replicas can share follow-up reads. These limits do not insert an artificial delay between successful requests.

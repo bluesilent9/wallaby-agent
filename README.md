@@ -2,7 +2,9 @@
 
 Wallaby Agent manages per-user **IPv6 SSH tunnels** from a Linux desktop to your server. Its local HTML5 configuration page uses the Wallaby gear emblem and black sidebar.
 
-**V2 Development build 3 is available for Ubuntu 26.04 LTS (amd64).** It adds independent Dashboard browser access and improved connection diagnostics. [Download the DEB](dist/wallaby-agent_2.0.0~dev3_amd64.deb) and verify [SHA256SUMS.txt](dist/SHA256SUMS.txt). All 42 automated tests and package inspection pass; live installation and startup testing remain pending. Stable has no application release.
+**V2 Development Build 4 source is ready; its DEB build is pending.** It corrects exact Bitcoin Core wallet RPC routing and bounded command handling for [Wallaby Dashboard V1 Build 1](https://github.com/bluesilent9/wallaby-dashboard/tree/Development). All 44 source tests pass, including actual Agent HTTP routing and concurrent work. No Build 4 installer has been published yet. Stable has no application release.
+
+The previous [Build 3 DEB](dist/wallaby-agent_2.0.0~dev3_amd64.deb) and its [checksums](dist/SHA256SUMS.txt) remain for historical access. Build 3 contains the wallet RPC routing defect and must be upgraded for automatic node wallet loading.
 
 ## Three independent services
 
@@ -18,16 +20,16 @@ All three switches default OFF for a new user. Upgrading an existing V1/V2 confi
 
 ## Install and configure
 
-Install `dist/wallaby-agent_2.0.0~dev3_amd64.deb`, verifying it against `dist/SHA256SUMS.txt` first:
+After Build 4 has been built and validated, install its DEB and verify the accompanying checksum:
 
 ```sh
-sudo apt install ./wallaby-agent_2.0.0~dev3_amd64.deb
+sudo apt install ./wallaby-agent_2.0.0~dev4_amd64.deb
 ```
 
 Installing a DEB uses normal administrator permission. Tunnels, settings and login startup subsequently run as your user, without sudo, system services or lingering. Open **Utilities → Wallaby Agent Configuration**, or run `wallaby-agent configure`.
 
 1. Enter a server hostname/domain and click **Accept server**. IP literals are rejected; the server requires an AAAA record and a working IPv6 route.
-2. Enter the **server SSH account**, which can differ from your desktop login. For example, desktop user `dave` on wallet-laptop uses server SSH account `wallet-laptop`. Verify the trusted server fingerprint and key authentication with `ssh -6 -F /dev/null USER@HOSTNAME` before enabling services. Encrypted keys must be unlocked in the desktop SSH agent. An optional absolute private-key path can be selected.
+2. Enter the **server SSH account**, which can differ from your desktop login. For example, desktop user `alice` may use a separate server SSH account `wallet-node`. Verify the trusted server fingerprint and key authentication with `ssh -6 -F /dev/null USER@HOSTNAME` before enabling services. Encrypted keys must be unlocked in the desktop SSH agent. An optional absolute private-key path can be selected.
 3. Click **Save settings** after editing SSH/RPC fields. Accepting a server name and toggling services do not save those fields. Unsaved edits now display a reminder. Saving connection changes restarts enabled services with those settings.
 4. Enable the services needed on this computer. Dashboard browser access and DDNS-GO need no RPC cookie.
 5. For the node interface, enable RPC (`server=1`) and restart Bitcoin Core. Agent checks owned Core processes, custom datadir/cookie options, Snap `~/snap/bitcoin-core/common/.bitcoin` and `current/.bitcoin`, then `~/.bitcoin`, with local config/settings hints. Bitcoin Core has no standard datadir environment variable. If needed, select the local `.cookie` with **Choose file**, then save settings. Only its path is saved, and its contents are reread for each RPC call.
@@ -67,7 +69,7 @@ The Agent independently enforces the Dashboard method/public-descriptor policy, 
 
 Close old configuration tabs before upgrading. V2 startup stops/disables the current user's retired V1 Jellyfin unit and removes its old startup link/status/config switch. DDNS-GO and node settings are preserved; Dashboard browser access starts OFF.
 
-After installing build 3:
+After installing Build 4:
 
 ```sh
 systemctl --user daemon-reload
@@ -90,3 +92,7 @@ python3 packaging/build.py
 ```
 
 No root or network is needed for building. The DEB includes a compiled native launcher and Python runtime sources; it is not a static standalone executable. Sources include the vendored embit public descriptor parser and its MIT license. RPC policy derives from Dashboard V155. See [VALIDATION.md](VALIDATION.md) for checks and remaining live tests.
+
+## Build 4 RPC corrections
+
+Wallet RPC uses `/wallet/` followed by the encoded exact wallet name, with no extra suffix. Empty default wallet names, literal trailing slashes, spaces, Unicode, percent signs and embedded slashes are preserved. The Dashboard dispatches at most two active RPC commands per Agent; the Agent retains its own two-worker limit and waits for a free worker rather than disconnecting during a completion race. Independent heartbeats remain active. Existing signing, unlock, private-key and broadcast restrictions are unchanged.

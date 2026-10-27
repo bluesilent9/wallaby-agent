@@ -42,7 +42,7 @@ def request(method,params,wallet):
     if not isinstance(method,str) or method not in METHODS:raise ValueError('RPC method is not enabled for Dashboard agents.')
     if not isinstance(params,(list,dict)):raise ValueError('RPC params must be an array or object.')
     params,size=clean_json(params,MAX_REQUEST_BYTES)
-    if wallet is not None and (not isinstance(wallet,str) or not wallet or len(wallet)>256 or any(ord(c)<32 for c in wallet)):raise ValueError('Invalid wallet name.')
+    if wallet is not None and (not isinstance(wallet,str) or len(wallet)>256 or any(ord(c)<32 for c in wallet)):raise ValueError('Invalid wallet name.')
     if method in WALLET_METHODS and wallet is None:raise ValueError('Specify the exact Core wallet name for a wallet RPC.')
     if method not in WALLET_METHODS and wallet is not None:raise ValueError('This node RPC does not take a wallet endpoint.')
     if method=='listdescriptors' and params not in ([],[False],{}, {'private':False}):raise ValueError('Only public listdescriptors false exports are permitted.')

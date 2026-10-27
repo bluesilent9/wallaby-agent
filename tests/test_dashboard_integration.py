@@ -57,7 +57,7 @@ class DashboardIntegration(unittest.TestCase):
       if row['state'] in ('succeeded','failed'):break
       time.sleep(.02)
      self.assertEqual(row['state'],'succeeded',row);self.assertEqual(row['result']['mine']['trusted'],'0.00000001')
-     self.assertTrue(any(p=='/wallet/Family%20%2F%20node/' for p,_,_ in FakeCore.calls))
+     self.assertTrue(any(p=='/wallet/Family%20%2F%20node' for p,_,_ in FakeCore.calls))
      # Wake any long poll, then end gracefully.
      stop.set();registry.rpc.queue(node_id,'getblockcount',[],timeout_seconds=5);t.join(5)
      self.assertFalse(t.is_alive());self.assertFalse(registry.connections);self.assertFalse(errors)

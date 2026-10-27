@@ -69,7 +69,7 @@ class RPCTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as root:
    cookie=Path(root)/'.cookie';cookie.write_text('u:first');c=Config().values;c['cookie']=str(cookie);core=Core(c)
    with patch('node_client.http_json',return_value={'id':'test','result':{'balance':Decimal('0.00000001')}}) as http:
-    self.assertEqual(core.call('test','getbalances',[],'family/wallet #1')['result']['balance'],'0.00000001');self.assertEqual(http.call_args.args[1],'/wallet/family%2Fwallet%20%231/');self.assertEqual(http.call_args.kwargs['auth'],'u:first')
+    self.assertEqual(core.call('test','getbalances',[],'family/wallet #1')['result']['balance'],'0.00000001');self.assertEqual(http.call_args.args[1],'/wallet/family%2Fwallet%20%231');self.assertEqual(http.call_args.kwargs['auth'],'u:first')
     cookie.write_text('u:second');core.call('test','getbalances',[]);self.assertEqual(http.call_args.kwargs['auth'],'u:second')
  def test_core_id_mismatch_and_duplicate_json_rejected(self):
   with self.assertRaises(ValueError):decode('{"a":1,"a":2}')

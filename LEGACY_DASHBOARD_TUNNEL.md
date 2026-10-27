@@ -1,16 +1,23 @@
-# Retiring wallet-laptop's old Dashboard startup tunnel
+# Retiring an older Dashboard startup tunnel
 
-Run these commands on **wallet-laptop**, as desktop user dave, outside any server SSH session. The inspected legacy unit is `/home/dave/.config/systemd/user/ssh-tunnels.service`, described as Persistent SSH tunnels. Its SSH command forwards browser port 38951 on IPv4 and IPv6 loopback to server [::1]:38951; it is not an SSHFS/storage mount.
+An existing SSH forward can occupy local port 38951 before Wallaby Agent starts. On the desktop computer, inspect user services before changing them:
 
 ```sh
-systemctl --user disable --now ssh-tunnels.service
+systemctl --user list-unit-files --type=service --no-pager
+systemctl --user cat YOUR_LEGACY_TUNNEL.service
+```
+
+Confirm that the exact unit only provides the obsolete Dashboard forward. A general tunnel service may also supply unrelated applications; preserve those forwards. Do not disable `ssh-agent.service`, any `wallaby-agent-*` service, or a storage mount.
+
+For a confirmed obsolete user unit, substitute its exact name below:
+
+```sh
+systemctl --user disable --now YOUR_LEGACY_TUNNEL.service
 mkdir -p ~/.local/share/wallaby-agent/retired-services
-mv --backup=numbered ~/.config/systemd/user/ssh-tunnels.service ~/.local/share/wallaby-agent/retired-services/
+mv --backup=numbered ~/.config/systemd/user/YOUR_LEGACY_TUNNEL.service ~/.local/share/wallaby-agent/retired-services/
 systemctl --user daemon-reload
 ```
 
-This stops/removes the old startup entry and preserves a backup outside systemd's unit directory. Do not disable `ssh-agent.service` or any `wallaby-agent-*` service. The working Agent node interface on port 56443 can remain enabled.
+This preserves a backup outside systemd's unit directory. Browser access through that old forward stops until **Wallaby Dashboard** is enabled in Agent. Agent's **Open Dashboard** link uses `http://[::1]:38951`. The independent node interface uses server port 56443.
 
-Browser access through the old tunnel will stop until build 3 is installed and **Wallaby Dashboard** is enabled in Agent. Its **Open Dashboard** link uses `http://[::1]:38951`. Existing localhost bookmarks may also work when localhost resolves over IPv6; changing browser origin can require signing in again.
-
-The exact name, user-unit path and forwarding command above were confirmed from wallet-laptop's user-provided systemd output. No removal command was executed remotely by this preparation task.
+These instructions concern a client tunnel, not the Dashboard server's old system service. Retire a legacy server service separately when installing the new Dashboard DEB. Neither procedure has been executed during source preparation.

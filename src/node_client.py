@@ -56,7 +56,7 @@ class Core:
         except (PermissionError,IsADirectoryError):raise ConnectionFailure('rpc','cookie_access','The Bitcoin Core cookie cannot be read by this desktop user. Choose the correct .cookie file and check its permissions.') from None
         except UnicodeError:raise ConnectionFailure('rpc','cookie_invalid','The selected file is not a Bitcoin Core text cookie. Choose the correct .cookie file.') from None
         if ':' not in cookie or '\n' in cookie:raise ConnectionFailure('rpc','cookie_invalid','The selected file is not a valid Bitcoin Core RPC cookie. Choose the .cookie file; do not enter its contents.')
-        path='/' if wallet is None else '/wallet/'+quote(wallet,safe='')+'/'
+        path='/' if wallet is None else '/wallet/'+quote(wallet,safe='')
         try:response=http_json(self.config['rpc_port'],path,{'jsonrpc':'2.0','id':ident,'method':method,'params':params},timeout=timeout,auth=cookie,host='127.0.0.1')
         except Exception as error:raise describe('rpc',error) from None
         if not isinstance(response,dict) or response.get('id')!=ident:raise ConnectionFailure('rpc','response_id','Bitcoin Core returned an unexpected RPC response ID. Check the local RPC port and service.')
@@ -101,8 +101,12 @@ class NodeClient:
                 if ident in self.seen:continue
                 if len(self.seen)>=10000:raise ValueError('Session request limit reached; reconnect required.')
                 self.seen.add(ident)
-            if not self.pending.acquire(blocking=False):raise ValueError('Too many concurrent Core commands.')
-            self.pool.submit(self.execute,c,time.monotonic())
+            received=time.monotonic()
+            while not self.pending.acquire(timeout=.1):
+                if self.stop.is_set() or self.failed.is_set():return
+                if time.monotonic()-received>=float(c['expires_in_seconds']):raise ValueError('RPC deadline expired while waiting for a Core worker.')
+            if self.stop.is_set() or self.failed.is_set():self.pending.release();return
+            self.pool.submit(self.execute,c,received)
     def execute(self,c,received):
         try:
             ident=c['id'];expiry=c['expires_in_seconds']
