@@ -2,7 +2,7 @@
 
 Wallaby Agent manages per-user **IPv6 SSH tunnels** from a Linux desktop to your server. Its local HTML5 configuration page uses the Wallaby gear emblem and black sidebar.
 
-**V2 Development build 3 source is prepared; its installer has not been built.** The published V2 dev1 DEB predates Dashboard browser access and the improved diagnostics. Stable has no application release. Building is paused for the requested reboot.
+**V2 Development build 3 is available for Ubuntu 26.04 LTS (amd64).** It adds independent Dashboard browser access and improved connection diagnostics. [Download the DEB](dist/wallaby-agent_2.0.0~dev3_amd64.deb) and verify [SHA256SUMS.txt](dist/SHA256SUMS.txt). All 42 automated tests and package inspection pass; live installation and startup testing remain pending. Stable has no application release.
 
 ## Three independent services
 
@@ -18,7 +18,7 @@ All three switches default OFF for a new user. Upgrading an existing V1/V2 confi
 
 ## Install and configure
 
-After build 3 is built and published, install `dist/wallaby-agent_2.0.0~dev3_amd64.deb`, verifying it against `dist/SHA256SUMS.txt` first:
+Install `dist/wallaby-agent_2.0.0~dev3_amd64.deb`, verifying it against `dist/SHA256SUMS.txt` first:
 
 ```sh
 sudo apt install ./wallaby-agent_2.0.0~dev3_amd64.deb
@@ -67,7 +67,7 @@ The Agent independently enforces the Dashboard method/public-descriptor policy, 
 
 Close old configuration tabs before upgrading. V2 startup stops/disables the current user's retired V1 Jellyfin unit and removes its old startup link/status/config switch. DDNS-GO and node settings are preserved; Dashboard browser access starts OFF.
 
-After installing the future build 3 package:
+After installing build 3:
 
 ```sh
 systemctl --user daemon-reload
@@ -83,7 +83,7 @@ Source checks:
 python3 -m unittest discover -s tests -v
 ```
 
-Build after the requested reboot, using Ubuntu 26.04 with Python 3, `gcc` and `dpkg-dev`:
+Build using Ubuntu 26.04 with Python 3, `gcc` and `dpkg-dev`:
 
 ```sh
 python3 packaging/build.py

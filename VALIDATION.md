@@ -1,6 +1,6 @@
-# V2 Development build 3 — pre-build validation
+# V2 Development build 3 — build validation
 
-Prepared 27 October 2026. Intended package version: `2.0.0~dev3`. **Build 3 has not been built or installed; compilation is paused until the requested reboot.**
+Built 27 October 2026. Package version: `2.0.0~dev3`, architecture amd64. GCC compiled the native PIE launcher; dpkg-deb generated the Ubuntu 26.04 installer.
 
 Source retains the staged dev2 diagnostics work and adds the independent Dashboard browser tunnel: local [::1]:38951 to server [::1]:38951. The node RPC interface remains on server port 56443. Upgrades preserve DDNS-GO/node choices and add Dashboard OFF. Fresh installs default all three switches OFF. Dashboard access does not load a cookie or start a node RPC client.
 
@@ -10,4 +10,6 @@ Live read-only server inspection confirmed both browser port 38951 and Agent por
 
 An isolated browser preview verified all three controls, Dashboard toggle persistence with node OFF, the Open Dashboard IPv6 link, and the unsaved-settings reminder. JavaScript syntax was checked with Node. Preview configuration was isolated from the installed Agent.
 
-Pending: build 3 launcher/DEB generation and package inspection; installation/upgrade; live Dashboard browser tunnel and login-startup testing on the two laptops. The legacy wallet-laptop unit was identified as ~/.config/systemd/user/ssh-tunnels.service from the user-provided unit listing and contents; exact retirement commands are documented in LEGACY_DASHBOARD_TUNNEL.md. No cleanup command was executed remotely.
+Package inspection verified version, architecture, all five user services including Dashboard, runtime/web source parity, no Python caches, native amd64 PIE launcher, default-OFF configuration and no automatic tunnel activation in postinst. SHA256SUMS.txt includes the new installer and previously published packages only.
+
+Pending: installation/upgrade; live Dashboard browser tunnel and login-startup testing on the two laptops. The legacy wallet-laptop unit was identified as ~/.config/systemd/user/ssh-tunnels.service from the user-provided unit listing and contents; exact retirement commands are documented in LEGACY_DASHBOARD_TUNNEL.md. No cleanup command was executed remotely.
