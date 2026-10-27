@@ -2,7 +2,7 @@
 
 Wallaby Agent manages per-user **IPv6 SSH tunnels** from a Linux desktop to your server. Its local HTML5 configuration page uses the Wallaby gear emblem and black sidebar.
 
-**V2 Development Build 4 source is ready; its DEB build is pending.** It corrects exact Bitcoin Core wallet RPC routing and bounded command handling for [Wallaby Dashboard V1 Build 1](https://github.com/bluesilent9/wallaby-dashboard/tree/Development). All 44 source tests pass, including actual Agent HTTP routing and concurrent work. No Build 4 installer has been published yet. Stable has no application release.
+**V2 Development Build 4 is available for Ubuntu 26.04 LTS (amd64).** [Download the DEB](dist/wallaby-agent_2.0.0~dev4_amd64.deb) and verify [SHA256SUMS.txt](dist/SHA256SUMS.txt). It corrects exact Bitcoin Core wallet RPC routing and bounded command handling for [Wallaby Dashboard V1 Build 1](https://github.com/bluesilent9/wallaby-dashboard/tree/Development). All 44 source tests and package inspection pass. Live installation and startup testing remain pending. Stable has no application release.
 
 The previous [Build 3 DEB](dist/wallaby-agent_2.0.0~dev3_amd64.deb) and its [checksums](dist/SHA256SUMS.txt) remain for historical access. Build 3 contains the wallet RPC routing defect and must be upgraded for automatic node wallet loading.
 
@@ -20,7 +20,7 @@ All three switches default OFF for a new user. Upgrading an existing V1/V2 confi
 
 ## Install and configure
 
-After Build 4 has been built and validated, install its DEB and verify the accompanying checksum:
+Install the Build 4 DEB after verifying its accompanying checksum:
 
 ```sh
 sudo apt install ./wallaby-agent_2.0.0~dev4_amd64.deb
