@@ -1,3 +1,7 @@
+> [!CAUTION]
+> **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
+> If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
+
 # Wallaby Agent V2 — Development
 
 Wallaby Agent manages per-user **IPv6 SSH tunnels** from a Linux desktop to your server. Its local HTML5 configuration page uses the Wallaby gear emblem and black sidebar.
@@ -5,6 +9,15 @@ Wallaby Agent manages per-user **IPv6 SSH tunnels** from a Linux desktop to your
 **V2 Development Build 5** adds locally controlled Vault Builder and Authorise pages and restricts direct Dashboard RPC to public/read-only operations. [Download the Ubuntu 26.04 LTS amd64 DEB](dist/wallaby-agent_2.0.0~dev5_amd64.deb) and verify [SHA256SUMS.txt](dist/SHA256SUMS.txt). This is a Development build, not a Stable release. Dashboard-side vault exchange and Transaction Builder Stage 2 reception are specified but not implemented in the Dashboard by this change.
 
 The previous [Build 3 DEB](dist/wallaby-agent_2.0.0~dev3_amd64.deb) and its [checksums](dist/SHA256SUMS.txt) remain for historical access. Build 3 contains the wallet RPC routing defect and must be upgraded for automatic node wallet loading.
+
+## Current capabilities at a glance
+
+- **Services:** independently enable per-user IPv6 SSH access to DDNS-GO Administration, the Dashboard browser and the Bitcoin Core node interface. Services default OFF, reconnect automatically when enabled and start with the desktop session.
+- **Public/read-only Dashboard RPC:** direct remote requests cannot create wallets, import descriptors, change addresses or labels, unlock wallets, export private keys, sign or broadcast. Sensitive local workflows use separate fixed code paths.
+- **Vault Builder:** a local Agent feature, replacing the proposed standalone vault application. Build a single-key P2WSH block-height vault, sweep the source wallet’s available receiving/change funds into one output, verify the policy/key/address with local Core and roll a matured vault into a new one. Unavailable funds stop a partial sweep.
+- **Timing and review:** bundled timezone map, local/UTC 99% model and most-likely arrival estimates, annotated commands/descriptors/PSBTs, locally reconstructed wallet identities and exact amounts/total fees in pipe notation. The timing model is an estimate, not a calendar-date guarantee.
+- **Authorise:** locally approve or deny staged public imports and signing proposals. Deny records persist; transaction reviews expire and are consumed once. Local signing can broadcast after review, while Vault Builder’s Send to Transaction Builder action queues a signed PSBT without broadcasting.
+- **Integration boundary:** Build 5 implements the Agent side of the [approval/exchange protocol](APPROVAL_PROTOCOL.md). Dashboard V1 Build 7 has not implemented its exchange or immutable Stage 2 receiver; public vault records and signed PSBT exports remain queued locally. Ordinary read-only node queries and existing tunnels continue to work. The Dashboard’s earlier direct watch-wallet creation/import operations are blocked by Build 5 and require the later approval integration.
 
 ## Three independent services
 
@@ -115,3 +128,4 @@ Incoming public vault records and signing proposals can only be staged by the ne
 The private `approvals.json` beside config.cfg stores public vault records, pending/denied/attempted decisions and queued public/signed exports. A signed PSBT is a spending authorisation and is protected with mode 0600. Reviews expire after ten minutes and are consumed once. Interrupted signing/import operations are marked attempted and never automatically replayed; inspect Core before deliberately retrying. Reconnecting transports only retries data delivery. This build retains one desktop-user permission domain; it is not isolation from a compromised local account, browser or Core cookie.
 
 The Dashboard's former direct watch-wallet creation/import workflows now require its later approval-protocol update. No Dashboard code, server installation, real wallet or installed Agent was changed during this build.
+
