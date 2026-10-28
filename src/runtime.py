@@ -2,7 +2,7 @@
 import copy, json, os, random, signal, subprocess, tempfile, threading, time, sys
 from pathlib import Path
 from configuration import Config,SERVICES,discover_cookie
-from transport import Tunnel,ping
+from transport import Tunnel,MasterConnection,fingerprint,SSH_FIELDS
 from node_client import NodeClient
 from diagnostics import ConnectionFailure,describe
 
@@ -24,7 +24,7 @@ def read_status(kind):
         d=json.loads((runtime_dir()/(kind+'.json')).read_text())
         if time.time()-d['updated']<50 or time.time()<d.get('retry_at',0)+10:return d
     except (OSError,ValueError,KeyError):pass
-    return {'color':'red','message':'Off' if kind!='server' else 'Server name not configured.'}
+    return {'color':'red','message':'Off' if kind!='server' else 'Server SSH connection is not active.'}
 
 def ctl(*args):
     p=subprocess.run(['systemctl','--user',*args],capture_output=True,text=True,timeout=20)
@@ -52,16 +52,15 @@ def retire_jellyfin():
 def apply_config(config,new):
     """Persist desired state first; report service failures so they are never hidden."""
     old=copy.deepcopy(config.values);config.save(new)
-    changed=any(old[k]!=new[k] for k in ('hostname','ssh_user','ssh_port','identity_file','cookie','rpc_port'))
+    rpc_changed=any(old[k]!=new[k] for k in ('cookie','rpc_port'))
     for kind in SERVICES:
         unit='wallaby-agent-'+kind+'.service'
         if new['enabled'][kind]:
-            ctl('enable',unit)
-            ctl('restart' if changed else 'start',unit)
-        else:
-            ctl('disable','--now',unit);write_status(kind,'red','Off',tunnel=False)
+            if not old['enabled'][kind]:ctl('enable','--now',unit)
+            elif kind=='node' and rpc_changed:ctl('restart',unit)
+        elif old['enabled'][kind]:ctl('disable','--now',unit);write_status(kind,'red','Off',tunnel=False)
     ctl('enable','--now','wallaby-agent-monitor.service')
-    # Monitor notices config changes itself and pings immediately.
+    # The monitor observes SSH setting changes. Workers reattach to its new generation.
 
 def worker(kind):
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
@@ -84,7 +83,7 @@ def worker(kind):
             tunnel=Tunnel(config,kind,runtime_dir());tunnel.start()
             deadline=time.monotonic()+16
             while not stop.is_set() and not tunnel.alive():
-                if tunnel.process.poll() is not None or time.monotonic()>deadline:raise tunnel.failure()
+                if time.monotonic()>deadline:raise tunnel.failure()
                 stop.wait(.3)
             if stop.is_set():break
             stable_since=time.monotonic()
@@ -118,6 +117,9 @@ def worker(kind):
             if session_stop is not None:session_stop.set()
             if tunnel is not None:tunnel.close()
         if stop.is_set():break
+        if failure and failure.code=='master_wait':
+            publish('amber',str(failure),tunnel=False,stage='ssh');stop.wait(2);continue
+        if fingerprint(Config().values)!=fingerprint(config):continue
         retry=delay+random.uniform(0,3)
         publish('red',str(failure)+' Retrying automatically.',tunnel=False,stage=failure.stage,code=failure.code,retry_at=time.time()+retry)
         stop.wait(retry);delay=min(300,delay*2)
@@ -125,28 +127,71 @@ def worker(kind):
 
 def monitor():
     retire_jellyfin()
-    stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());last_host=None;due=0;color='red';message='Server name not configured.'
-    while not stop.is_set():
-        host=Config().values['hostname'];active=any(read_status(k).get('tunnel',False) for k in SERVICES)
-        if host!=last_host:last_host=host;due=0;color='red'
-        if not host:color='red';message='Enter your server hostname or domain.'
-        elif active:color='green';message='SSH tunnel established.';due=0
-        elif time.monotonic()>=due:
-            write_status('server','amber','Checking server over IPv6…')
-            try:ok=ping(host)
-            except Exception:ok=False
-            color='green' if ok else 'red';message='Server responds over IPv6.' if ok else 'Server did not respond to IPv6 ping.';due=time.monotonic()+60
-        write_status('server',color,message)
-        # Only locally installed code opens the local review page; remote URLs are never used.
-        try:
-            from approval_store import Store,digest
-            store=Store();saved=store.read();pending=sorted(k for k,v in saved['pending'].items() if v['state']=='pending')
-            batch=digest(pending);notice=runtime_dir()/'approval-notice.json';ui=runtime_dir()/'ui-seen.json'
-            previous=json.loads(notice.read_text()) if notice.exists() else {}
-            seen=json.loads(ui.read_text()) if ui.exists() else {}
-            if pending and previous.get('batch')!=batch:
-                if time.time()-seen.get('at',0)>15:
-                    subprocess.Popen(['/usr/bin/wallaby-agent','authorise'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-                notice.write_text(json.dumps({'batch':batch}))
-        except (OSError,ValueError,KeyError):pass
-        stop.wait(2)
+    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev6','pid':os.getpid()}))
+    stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
+    master=None;current=None;attempt_started=0;due=0;delay=15;notice=None;reconciled=None;last_rpc=None;status=('red','Enter your server hostname or domain.');extra={}
+    try:
+        while not stop.is_set():
+            cfg=Config().values;identity=fingerprint(cfg)
+            try:request=(runtime_dir()/'connect-request.json').read_text()
+            except OSError:request=None
+            if identity!=current or (request!=notice and (master is None or not master.alive())):
+                if master:master.close();master=None
+                (runtime_dir()/'master.json').unlink(missing_ok=True)
+                current=identity;due=0;delay=15;extra={}
+            notice=request
+            if reconciled!=cfg['enabled']:
+                for kind,on in cfg['enabled'].items():
+                    if reconciled is None or reconciled[kind]!=on:
+                        try:ctl('enable' if on else 'disable','--now','wallaby-agent-'+kind+'.service')
+                        except RuntimeError:pass  # UI apply reports manager errors; keep SSH monitoring alive.
+                reconciled=copy.deepcopy(cfg['enabled'])
+            rpc_settings=(cfg['cookie'],cfg['rpc_port'])
+            if last_rpc is not None and last_rpc!=rpc_settings and cfg['enabled']['node']:
+                try:ctl('restart','wallaby-agent-node.service')
+                except RuntimeError:pass
+            last_rpc=rpc_settings
+            now=time.monotonic()
+            if not cfg['hostname']:
+                status=('red','Enter your server hostname or domain.');extra={}
+            elif master is None and now>=due:
+                status=('amber','Authenticating SSH over IPv6…');extra={}
+                write_status('server',*status,tunnel=False)
+                master=MasterConnection(cfg,runtime_dir());attempt_started=now
+                try:master.start()
+                except Exception as error:
+                    status=('red',str(describe('ssh',error)));master.close();master=None;due=now+delay;delay=min(300,delay*2)
+            if master:
+                if master.alive():
+                    meta=runtime_dir()/'master.json'
+                    if not meta.exists():
+                        fd,name=tempfile.mkstemp(dir=runtime_dir())
+                        with os.fdopen(fd,'w') as f:json.dump(master.info(),f)
+                        os.replace(name,meta)
+                    status=('green','Authenticated server SSH connection established.');extra={};delay=15
+                elif master.process.poll() is not None or (runtime_dir()/'master.json').exists() or now-attempt_started>16:
+                    failure=master.failure();status=('red',str(failure)+' Retrying automatically.')
+                    extra={'stage':failure.stage,'code':failure.code,'retry_at':time.time()+delay}
+                    master.close();master=None;(runtime_dir()/'master.json').unlink(missing_ok=True)
+                    due=now+delay+random.uniform(0,3);delay=min(300,delay*2)
+                else:status=('amber','Authenticating SSH over IPv6…')
+            write_status('server',*status,tunnel=status[0]=='green',**extra)
+            notify_approvals();stop.wait(1)
+    finally:
+        if master:master.close()
+        (runtime_dir()/'master.json').unlink(missing_ok=True)
+        write_status('server','red','Server SSH connection stopped.',tunnel=False)
+
+def notify_approvals():
+    # Only locally installed code opens the local review page; remote URLs are never used.
+    try:
+        from approval_store import Store,digest
+        store=Store();saved=store.read();pending=sorted(k for k,v in saved['pending'].items() if v['state']=='pending')
+        batch=digest(pending);notice=runtime_dir()/'approval-notice.json';ui=runtime_dir()/'ui-seen.json'
+        previous=json.loads(notice.read_text()) if notice.exists() else {}
+        seen=json.loads(ui.read_text()) if ui.exists() else {}
+        if pending and previous.get('batch')!=batch:
+            if time.time()-seen.get('at',0)>15:
+                subprocess.Popen(['/usr/bin/wallaby-agent','authorise'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            notice.write_text(json.dumps({'batch':batch}))
+    except (OSError,ValueError,KeyError):pass

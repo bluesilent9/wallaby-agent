@@ -4,9 +4,10 @@
 
 # Development installers
 
-Latest: [V2 Development Build 5 DEB](wallaby-agent_2.0.0~dev5_amd64.deb), Ubuntu 26.04 LTS amd64. Verify [SHA256SUMS.txt](SHA256SUMS.txt).
+Latest: [V2 Development Build 6 DEB](wallaby-agent_2.0.0~dev6_amd64.deb), Ubuntu 26.04 LTS amd64. Verify [SHA256SUMS.txt](SHA256SUMS.txt).
 
-Build 5 adds local Vault Builder and Authorise pages and restricts direct Dashboard RPC to public/read-only queries. All three existing service toggles remain. It signs only after local review and approval, supports local broadcast or signed PSBT queuing, and persists sync denials. 60 tests pass, including twelve isolated Core 31 regtest tests; package checks pass.
+Build 6 fixes fresh-tab local page authentication, removes all ping checks, uses one authenticated IPv6 SSH connection shared by every service, changes Accept Server to Connect, and automatically saves/reloads valid configuration edits. It also refreshes older running Agent services when opened after an upgrade. Existing settings and service choices persist.
 
-Dashboard exchange and Transaction Builder Stage 2 reception require the later Dashboard implementation in APPROVAL_PROTOCOL.md. Current servers cannot yet receive those queued items. Development only; not installed or independently security-audited. Older packages do not include these features.
+77 tests pass, including twelve isolated Core 31 vault/signing regtest cases. A live isolated shared-SSH test passed against the configured server, adding/removing DDNS-GO and Dashboard forwards without replacing the login. Browser live-saving/reload tests and package checks pass.
 
+Close old tabs after installing and open Wallaby Agent Configuration from the desktop menu. Build 5 vault/authorisation features and read-only Dashboard RPC remain. The future Dashboard exchange and Stage 2 receiver are still pending; those exports remain queued locally. Development only. See the main README and validation report for details.

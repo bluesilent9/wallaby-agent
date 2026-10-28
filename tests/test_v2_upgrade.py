@@ -73,7 +73,7 @@ class UpgradeTests(unittest.TestCase):
     def test_bootstrap_retires_v1_before_starting_monitor(self):
         from app import bootstrap
         calls = []
-        with patch('app.retire_jellyfin', side_effect=lambda: calls.append('retire')), \
+        with tempfile.TemporaryDirectory() as root, patch('app.runtime_dir',return_value=Path(root)), patch('app.Config',return_value=Config(root)), patch('app.retire_jellyfin', side_effect=lambda: calls.append('retire')), \
                 patch('app.ctl', side_effect=lambda *args: calls.append(args)):
             bootstrap()
         self.assertEqual(calls[0], 'retire')

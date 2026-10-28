@@ -6,7 +6,7 @@
 
 Wallaby Agent manages per-user **IPv6 SSH tunnels** from a Linux desktop to your server. Its local HTML5 configuration page uses the Wallaby gear emblem and black sidebar.
 
-**V2 Development Build 5** adds locally controlled Vault Builder and Authorise pages and restricts direct Dashboard RPC to public/read-only operations. [Download the Ubuntu 26.04 LTS amd64 DEB](dist/wallaby-agent_2.0.0~dev5_amd64.deb) and verify [SHA256SUMS.txt](dist/SHA256SUMS.txt). This is a Development build, not a Stable release. Dashboard-side vault exchange and Transaction Builder Stage 2 reception are specified but not implemented in the Dashboard by this change.
+**V2 Development Build 6** fixes fresh-page authentication, adds live configuration saving/reloading, and replaces all ping checks with one authenticated IPv6 SSH connection shared by the three services. It retains Vault Builder, Authorise and the public/read-only Dashboard RPC policy. [Download the Ubuntu 26.04 LTS amd64 DEB](dist/wallaby-agent_2.0.0~dev6_amd64.deb) and verify [SHA256SUMS.txt](dist/SHA256SUMS.txt). This is a Development build, not a Stable release. Dashboard-side vault exchange and Transaction Builder Stage 2 reception are specified but not implemented in the Dashboard by this change.
 
 The previous [Build 3 DEB](dist/wallaby-agent_2.0.0~dev3_amd64.deb) and its [checksums](dist/SHA256SUMS.txt) remain for historical access. Build 3 contains the wallet RPC routing defect and must be upgraded for automatic node wallet loading.
 
@@ -17,7 +17,7 @@ The previous [Build 3 DEB](dist/wallaby-agent_2.0.0~dev3_amd64.deb) and its [che
 - **Vault Builder:** a local Agent feature, replacing the proposed standalone vault application. Build a single-key P2WSH block-height vault, sweep the source wallet’s available receiving/change funds into one output, verify the policy/key/address with local Core and roll a matured vault into a new one. Unavailable funds stop a partial sweep.
 - **Timing and review:** bundled timezone map, local/UTC 99% model and most-likely arrival estimates, annotated commands/descriptors/PSBTs, locally reconstructed wallet identities and exact amounts/total fees in pipe notation. The timing model is an estimate, not a calendar-date guarantee.
 - **Authorise:** locally approve or deny staged public imports and signing proposals. Deny records persist; transaction reviews expire and are consumed once. Local signing can broadcast after review, while Vault Builder’s Send to Transaction Builder action queues a signed PSBT without broadcasting.
-- **Integration boundary:** Build 5 implements the Agent side of the [approval/exchange protocol](APPROVAL_PROTOCOL.md). Dashboard V1 Build 7 has not implemented its exchange or immutable Stage 2 receiver; public vault records and signed PSBT exports remain queued locally. Ordinary read-only node queries and existing tunnels continue to work. The Dashboard’s earlier direct watch-wallet creation/import operations are blocked by Build 5 and require the later approval integration.
+- **Integration boundary:** Build 6 retains the Agent side of the [approval/exchange protocol](APPROVAL_PROTOCOL.md). Dashboard V1 Build 7 has not implemented its exchange or immutable Stage 2 receiver; public vault records and signed PSBT exports remain queued locally. Ordinary read-only node queries and existing tunnels continue to work. The Dashboard’s earlier direct watch-wallet creation/import operations are blocked by the Agent and require the later approval integration.
 
 ## Three independent services
 
@@ -33,19 +33,19 @@ All three switches default OFF for a new user. Upgrading an existing V1/V2 confi
 
 ## Install and configure
 
-Install the Build 5 DEB after verifying its accompanying checksum:
+Install the Build 6 DEB after verifying its accompanying checksum:
 
 ```sh
-sudo apt install ./wallaby-agent_2.0.0~dev5_amd64.deb
+sudo apt install ./wallaby-agent_2.0.0~dev6_amd64.deb
 ```
 
 Installing a DEB uses normal administrator permission. Tunnels, settings and login startup subsequently run as your user, without sudo, system services or lingering. Open **Utilities → Wallaby Agent Configuration**, or run `wallaby-agent configure`.
 
-1. Enter a server hostname/domain and click **Accept server**. IP literals are rejected; the server requires an AAAA record and a working IPv6 route.
+1. Enter a server hostname/domain. It saves automatically; **Connect** applies pending valid edits and immediately retries the saved SSH connection. IP literals are rejected; the server requires an AAAA record and a working IPv6 route.
 2. Enter the **server SSH account**, which can differ from your desktop login. For example, desktop user `alice` may use a separate server SSH account `wallet-node`. Verify the trusted server fingerprint and key authentication with `ssh -6 -F /dev/null USER@HOSTNAME` before enabling services. Encrypted keys must be unlocked in the desktop SSH agent. An optional absolute private-key path can be selected.
-3. Click **Save settings** after editing SSH/RPC fields. Accepting a server name and toggling services do not save those fields. Unsaved edits now display a reminder. Saving connection changes restarts enabled services with those settings.
+3. Settings save automatically after a short 350 ms typing debounce and are reread every two seconds. No Save button is needed. Valid edits update config.cfg atomically; invalid drafts stay visibly unsaved and cannot replace the last valid settings. Partial updates preserve other fields and service choices. SSH edits replace the shared login; RPC edits refresh the local node client. Direct file edits are reflected on the page too.
 4. Enable the services needed on this computer. Dashboard browser access and DDNS-GO need no RPC cookie.
-5. For the node interface, enable RPC (`server=1`) and restart Bitcoin Core. Agent checks owned Core processes, custom datadir/cookie options, Snap `~/snap/bitcoin-core/common/.bitcoin` and `current/.bitcoin`, then `~/.bitcoin`, with local config/settings hints. Bitcoin Core has no standard datadir environment variable. If needed, select the local `.cookie` with **Choose file**, then save settings. Only its path is saved, and its contents are reread for each RPC call.
+5. For the node interface, enable RPC (`server=1`) and restart Bitcoin Core. Agent checks owned Core processes, custom datadir/cookie options, Snap `~/snap/bitcoin-core/common/.bitcoin` and `current/.bitcoin`, then `~/.bitcoin`, with local config/settings hints. Bitcoin Core has no standard datadir environment variable. If needed, select the local `.cookie` with **Choose file**, the selected path saves automatically. Only its path is saved, and its contents are reread for each RPC call.
 
 ## IPv6 and SSH forwarding
 
@@ -59,7 +59,7 @@ Remove an old Dashboard startup forward before enabling the Agent's Dashboard sw
 
 Red means off/disconnected, amber means connecting/checking, and green means connected. The switch records desired ON/OFF; the separate dot reports actual state. DDNS-GO and Dashboard browser tunnel green confirms authenticated SSH and its forwarding listener, not the application's HTTP health. Node green requires **SSH, healthy local Core RPC, and successful Dashboard registration/heartbeat**.
 
-Reconnects use 15–300 second exponential backoff with jitter. SSH keepalives detect lost transports. A connected SSH transport suppresses server ping; without one, IPv6 ping runs immediately and every 60 seconds. ICMP blocking can make ping red while SSH works.
+The server indicator is green only while an authenticated IPv6 SSH master is connected, amber during authentication, and red after a drop or configuration/authentication error. Reconnects use 15–300 second backoff with jitter; Connect requests an immediate retry. There are no ping/ICMP probes. The master keeps the login connected even when every service switch is OFF. Turning a switch ON/OFF adds/cancels that forwarding with OpenSSH `-O forward` / `-O cancel`, without another login. New master generations invalidate old forwards so workers reattach after reconnect. SSH keepalives detect lost transports.
 
 Errors distinguish SSH/DNS/IPv6 routing, server-key verification, key authentication, local port conflicts, denied server forwarding, a refused remote target, Core cookie discovery/readability/format, RPC authentication/port/warmup, and Dashboard HTTP/protocol/session failures. RPC/Dashboard errors are no longer overwritten with a generic SSH-key warning. The original failure remains visible during long retry waits and is shown as the previous failure during the next connection attempt.
 
@@ -70,7 +70,7 @@ journalctl --user -u wallaby-agent-node.service -n 50 --no-pager
 
 The journal includes classified stage/code and actionable messages. Raw SSH error lines are drained into bounded private memory for classification, not copied to the page or journal. Cookies, authentication headers, session tokens and raw RPC responses are not logged.
 
-Configuration is `$XDG_CONFIG_HOME/wallaby-agent/config.cfg` (normally `~/.config/wallaby-agent/config.cfg`), mode 0600 in a private directory. Status and launch tokens use `$XDG_RUNTIME_DIR`. The UI binds only to `127.0.0.1`, requires its menu-launch token, checks Host/Origin and loads no third-party assets.
+Configuration is `$XDG_CONFIG_HOME/wallaby-agent/config.cfg` (normally `~/.config/wallaby-agent/config.cfg`), mode 0600 in a private directory. Status and control sockets use `$XDG_RUNTIME_DIR`. The UI binds only to `127.0.0.1`. A fresh local page obtains its current Bearer token using a same-origin Fetch Metadata/custom-header handshake; it no longer depends on a fragment token or sessionStorage from the menu launch. Host is restricted to this port’s 127.0.0.1/localhost authority, foreign origins and same-site/cross-site requests are rejected, API access still requires the token, and no CORS access is granted. No session cookie is used because cookies are not isolated by port. All page assets are locally installed.
 
 ## Node protocol and RPC
 
@@ -82,7 +82,7 @@ The Agent independently enforces a public/read-only RPC allowlist. Wallet creati
 
 Close old configuration tabs before upgrading. V2 startup stops/disables the current user's retired V1 Jellyfin unit and removes its old startup link/status/config switch. DDNS-GO and node settings are preserved; Dashboard browser access starts OFF.
 
-After installing Build 5:
+Optional manual refresh after installing Build 6:
 
 ```sh
 systemctl --user daemon-reload
@@ -90,7 +90,7 @@ systemctl --user try-restart wallaby-agent-monitor.service wallaby-agent-ddns.se
 wallaby-agent configure
 ```
 
-This only restarts units already running. The new Dashboard unit is enabled when its switch is turned on. Package scripts do not control another logged-in user's session.
+Opening Wallaby Agent Configuration from the menu automatically detects older monitor/UI processes and refreshes the saved enabled services once after an upgrade. Reopening an already-current Build 6 page keeps the SSH master connected. Close old browser tabs after upgrading. The optional commands above only restart units already running. The new Dashboard unit is enabled when its switch is turned on. Package scripts do not control another logged-in user's session.
 
 Source checks:
 
@@ -119,7 +119,7 @@ Vault Builder selects a funded private-key source wallet with no active vault, a
 
 The locally bundled timezone boundary map and IANA list retain Dashboard's earlier design and attribution. The target is internally the selected date's local 07:00; the display instead gives the inverse 99% arrival-model time for the selected discrete height, and the most-likely time, both in the selected zone and UTC. The constant 600-second Poisson model is an estimate, not a 99% real-world guarantee. Height restrictions are enforced by Bitcoin consensus, not the date or the Agent. No block explorer is consulted.
 
-Build 5 creates `wsh(and_v(v:pk(KEY),after(HEIGHT)))` with one public key and no bypass path. The exact descriptor, RPC construction and PSBT are shown; policy and command sections have explanatory hover/focus highlighting. Core independently derives the address and the key is bound to the destination's public descriptor. A dedicated private-key-disabled `Wallaby Vault <hash>` wallet monitors it; the original key wallet signs later withdrawals. The Agent associates monitor balances with that key wallet and can roll a matured vault into a new one. A watch-only destination does not prove possession of its private key. Back up the original key wallet and vault descriptor: the public monitor is not a key backup.
+Vault Builder creates `wsh(and_v(v:pk(KEY),after(HEIGHT)))` with one public key and no bypass path. The exact descriptor, RPC construction and PSBT are shown; policy and command sections have explanatory hover/focus highlighting. Core independently derives the address and the key is bound to the destination's public descriptor. A dedicated private-key-disabled `Wallaby Vault <hash>` wallet monitors it; the original key wallet signs later withdrawals. The Agent associates monitor balances with that key wallet and can roll a matured vault into a new one. A watch-only destination does not prove possession of its private key. Back up the original key wallet and vault descriptor: the public monitor is not a key backup.
 
 **Send** opens a local passphrase dialog, signs the reviewed transaction through Core, promptly relocks encrypted wallets, checks mempool acceptance and broadcasts. **Send to Transaction Builder** signs but does not broadcast: it queues the signed PSBT for the future Dashboard Stage 2 receiver. Both paths queue public vault data for synchronisation. Existing Dashboard versions report unsupported exchange and queues remain local; this is not a claim of successful server sync. Read-only node RPC and existing tunnels continue to work.
 
@@ -129,3 +129,7 @@ The private `approvals.json` beside config.cfg stores public vault records, pend
 
 The Dashboard's former direct watch-wallet creation/import workflows now require its later approval-protocol update. No Dashboard code, server installation, real wallet or installed Agent was changed during this build.
 
+
+## Build 6 regression coverage
+
+Fresh tab, reload, localhost alias, token refresh, invalid-token/Origin/Host/Fetch Metadata rejection, partial autosaves, external config edits and upgrade-process refresh are tested. Form controls stay disabled until the saved configuration loads, avoiding the false empty/red state seen in Build 5. A live isolated test against the configured server authenticated one IPv6 SSH master, added both DDNS-GO and Dashboard forwards, received their web responses, then removed both forwards while the same master PID stayed connected. Existing installed services and saved config were not changed by that test.

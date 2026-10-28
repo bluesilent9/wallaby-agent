@@ -11,6 +11,8 @@ node=Regtest();c=node.core
 try:
  for name in ('Test miner','Test treasury','Test storage'):rpc(c,'createwallet',{'wallet_name':name,'passphrase':'regtest-only'})
  rpc(c,'walletpassphrase',['regtest-only',600],'Test miner');address=rpc(c,'getnewaddress',[],'Test miner');rpc(c,'generatetoaddress',[105,address]);rpc(c,'sendtoaddress',[rpc(c,'getnewaddress',[],'Test treasury'),'1.0'],'Test miner');rpc(c,'generatetoaddress',[1,address])
+ from configuration import Config
+ config=Config();v=config.values;v.update(c.config);config.save(v)
  ops=WalletOps(c,Store());r=ops.build('Test treasury','Test storage','2',(datetime.now()+timedelta(days=30)).date().isoformat(),'Australia/Sydney');ops.store=Store(Path(root.name)/'peer');ops.store.receive({'kind':'vault_sync','vault':r['vault']})
  server=Server(('127.0.0.1',0),Handler);server.token='REGTEST-UI-ONLY';server.config_lock=threading.Lock();server.preview=False;server.wallet_ops=ops
  Path('work/build5-ui-url.txt').write_text(f'http://127.0.0.1:{server.server_port}/#REGTEST-UI-ONLY');print('Regtest browser fixture ready',server.server_port,flush=True);server.serve_forever()

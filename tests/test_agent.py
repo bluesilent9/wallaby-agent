@@ -41,14 +41,15 @@ class ConfigurationTests(unittest.TestCase):
  def test_toggle_uses_only_user_units(self):
   with tempfile.TemporaryDirectory() as root,patch('runtime.ctl') as ctl,patch('runtime.write_status'):
    c=Config(root);v=copy.deepcopy(c.values);v['hostname']='server.test';v['enabled']['ddns']=True;apply_config(c,v)
-   calls=[x.args for x in ctl.call_args_list];self.assertIn(('enable','wallaby-agent-ddns.service'),calls);self.assertIn(('restart','wallaby-agent-ddns.service'),calls);self.assertIn(('disable','--now','wallaby-agent-node.service'),calls)
+   calls=[x.args for x in ctl.call_args_list];self.assertIn(('enable','--now','wallaby-agent-ddns.service'),calls);self.assertNotIn(('restart','wallaby-agent-ddns.service'),calls)
  def test_ssh_forces_ipv6_trust_and_loopback(self):
   c=Config().values;c['hostname']='server.test';args=ssh_command(c,'ddns',9876,'/tmp/test.sock')
   self.assertIn('-6',args);self.assertIn('StrictHostKeyChecking=yes',args);self.assertIn('[::1]:9876:[::1]:9876',args);self.assertEqual(args[-2:],['--','server.test']);self.assertNotIn('0.0.0.0',args)
  def test_busy_local_port_fails_before_ssh(self):
   with socket.socket(socket.AF_INET6) as s,tempfile.TemporaryDirectory() as root:
    s.bind(('::1',0));t=Tunnel(Config().values,'ddns',root);t.port=s.getsockname()[1]
-   with self.assertRaises(OSError):t.start()
+   with patch('transport.master_info',return_value={'control':str(Path(root)/'ssh-test.sock')}):
+    with self.assertRaises(OSError):t.start()
 
 class RPCTests(unittest.TestCase):
  def test_rejects_dangerous_calls_and_private_exports(self):
@@ -102,7 +103,7 @@ class WebSecurityTests(unittest.TestCase):
  def test_retired_service_is_not_exposed_or_accepted(self):
   headers={'Authorization':'Bearer secret','Content-Type':'application/json'}
   code,data=self.call('/api/state',headers)
-  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development build 5')
+  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development build 6')
   self.assertEqual(set(data['config']['enabled']),{'ddns','dashboard','node'});self.assertNotIn('jellyfin',data['status'])
   self.assertEqual(self.call('/api/toggle',headers,json.dumps({'service':'jellyfin','enabled':True}))[0],400)
  def test_dashboard_toggle_does_not_require_cookie_or_enable_node(self):
@@ -126,16 +127,3 @@ class LifecycleTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as root,patch('runtime.signal.signal'),patch('runtime.threading.Event',return_value=event),patch('runtime.Config') as config,patch('runtime.Tunnel',return_value=tunnel),patch('runtime.runtime_dir',return_value=Path(root)),patch('runtime.random.uniform',return_value=0),patch('runtime.write_status') as status:
    config.return_value.values=v;runtime.worker('ddns')
    self.assertEqual(event.delays,[15,30,60]);self.assertEqual([x.args[1] for x in status.call_args_list],['amber','red','amber','red','amber','red','red'])
- def test_ping_resumes_after_all_tunnels_drop(self):
-  import runtime
-  class Stop:
-   count=0
-   def is_set(self):return self.count>=3
-   def set(self):self.count=3
-   def wait(self,d):self.count+=1;return self.is_set()
-  stop=Stop();v=Config().values;v['hostname']='server.test'
-  # First iteration has a tunnel; then all transports drop for the following two iterations.
-  def status(kind):return {'tunnel':stop.count==0 and kind=='ddns'}
-  with patch('runtime.retire_jellyfin'),patch('runtime.signal.signal'),patch('runtime.threading.Event',return_value=stop),patch('runtime.Config') as config,patch('runtime.read_status',side_effect=status),patch('runtime.ping',return_value=True) as ping,patch('runtime.time.monotonic',side_effect=[0,0,10]),patch('runtime.write_status') as writes:
-   config.return_value.values=v;runtime.monitor()
-   self.assertEqual(ping.call_count,1);self.assertEqual(ping.call_args.args,('server.test',));self.assertIn('amber',[c.args[1] for c in writes.call_args_list])

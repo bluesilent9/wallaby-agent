@@ -7,7 +7,7 @@ from configuration import Config
 from diagnostics import ConnectionFailure, describe, ssh_failure
 from node_client import Core, HTTPFailure, NodeClient
 from runtime import read_status, worker
-from transport import Tunnel
+from transport import Tunnel,MasterConnection
 
 class DiagnosticsTests(unittest.TestCase):
  def test_ssh_categories_do_not_echo_raw_lines(self):
@@ -60,7 +60,7 @@ class DiagnosticsTests(unittest.TestCase):
    status={'updated':900,'color':'red','message':'Local RPC failed.','retry_at':1200};(Path(root)/'node.json').write_text(json.dumps(status));self.assertEqual(read_status('node')['message'],status['message'])
  def test_real_ssh_stderr_is_drained_and_classified(self):
   with tempfile.TemporaryDirectory() as root:
-   config=Config(root).values;config['hostname']='server.test';tunnel=Tunnel(config,'node',root)
+   config=Config(root).values;config['hostname']='server.test';tunnel=MasterConnection(config,root)
    process=subprocess.Popen([sys.executable,'-c','import sys; print("Permission denied (publickey).",file=sys.stderr)'],stderr=subprocess.PIPE)
    with patch('transport.subprocess.Popen',return_value=process):tunnel.start()
    process.wait(timeout=5);self.assertEqual(tunnel.failure().code,'authentication');tunnel.close()

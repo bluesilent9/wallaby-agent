@@ -34,8 +34,8 @@ class DashboardAccessTests(unittest.TestCase):
             values['enabled']['dashboard'] = True
             apply_config(config, values)
             calls = [call.args for call in ctl.call_args_list]
-            self.assertIn(('enable', 'wallaby-agent-dashboard.service'), calls)
-            self.assertIn(('restart', 'wallaby-agent-dashboard.service'), calls)
+            self.assertIn(('enable', '--now', 'wallaby-agent-dashboard.service'), calls)
+            self.assertIn(('enable', '--now', 'wallaby-agent-dashboard.service'), calls)
             self.assertTrue(Config(root).values['enabled']['dashboard'])
             self.assertFalse(Config(root).values['enabled']['node'])
             values = copy.deepcopy(config.values)
