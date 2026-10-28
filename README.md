@@ -2,7 +2,7 @@
 
 Wallaby Agent manages per-user **IPv6 SSH tunnels** from a Linux desktop to your server. Its local HTML5 configuration page uses the Wallaby gear emblem and black sidebar.
 
-**V2 Development Build 4 is available for Ubuntu 26.04 LTS (amd64).** [Download the DEB](dist/wallaby-agent_2.0.0~dev4_amd64.deb) and verify [SHA256SUMS.txt](dist/SHA256SUMS.txt). It corrects exact Bitcoin Core wallet RPC routing and bounded command handling for [Wallaby Dashboard V1 Build 1](https://github.com/bluesilent9/wallaby-dashboard/tree/Development). All 44 source tests and package inspection pass. Live installation and startup testing remain pending. Stable has no application release.
+**V2 Development Build 5** adds locally controlled Vault Builder and Authorise pages and restricts direct Dashboard RPC to public/read-only operations. [Download the Ubuntu 26.04 LTS amd64 DEB](dist/wallaby-agent_2.0.0~dev5_amd64.deb) and verify [SHA256SUMS.txt](dist/SHA256SUMS.txt). This is a Development build, not a Stable release. Dashboard-side vault exchange and Transaction Builder Stage 2 reception are specified but not implemented in the Dashboard by this change.
 
 The previous [Build 3 DEB](dist/wallaby-agent_2.0.0~dev3_amd64.deb) and its [checksums](dist/SHA256SUMS.txt) remain for historical access. Build 3 contains the wallet RPC routing defect and must be upgraded for automatic node wallet loading.
 
@@ -20,10 +20,10 @@ All three switches default OFF for a new user. Upgrading an existing V1/V2 confi
 
 ## Install and configure
 
-Install the Build 4 DEB after verifying its accompanying checksum:
+Install the Build 5 DEB after verifying its accompanying checksum:
 
 ```sh
-sudo apt install ./wallaby-agent_2.0.0~dev4_amd64.deb
+sudo apt install ./wallaby-agent_2.0.0~dev5_amd64.deb
 ```
 
 Installing a DEB uses normal administrator permission. Tunnels, settings and login startup subsequently run as your user, without sudo, system services or lingering. Open **Utilities → Wallaby Agent Configuration**, or run `wallaby-agent configure`.
@@ -63,13 +63,13 @@ Configuration is `$XDG_CONFIG_HOME/wallaby-agent/config.cfg` (normally `~/.confi
 
 Application V2 retains the **Dashboard V155 Agent v1 protocol on port 56443**. See [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md). Registration, independent heartbeats/long polling, acknowledgements and correlated results carry approved local Core RPC requests. Duplicate commands are not rerun; lost acknowledgements and RPC timeouts are not automatically replayed. Reconcile local state before repeating a write.
 
-The Agent independently enforces the Dashboard method/public-descriptor policy, including watch-only wallet setup. Private exports, unlocking, signing, broadcasting and arbitrary methods are excluded. Monetary decimals travel exactly, without binary-float conversion. Core is contacted only on its configured local loopback port; the hub cannot choose credentials or filesystem paths. MAC/hostname values are identity hints; SSH supplies authentication. Exactly-once RPC is not guaranteed across arbitrary network failures.
+The Agent independently enforces a public/read-only RPC allowlist. Wallet creation, descriptor import, address/label changes, scanning actions, private exports, unlocking, signing and broadcasting cannot be called directly by Dashboard. Approved local workflows use separate fixed code paths. See [APPROVAL_PROTOCOL.md](APPROVAL_PROTOCOL.md) for the future Dashboard exchange and immutable Stage 2 PSBT handoff.
 
 ## Upgrade and build
 
 Close old configuration tabs before upgrading. V2 startup stops/disables the current user's retired V1 Jellyfin unit and removes its old startup link/status/config switch. DDNS-GO and node settings are preserved; Dashboard browser access starts OFF.
 
-After installing Build 4:
+After installing Build 5:
 
 ```sh
 systemctl --user daemon-reload
@@ -96,3 +96,22 @@ No root or network is needed for building. The DEB includes a compiled native la
 ## Build 4 RPC corrections
 
 Wallet RPC uses `/wallet/` followed by the encoded exact wallet name, with no extra suffix. Empty default wallet names, literal trailing slashes, spaces, Unicode, percent signs and embedded slashes are preserved. The Dashboard dispatches at most two active RPC commands per Agent; the Agent retains its own two-worker limit and waits for a free worker rather than disconnecting during a completion race. Independent heartbeats remain active. Existing signing, unlock, private-key and broadcast restrictions are unchanged.
+
+
+## Vault Builder and Authorise
+
+The black sidebar contains **Services** (always available), **Vault Builder** (enabled when local Core RPC is reachable), and **Authorise** (enabled while pending requests or deny records exist). Core connectivity for local Vault Builder does not require a live Dashboard session. Core V31 is the tested wallet target.
+
+Vault Builder selects a funded private-key source wallet with no active vault, a destination wallet containing a derivable public key (including public-descriptor watch wallets), an exact sats/vB fee and an unlock date/timezone. Address-only watch wallets are excluded. It explicitly sweeps every available input, receiving and change outputs included, to one vault output after subtracting the fee. Locked, immature, unsafe or otherwise unavailable funds cause an explanatory failure rather than a partial sweep. Calculate creates a dedicated public Core monitor; it does not sign or broadcast.
+
+The locally bundled timezone boundary map and IANA list retain Dashboard's earlier design and attribution. The target is internally the selected date's local 07:00; the display instead gives the inverse 99% arrival-model time for the selected discrete height, and the most-likely time, both in the selected zone and UTC. The constant 600-second Poisson model is an estimate, not a 99% real-world guarantee. Height restrictions are enforced by Bitcoin consensus, not the date or the Agent. No block explorer is consulted.
+
+Build 5 creates `wsh(and_v(v:pk(KEY),after(HEIGHT)))` with one public key and no bypass path. The exact descriptor, RPC construction and PSBT are shown; policy and command sections have explanatory hover/focus highlighting. Core independently derives the address and the key is bound to the destination's public descriptor. A dedicated private-key-disabled `Wallaby Vault <hash>` wallet monitors it; the original key wallet signs later withdrawals. The Agent associates monitor balances with that key wallet and can roll a matured vault into a new one. A watch-only destination does not prove possession of its private key. Back up the original key wallet and vault descriptor: the public monitor is not a key backup.
+
+**Send** opens a local passphrase dialog, signs the reviewed transaction through Core, promptly relocks encrypted wallets, checks mempool acceptance and broadcasts. **Send to Transaction Builder** signs but does not broadcast: it queues the signed PSBT for the future Dashboard Stage 2 receiver. Both paths queue public vault data for synchronisation. Existing Dashboard versions report unsupported exchange and queues remain local; this is not a claim of successful server sync. Read-only node RPC and existing tunnels continue to work.
+
+Incoming public vault records and signing proposals can only be staged by the network service. Authorise reconstructs the policy or transaction locally; no Dashboard wallet/owner labels are trusted. Diagrams show inputs, receiving/change outputs, signing-wallet highlight and total fee using exact pipe notation, with addresses in the details. Authorise/Deny decisions are local. Denials persist by content hash and can be deleted to permit a new prompt. New pending requests open the local Authorise page if no Agent page is active. Passwords, Core cookies and private keys never enter the exchange.
+
+The private `approvals.json` beside config.cfg stores public vault records, pending/denied/attempted decisions and queued public/signed exports. A signed PSBT is a spending authorisation and is protected with mode 0600. Reviews expire after ten minutes and are consumed once. Interrupted signing/import operations are marked attempted and never automatically replayed; inspect Core before deliberately retrying. Reconnecting transports only retries data delivery. This build retains one desktop-user permission domain; it is not isolation from a compromised local account, browser or Core cookie.
+
+The Dashboard's former direct watch-wallet creation/import workflows now require its later approval-protocol update. No Dashboard code, server installation, real wallet or installed Agent was changed during this build.

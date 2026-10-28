@@ -136,4 +136,17 @@ def monitor():
             try:ok=ping(host)
             except Exception:ok=False
             color='green' if ok else 'red';message='Server responds over IPv6.' if ok else 'Server did not respond to IPv6 ping.';due=time.monotonic()+60
-        write_status('server',color,message);stop.wait(2)
+        write_status('server',color,message)
+        # Only locally installed code opens the local review page; remote URLs are never used.
+        try:
+            from approval_store import Store,digest
+            store=Store();saved=store.read();pending=sorted(k for k,v in saved['pending'].items() if v['state']=='pending')
+            batch=digest(pending);notice=runtime_dir()/'approval-notice.json';ui=runtime_dir()/'ui-seen.json'
+            previous=json.loads(notice.read_text()) if notice.exists() else {}
+            seen=json.loads(ui.read_text()) if ui.exists() else {}
+            if pending and previous.get('batch')!=batch:
+                if time.time()-seen.get('at',0)>15:
+                    subprocess.Popen(['/usr/bin/wallaby-agent','authorise'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                notice.write_text(json.dumps({'batch':batch}))
+        except (OSError,ValueError,KeyError):pass
+        stop.wait(2)

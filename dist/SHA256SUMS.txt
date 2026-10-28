@@ -3,3 +3,4 @@ dc5ef206bf9f1a7c35df1d77862c70a970d49fdd0381beb5fc37e1f1f70c3b22  wallaby-agent_
 beb96366704dab06c868a10015e2961a9a0cc43a87990f7d7c48ecab2b89c16e  wallaby-agent_2.0.0~dev1_amd64.deb
 f74cf967512e56773cffd007784bc24f1356f2d8ae2d02fa4974dfed42a9eb30  wallaby-agent_2.0.0~dev3_amd64.deb
 e7d1f697b4408f7491bbae4c362da65f1ad3bd91d9120c40bd0c155d4834190d  wallaby-agent_2.0.0~dev4_amd64.deb
+4b4c9be8f98680647192a8e6aa3feda3751823fc49418cee0da77c54049881d8  wallaby-agent_2.0.0~dev5_amd64.deb

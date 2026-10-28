@@ -1,9 +1,7 @@
 # Development installers
 
-The latest installer is **V2 Development build 3**: [wallaby-agent_2.0.0~dev3_amd64.deb](wallaby-agent_2.0.0~dev3_amd64.deb), for Ubuntu 26.04 LTS amd64. Verify it with [SHA256SUMS.txt](SHA256SUMS.txt).
+Latest: [V2 Development Build 5 DEB](wallaby-agent_2.0.0~dev5_amd64.deb), Ubuntu 26.04 LTS amd64. Verify [SHA256SUMS.txt](SHA256SUMS.txt).
 
-Build 3 adds the independent Wallaby Dashboard browser tunnel on port 38951, retains DDNS-GO and the separate node interface on port 56443, and includes specific connection errors and an unsaved-settings reminder. Existing DDNS-GO/node settings are preserved; the new Dashboard switch defaults OFF.
+Build 5 adds local Vault Builder and Authorise pages and restricts direct Dashboard RPC to public/read-only queries. All three existing service toggles remain. It signs only after local review and approval, supports local broadcast or signed PSBT queuing, and persists sync denials. 60 tests pass, including twelve isolated Core 31 regtest tests; package checks pass.
 
-All 42 automated tests and package inspection pass. Installation/upgrade and live login-startup testing remain pending. Older DEBs are historical artifacts and do not include these additions. Stable has no released Agent application.
-
-See the repository README for installation, restarting active user services after upgrade, configuration and legacy Dashboard startup removal.
+Dashboard exchange and Transaction Builder Stage 2 reception require the later Dashboard implementation in APPROVAL_PROTOCOL.md. Current servers cannot yet receive those queued items. Development only; not installed or independently security-audited. Older packages do not include these features.

@@ -1,3 +1,5 @@
+> Build 5 permission update: the direct RPC catalogue below is now restricted to public/read-only methods. `createwallet`, `importdescriptors`, scans and network-changing calls are no longer advertised or accepted by this Agent. Signing/broadcast/import are only local approval workflows described in [APPROVAL_PROTOCOL.md](APPROVAL_PROTOCOL.md); the original V155 server catalogue cannot override this restriction.
+
 # Wallaby Agent protocol — v1 with RPC capability v1 (V155)
 
 Dashboard is the hub. Wallaby Agent initiates every connection through its authorised SSH tunnel, polls for commands, calls its local Bitcoin Core, and posts results. No server-initiated connection to a laptop is required. The production Agent application is **not** bundled with V155; the server contract is implemented and integration-tested with the actual Agent client and a simulated Core HTTP endpoint.
@@ -101,7 +103,7 @@ Future Python features can use `sessions.nodes.rpc.queue(...)`, `.status(...)`, 
 
 ## Permissions and lifecycle
 
-The method catalogue in `agent_rpc.py` covers node/chain/mempool reads, descriptor/address inspection, wallet balances/history, historical scanning/block retrieval, and public watch-only setup. Wallet methods require an explicit wallet endpoint. `listdescriptors` permits only its public form. `createwallet` permits only named, blank, private-key-disabled descriptor-wallet creation. `importdescriptors` validates supported public descriptors before delivery.
+The method catalogue in `agent_rpc.py` permits public/read-only node, chain, mempool, descriptor/address, wallet balance and history queries. Wallet methods require an explicit wallet endpoint. `listdescriptors` permits only its public form. Wallet creation, imports, scans, network mutations, signing, unlocking and broadcast are excluded from direct Dashboard RPC.
 
 Signing, wallet unlocking, private exports, broadcast, arbitrary method names and arbitrary commands are not allowed. Cold-storage signing remains a local user-controlled action. An Agent must apply these same rules locally even if its SSH-trusted hub is compromised. Expanding the catalogue is a deliberate future permission change, not an agent-supplied bypass.
 

@@ -140,6 +140,9 @@ class NodeClient:
             if not isinstance(r,dict) or r.get('protocol')!='wallaby-agent' or r.get('version')!=1 or not isinstance(r.get('connection_token'),str) or not r['connection_token']:
                 raise ConnectionFailure('dashboard','protocol','Dashboard registration returned an incompatible Agent protocol or no session token. Check the Dashboard Agent service/version on port 56443.')
             self.token=r['connection_token'];self.consume(r)
+            from agent_exchange import Exchange
+            exchange=Exchange(self.port,self.token)
+            exchange_thread=threading.Thread(target=exchange.run,args=(self.failed,),daemon=True);self.threads.append(exchange_thread);exchange_thread.start()
             self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
             thread=threading.Thread(target=self.heartbeat,daemon=True);self.threads.append(thread);thread.start()
             while not self.stop.is_set() and not self.failed.is_set():self.consume(self.post('poll',{'wait_seconds':20},timeout=25))

@@ -9,7 +9,7 @@ def put(path,text,mode=0o644):
  p=stage/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);p.chmod(mode)
 arch=subprocess.check_output(['dpkg','--print-architecture'],text=True).strip()
 put('DEBIAN/control',f'''Package: wallaby-agent
-Version: 2.0.0~dev4
+Version: 2.0.0~dev5
 Section: utils
 Priority: optional
 Architecture: {arch}
@@ -17,7 +17,7 @@ Maintainer: Wallaby Suite <347047153+bluesilent9@users.noreply.github.com>
 Depends: python3 (>= 3.11), openssh-client, iputils-ping, systemd, xdg-utils
 Recommends: kdialog | zenity
 Description: Wallaby Agent V2 Development
- Per-user IPv6 DDNS-GO and Dashboard access, plus Bitcoin Core RPC transport.
+ Per-user IPv6 tunnels, read-only node RPC, local vaults and authorisation.
  All tunnels are off on first install. Includes an HTML5 configuration page.
 ''')
 for folder in ('src','web'):
@@ -62,12 +62,13 @@ NoDisplay=true
 X-KDE-autostart-phase=2
 ''')
 put('usr/share/icons/hicolor/scalable/apps/wallaby-agent.svg',(root/'web/wallaby-agent.svg').read_text())
-put('usr/share/doc/wallaby-agent/README.md',(root/'README.md').read_text())
+for document in ('README.md','AGENT_PROTOCOL.md','APPROVAL_PROTOCOL.md'):
+ put('usr/share/doc/wallaby-agent/'+document,(root/document).read_text())
 put('DEBIAN/postinst','''#!/bin/sh
 set -e
 if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q || true; fi
 exit 0
 ''',0o755)
-out=root/'dist'/f'wallaby-agent_2.0.0~dev4_{arch}.deb';out.parent.mkdir(exist_ok=True)
+out=root/'dist'/f'wallaby-agent_2.0.0~dev5_{arch}.deb';out.parent.mkdir(exist_ok=True)
 subprocess.run(['dpkg-deb','--root-owner-group','--build',str(stage),str(out)],check=True)
 print(out)

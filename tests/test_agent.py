@@ -55,7 +55,8 @@ class RPCTests(unittest.TestCase):
   for method,params,wallet in [('sendtoaddress',[],None),('walletpassphrase',[],None),('listdescriptors',[True],'wallet'),('createwallet',{'wallet_name':'unsafe'},None)]:
    with self.assertRaises(ValueError):request(method,params,wallet)
  def test_public_watchonly_policy(self):
-  p={'wallet_name':'watch','disable_private_keys':True,'blank':True,'descriptors':True};self.assertEqual(request('createwallet',p,None)[0],p)
+  p={'wallet_name':'watch','disable_private_keys':True,'blank':True,'descriptors':True}
+  with self.assertRaises(ValueError):request('createwallet',p,None)
  def test_duplicate_command_executes_once(self):
   n=NodeClient(Config().values,1234,threading.Event(),lambda *_:None);c={'id':'id','kind':'rpc','method':'getblockchaininfo','params':[],'wallet':None,'expires_in_seconds':10}
   with patch.object(n,'post',side_effect=[{'execute':True},{'accepted':True}]) as post,patch.object(n.core,'call',return_value={'result':1}) as core:
@@ -86,6 +87,8 @@ class WebSecurityTests(unittest.TestCase):
  def tearDown(self):self.server.shutdown();self.server.server_close();self.thread.join();self.env.stop();self.temp.cleanup()
  def call(self,path,headers=None,body=None):
   c=http.client.HTTPConnection('127.0.0.1',self.server.server_port);c.request('POST' if body is not None else 'GET',path,body,headers or {});r=c.getresponse();data=r.read();c.close();return r.status,json.loads(data) if path.startswith('/api') else data
+ def test_bundled_timezone_json_is_served_as_json_bytes(self):
+  status,raw=self.call('/timezones.json');self.assertEqual(status,200);self.assertIsInstance(json.loads(raw),list)
  def test_token_and_origin(self):
   self.assertEqual(self.call('/api/state')[0],403)
   self.assertEqual(self.call('/api/state',{'Authorization':'Bearer secret','Origin':'https://evil.test'})[0],403)
@@ -99,7 +102,7 @@ class WebSecurityTests(unittest.TestCase):
  def test_retired_service_is_not_exposed_or_accepted(self):
   headers={'Authorization':'Bearer secret','Content-Type':'application/json'}
   code,data=self.call('/api/state',headers)
-  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development')
+  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development build 5')
   self.assertEqual(set(data['config']['enabled']),{'ddns','dashboard','node'});self.assertNotIn('jellyfin',data['status'])
   self.assertEqual(self.call('/api/toggle',headers,json.dumps({'service':'jellyfin','enabled':True}))[0],400)
  def test_dashboard_toggle_does_not_require_cookie_or_enable_node(self):

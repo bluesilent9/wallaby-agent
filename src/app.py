@@ -3,6 +3,11 @@
 import argparse, copy, fcntl, hmac, json, os, secrets, shutil, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit,parse_qs
+from node_client import Core,decode
+from wallet_ops import WalletOps
+from approval_store import Store
+from block_clock import timezones_with_offsets
 from configuration import Config,hostname,discover_cookie,SERVICES
 from runtime import runtime_dir,read_status,write_status,apply_config,ctl,worker,monitor,retire_jellyfin
 
@@ -18,6 +23,22 @@ def picker():
     path=Path(p.stdout.strip())
     if not path.is_file() or not os.access(path,os.R_OK):raise ValueError('Choose a readable cookie file.')
     return str(path.resolve())
+
+def wallet_ops(server):
+    if getattr(server,'wallet_ops',None) is None:
+        v=Config().values
+        if not v['cookie']:v['cookie']=discover_cookie()
+        server.wallet_ops=WalletOps(Core(v))
+    return server.wallet_ops
+
+def workspace(server):
+    (runtime_dir()/'ui-seen.json').write_text(json.dumps({'at':time.time()}))
+    saved=wallet_ops(server).store.read()
+    try:
+        wallet_ops(server).core.ready();connected=True
+    except Exception:connected=False
+    return {'connected':connected,'pending':[{"id":k,'kind':v['proposal']['kind'],'state':v['state']} for k,v in saved['pending'].items()],
+            'denied':[{"id":k,'proposal':{'kind':v['proposal']['kind'],**({'vault':v['proposal']['vault']} if v['proposal']['kind']=='vault_sync' else {})}} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox'])}
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version='HTTP/1.0'
@@ -43,20 +64,41 @@ class Handler(BaseHTTPRequestHandler):
                 if not v['cookie']:
                     cookie=discover_cookie()
                     if cookie:v['cookie']=cookie;c.save(v)
-                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development'})
-        paths={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
+                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development build 5','workspace':workspace(self.server)})
+        if self.path.startswith('/api/timezones?'):
+            try:return self.reply(200,timezones_with_offsets(int(parse_qs(urlsplit(self.path).query).get('year',['2026'])[0])))
+            except ValueError:return self.reply(400,{'error':'Choose a valid calendar year.'})
+        if self.path=='/api/wallets':
+            try:return self.reply(200,wallet_ops(self.server).list_wallets())
+            except Exception:return self.reply(503,{'error':'Connect local Bitcoin Core RPC first. Check the cookie and RPC port on Services.'})
+        paths={'/':'index.html','/app.js':'app.js','/workspace.js':'workspace.js','/timezones.json':'timezones.json','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
         if self.path not in paths:return self.reply(404,{'error':'Not found.'})
-        f=ASSETS/paths[self.path];mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml'}[f.suffix]
+        f=ASSETS/paths[self.path];mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.json':'application/json; charset=utf-8'}[f.suffix]
         self.reply(200,f.read_bytes(),mime)
     def do_POST(self):
         if not self.allowed(True):return self.reply(403,{'error':'Configuration access denied.'})
         if self.headers.get('Content-Type')!='application/json':return self.reply(415,{'error':'JSON required.'})
         try:
             n=int(self.headers.get('Content-Length','0'))
-            if not 0<n<=16384:raise ValueError('Invalid request size.')
-            body=json.loads(self.rfile.read(n))
+            if not 0<n<=(3*1024*1024 if self.path.startswith(('/api/vault/','/api/authorise/')) else 16384):raise ValueError('Invalid request size.')
+            body=decode(self.rfile.read(n))
             if not isinstance(body,dict):raise ValueError('Invalid settings.')
             if self.path=='/api/pick-cookie':return self.reply(200,{'path':picker()})
+            if self.path.startswith(('/api/vault/','/api/authorise/')):
+                ops=wallet_ops(self.server);store=ops.store
+                if self.server.preview:raise ValueError('Wallet operations are disabled in preview mode.')
+                if self.path=='/api/vault/build' and set(body)=={'source','destination','fee_rate','date','timezone'}:
+                    result=ops.build(body['source'],body['destination'],body['fee_rate'],body['date'],body['timezone'])
+                elif self.path=='/api/vault/sign' and set(body)=={'id','password','action'}:
+                    if not isinstance(body['password'],str) or len(body['password'])>1024:raise ValueError('Invalid wallet passphrase.')
+                    result=ops.sign(body['id'],body['password'],body['action'])
+                elif self.path=='/api/authorise/review' and set(body)=={'id'}:result=ops.prepare_request(body['id'])
+                elif self.path=='/api/authorise/approve' and set(body)=={'id'}:result=ops.approve_sync(body['id'])
+                elif self.path=='/api/authorise/deny' and set(body)=={'id'}:store.deny(body['id']);result={'ok':True}
+                elif self.path=='/api/authorise/forget' and set(body)=={'id'}:store.forget(body['id']);result={'ok':True}
+                else:raise ValueError('Invalid local approval action or fields.')
+                return self.reply(200,result)
+
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
                 if self.path=='/api/hostname':
@@ -64,7 +106,7 @@ class Handler(BaseHTTPRequestHandler):
                     v['hostname']=hostname(body['hostname'])
                 elif self.path=='/api/settings':
                     if set(body)!={'ssh_user','ssh_port','identity_file','cookie','rpc_port'}:raise ValueError('Invalid fields.')
-                    v.update(body)
+                    v.update(body);self.server.wallet_ops=None
                 elif self.path=='/api/toggle':
                     if set(body)!={'service','enabled'} or body['service'] not in SERVICES or type(body['enabled']) is not bool:raise ValueError('Invalid service toggle.')
                     if body['enabled'] and not v['hostname']:raise ValueError('Accept a server name first.')
@@ -73,8 +115,9 @@ class Handler(BaseHTTPRequestHandler):
                 if self.server.preview:c.save(v)
                 else:apply_config(c,v)
             self.reply(200,{'ok':True})
-        except (ValueError,TypeError,KeyError):self.reply(400,{'error':'Check the hostname, settings and file paths. IP addresses are not allowed.'})
-        except Exception:self.reply(503,{'error':'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
+        except ValueError as error:self.reply(400,{'error':str(error) if self.path.startswith(('/api/vault/','/api/authorise/')) else 'Check the hostname, settings and file paths. IP addresses are not allowed.'})
+        except (TypeError,KeyError):self.reply(400,{'error':'Invalid request or expired review. Refresh this page and review again.'})
+        except Exception:self.reply(503,{'error':'The wallet operation failed or its outcome is uncertain. Check Core and review again; it was not automatically replayed.' if self.path.startswith(('/api/vault/','/api/authorise/')) else 'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
 
 class Server(ThreadingHTTPServer):
     daemon_threads=True
@@ -96,7 +139,7 @@ def bootstrap():
     if names:ctl('import-environment',*names)
     ctl('daemon-reload');ctl('enable','--now','wallaby-agent-monitor.service')
 
-def launch():
+def launch(page='services'):
     bootstrap();ctl('start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
@@ -104,15 +147,16 @@ def launch():
             import http.client
             conn=http.client.HTTPConnection('127.0.0.1',d['port'],timeout=1);conn.request('GET','/api/state',headers={'Authorization':'Bearer '+d['token']});r=conn.getresponse();r.read();conn.close()
             if r.status==200:
-                webbrowser.open(f"http://127.0.0.1:{d['port']}/#"+d['token']);return
+                webbrowser.open(f"http://127.0.0.1:{d['port']}/#"+d['token']+'|'+page);return
         except (OSError,ValueError):pass
         time.sleep(.1)
     raise RuntimeError('Configuration service did not start.')
 
 if __name__=='__main__':
     os.umask(0o077)
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['configure','ui','bootstrap','monitor',*SERVICES,'preview'],nargs='?',default='configure');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['configure','authorise','ui','bootstrap','monitor',*SERVICES,'preview'],nargs='?',default='configure');a=p.parse_args()
     if a.mode=='configure':launch()
+    elif a.mode=='authorise':launch('authorise')
     elif a.mode=='bootstrap':bootstrap()
     elif a.mode=='monitor':monitor()
     elif a.mode in SERVICES:worker(a.mode)
