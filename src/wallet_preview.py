@@ -25,11 +25,11 @@ def validate_preview(payload):
     from peer_wallet import validate_details
     if not isinstance(payload,dict) or set(payload)!={'preview','public_key','signature'}:raise ValueError('Invalid signed wallet preview.')
     p=payload['preview'];required={'version','transfer_id','challenge','sender_ipv6','receiver_ipv6','public_wallet','chain','funded_outputs','node_tip','generated_at'}
-    if not isinstance(p,dict) or set(p)!=required or p['version']!=1:raise ValueError('Invalid public preview schema.')
+    if not isinstance(p,dict) or (set(p)!=required if p.get('version')==1 else set(p)!=required|{'vaults','address_labels'}) or p['version'] not in (1,2):raise ValueError('Invalid public preview schema.')
     for k in ('transfer_id','challenge'):
         if not re.fullmatch('[0-9a-f]{64}',str(p[k])):raise ValueError('Invalid preview binding.')
     ipv6(p['sender_ipv6']);ipv6(p['receiver_ipv6']);descriptors(p['public_wallet'])
-    validate_details({k:p[k] for k in ('public_wallet','chain','funded_outputs')})
+    validate_details({k:p[k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels') if k in p})
     if not isinstance(p['node_tip'],dict) or set(p['node_tip'])!={'height','hash'} or type(p['node_tip']['height']) is not int or not 0<=p['node_tip']['height']<500000000 or not re.fullmatch('[0-9a-f]{64}',str(p['node_tip']['hash'])):raise ValueError('Invalid preview block reference.')
     if type(p['generated_at']) is not int or not time.time()-900<=p['generated_at']<=time.time()+120:raise ValueError('Wallet preview expired or has a future timestamp. Start a fresh request.')
     fingerprint(payload['public_key'])
@@ -64,24 +64,26 @@ def prepare(core,store,key,p):
     if not p.get('preview_challenge'):return None # Build 8 must be updated before this protocol is enabled.
     own=local_ipv6(p['peer']['ipv6'])
     if own!=p['node_ipv6']:raise ValueError('The local IPv6 route differs from the paired request. Refresh node identity before synchronisation.')
-    facts=wallet_details(core,p);tip=rpc(core,'getblockchaininfo')
+    facts=wallet_details(core,p,store);tip=rpc(core,'getblockchaininfo')
     if tip.get('initialblockdownload') or tip.get('headers',tip['blocks'])!=tip['blocks']:raise ValueError('Wait for the sending node to finish synchronising before preparing a wallet preview.')
-    preview={'version':1,'transfer_id':p['transfer_id'],'challenge':p['preview_challenge'],'sender_ipv6':own,'receiver_ipv6':ipv6(p['peer']['ipv6']),**facts,'node_tip':{'height':tip['blocks'],'hash':tip['bestblockhash']},'generated_at':int(time.time())}
+    preview={'version':2 if p.get('transfer_version')==2 else 1,'transfer_id':p['transfer_id'],'challenge':p['preview_challenge'],'sender_ipv6':own,'receiver_ipv6':ipv6(p['peer']['ipv6']),**facts,'node_tip':{'height':tip['blocks'],'hash':tip['bestblockhash']},'generated_at':int(time.time())}
     payload=sign(store,preview);verify(store,payload)
     with store.edit() as s:
         # Only an unchanged currently active request can acquire a verified local snapshot.
-        if s.get('active_transfer')!=key or key not in s['pending']:raise ValueError('Synchronisation request changed during local verification.')
-        s.setdefault('transfer_previews',{})[key]=payload
+        if key not in s['pending'] or s['pending'][key].get('withdrawn'):raise ValueError('Synchronisation request changed during local verification.')
+        s.setdefault('transfer_previews',{})[key]=payload;s.get('preview_errors',{}).pop(key,None)
     store.queue('wallet_transfer_preview',{'request_hash':key,**payload});return payload
 
 def receive(store,payload):
-    from peer_wallet import active
-    key,row=active(store)
+    candidates=[(key,row) for key,row in store.read()['pending'].items() if row['proposal']['kind']=='wallet_transfer' and row['proposal']['direction']=='receive' and row['proposal']['transfer_id']==payload.get('preview',{}).get('transfer_id')]
+    if len(candidates)!=1:raise ValueError('No unique paired receiving request.')
+    key,row=candidates[0]
     if not row or row['proposal']['direction']!='receive':raise ValueError('No paired receiving request is active.')
     p=row['proposal'];proof=verify(store,payload);v=payload['preview']
+    if v['version']!=(2 if p.get('transfer_version')==2 else 1):raise ValueError('Preview protocol differs from request.')
     if v['transfer_id']!=p['transfer_id'] or v['challenge']!=p.get('preview_challenge') or v['sender_ipv6']!=p['peer']['ipv6'] or v['receiver_ipv6']!=p.get('node_ipv6') or descriptors(v['public_wallet'])!=descriptors(p['public_wallet']):raise ValueError('Signed preview does not match the active wallet, challenge and peer addresses.')
     with store.edit() as s:
-        if s.get('active_transfer')!=key:raise ValueError('Active request changed.')
+        if key not in s['pending'] or s['pending'][key].get('withdrawn'):raise ValueError('Request was withdrawn.')
         previous=s.setdefault('transfer_previews',{}).get(key)
         if previous and previous!=payload:raise ValueError('A verified request preview cannot be replaced. Cancel and start a fresh synchronisation.')
         s['transfer_previews'][key]=payload

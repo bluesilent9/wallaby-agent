@@ -6,11 +6,11 @@ from node_client import Core
 from wallet_ops import rpc
 
 class Regtest:
-    def __init__(self):
+    def __init__(self,extra_args=()):
         self.root=tempfile.TemporaryDirectory(prefix='wallaby-regtest-');p=Path(self.root.name)
         with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
         binary=os.environ.get('WALLABY_TEST_BITCOIND','/tmp/wallaby-core31-test/bitcoin-31.0/bin/bitcoind')
-        self.log=(p/'process.log').open('w');self.process=subprocess.Popen([binary,'-regtest','-server','-listen=0','-connect=0','-dnsseed=0','-discover=0','-txindex=1','-fallbackfee=0.00002','-datadir='+str(p),'-rpcport='+str(port)],stdout=self.log,stderr=subprocess.STDOUT)
+        self.log=(p/'process.log').open('w');self.process=subprocess.Popen([binary,'-regtest','-server','-listen=0','-connect=0','-dnsseed=0','-discover=0','-txindex=1','-fallbackfee=0.00002','-datadir='+str(p),'-rpcport='+str(port)]+list(extra_args),stdout=self.log,stderr=subprocess.STDOUT)
         self.core=Core({'rpc_port':port,'cookie':str(p/'regtest/.cookie')})
         for _ in range(100):
             try:self.core.ready();break

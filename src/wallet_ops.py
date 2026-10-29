@@ -100,7 +100,7 @@ def install_vault(core,v,store,owner=None):
     if info.get('private_keys_enabled') or not info.get('descriptors'):raise ValueError('Vault monitor must be a private-key-disabled descriptor wallet.')
     # Historical imports must not claim successful balance recovery on a pruned chain.
     chain=rpc(core,'getblockchaininfo')
-    if chain.get('pruned') and v['timestamp']<rpc(core,'getblockheader',[rpc(core,'getblockhash',[chain['pruneheight']])])['time']:
+    if chain.get('pruned') and chain.get('pruneheight',0)>0 and v['timestamp']<rpc(core,'getblockheader',[rpc(core,'getblockhash',[chain['pruneheight']])])['time']:
         raise ValueError('Vault history predates available pruned blocks. Restore the required history before authorising this import.')
     original=Descriptor.from_string(v['source']['descriptor'].split('#')[0]);derived=original.derive(v['source']['index']) if original.is_wildcard else original
     annotated=v['descriptor'].split('#')[0].replace(derived.key.get_public_key().sec().hex(),str(derived.key))

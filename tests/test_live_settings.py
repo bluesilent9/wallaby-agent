@@ -47,7 +47,7 @@ class LiveSettings(unittest.TestCase):
   root=Path(self.temp.name)/'wallaby-agent';root.mkdir(exist_ok=True)
   with patch('app.retire_jellyfin'),patch('app.ctl') as ctl:
    bootstrap();self.assertIn(('restart','wallaby-agent-monitor.service'),[c.args for c in ctl.call_args_list])
-  (root/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev7'}))
+  (root/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev8'}))
   with patch('app.retire_jellyfin'),patch('app.ctl') as ctl:
    bootstrap();self.assertNotIn(('restart','wallaby-agent-monitor.service'),[c.args for c in ctl.call_args_list])
  def test_old_running_ui_is_restarted_and_new_launch_url_contains_no_secret(self):

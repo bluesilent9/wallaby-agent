@@ -6,11 +6,19 @@ from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 from node_client import Core,decode
 from wallet_ops import WalletOps
-from peer_wallet import Transfer,peer_receive,askpass,check_firewall
+from peer_wallet import peer_receive,askpass,check_firewall
+from batch_transfer import BatchTransfer as Transfer
 from approval_store import Store
 from block_clock import timezones_with_offsets
 from configuration import Config,hostname,discover_cookie,SERVICES
 from runtime import runtime_dir,read_status,write_status,apply_config,ctl,worker,monitor,retire_jellyfin
+
+LOCAL_ACTION_LOCK=threading.RLock()
+TRANSFER_LOCK=threading.RLock()
+
+def local_busy(server):
+    saved=Store().read()
+    return bool(getattr(getattr(server,'transfer',None),'sending',False) or saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'))
 
 ASSETS=Path(__file__).resolve().parent.parent/'web'
 
@@ -34,6 +42,9 @@ def wallet_ops(server):
     return server.wallet_ops
 
 def transfer(server):
+    with TRANSFER_LOCK:return _transfer(server)
+
+def _transfer(server):
     ops=wallet_ops(server)
     if not getattr(server,'transfer',None):server.transfer=Transfer(ops.core,ops.store)
     if any(server.transfer.core.config.get(k)!=ops.core.config.get(k) for k in ('cookie','rpc_port')):
@@ -71,14 +82,14 @@ class Handler(BaseHTTPRequestHandler):
             if not self.allowed() or self.headers.get('Sec-Fetch-Site')!='same-origin' or self.headers.get('X-Wallaby-UI')!='1':return self.reply(403,{'error':'Local page session access denied.'})
             return self.reply(200,{'token':self.server.token})
         if not self.allowed(self.path.startswith('/api/')):return self.reply(403,{'error':'The local Agent session needs to reconnect.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev7'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev8'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
                 if not v['cookie']:
                     cookie=discover_cookie()
                     if cookie:v['cookie']=cookie;c.save(v)
-                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development build 7','workspace':workspace(self.server)})
+                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development build 8','workspace':workspace(self.server)})
         if self.path.startswith('/api/timezones?'):
             try:return self.reply(200,timezones_with_offsets(int(parse_qs(urlsplit(self.path).query).get('year',['2026'])[0])))
             except ValueError:return self.reply(400,{'error':'Choose a valid calendar year.'})
@@ -91,6 +102,8 @@ class Handler(BaseHTTPRequestHandler):
         f=ASSETS/paths[asset_path];mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.json':'application/json; charset=utf-8'}[f.suffix]
         self.reply(200,f.read_bytes(),mime)
     def do_POST(self):
+        with LOCAL_ACTION_LOCK:self.post()
+    def post(self):
         if not self.allowed(True):return self.reply(403,{'error':'Configuration access denied.'})
         if self.headers.get('Content-Type')!='application/json':return self.reply(415,{'error':'JSON required.'})
         try:
@@ -106,20 +119,30 @@ class Handler(BaseHTTPRequestHandler):
                     if transfer(self.server).state()['id']!=body['id']:raise ValueError('Active request changed.')
                     result=check_firewall(t)
                 elif self.path=='/api/synchronisation/review' and set(body)=={'id'}:result=t.review(body['id'])
-                elif self.path=='/api/synchronisation/authorise' and set(body)=={'id','sender_fingerprint'}:result=t.authorise(body['id'],body['sender_fingerprint'])
-                elif self.path=='/api/synchronisation/cancel' and set(body)=={'id'}:t.cancel(body['id']);result={'ok':True}
-                elif self.path=='/api/synchronisation/send' and set(body)=={'id','username','password','fingerprint'}:
-                    # Runs independently so browser polling continues during remote local review.
-                    def send():
-                        try:t.send(body['id'],body['username'],body['password'],body['fingerprint'])
-                        except Exception as e:t.error=str(e) if isinstance(e,ValueError) else 'SSH transfer failed. Check receiver readiness, credentials, firewall and Core; no automatic replay.'
-                        finally:body['password']=None;t.sending=False
+                elif self.path=='/api/synchronisation/selection' and set(body)=={'id','selected','watch_only'}:
+                    from sync_queue import choose
+                    choose(t.store,body['id'],body['selected'],body['watch_only']);result={'ok':True}
+                elif self.path=='/api/synchronisation/authorise-batch' and set(body)=={'fingerprints'}:result=t.authorise_batch(body['fingerprints'])
+                elif self.path=='/api/synchronisation/end-receiving' and not body:result=t.stop_receiving()
+                elif self.path=='/api/synchronisation/recovery-plan' and not body:result=t.recovery.plan()
+                elif self.path=='/api/synchronisation/recovery-start' and set(body)=={'id'}:
+                    if getattr(t,'sending',False):raise ValueError('Finish the sending batch before recovering history.')
+                    result=t.recovery.start(body['id'])
+                elif self.path=='/api/synchronisation/send-batch' and set(body)=={'credentials'}:
+                    if not isinstance(body['credentials'],dict) or len(body['credentials'])>128:raise ValueError('Invalid receiving credentials.')
                     if getattr(t,'sending',False):raise ValueError('A transfer is already in progress.')
-                    t.sending=True;t.error='';threading.Thread(target=send,daemon=True).start();result={'ok':True}
+                    def send_batch():
+                        try:t.send_batch(body['credentials'])
+                        except Exception as error:t.error=str(error) if isinstance(error,ValueError) else 'Transfer stopped with an uncertain result. Inspect both Agents before retrying.'
+                        finally:
+                            for data in body.get('credentials',{}).values():
+                                if isinstance(data,dict):data['password']=None
+                            t.sending=False
+                    t.sending=True;t.error='';threading.Thread(target=send_batch,daemon=True).start();result={'ok':True}
                 else:raise ValueError('Invalid synchronisation action.')
                 return self.reply(200,result)
             if self.path.startswith(('/api/vault/','/api/authorise/')):
-                if Store().read().get('active_transfer'):raise ValueError('Finish or cancel wallet synchronisation first. Other Dashboard requests are locked out.')
+                if local_busy(self.server):raise ValueError('Finish the active wallet transfer or history recovery first.')
                 ops=wallet_ops(self.server);store=ops.store
                 if self.server.preview:raise ValueError('Wallet operations are disabled in preview mode.')
                 if self.path=='/api/vault/build' and set(body)=={'source','destination','fee_rate','date','timezone'}:
@@ -143,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
                     allowed={'hostname','ssh_user','ssh_port','identity_file','cookie','rpc_port'}
                     if not body or set(body)-allowed:raise ValueError('Invalid settings fields.')
                     if 'hostname' in body:body['hostname']=hostname(body['hostname']) if body['hostname'].strip() else ''
-                    if set(body)&{'cookie','rpc_port'} and Store().read().get('active_transfer'):raise ValueError('Finish synchronisation before changing Core connection settings.')
+                    if set(body)&{'cookie','rpc_port'} and local_busy(self.server):raise ValueError('Finish synchronisation before changing Core connection settings.')
                     v.update(body);self.server.wallet_ops=None
                 elif self.path=='/api/connect':
                     if body:raise ValueError('Invalid connect request.')
@@ -151,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
                     (runtime_dir()/'connect-request.json').write_text(secrets.token_hex(16))
                 elif self.path=='/api/settings':
                     if set(body)!={'ssh_user','ssh_port','identity_file','cookie','rpc_port'}:raise ValueError('Invalid fields.')
-                    if set(body)&{'cookie','rpc_port'} and Store().read().get('active_transfer'):raise ValueError('Finish synchronisation before changing Core connection settings.')
+                    if set(body)&{'cookie','rpc_port'} and local_busy(self.server):raise ValueError('Finish synchronisation before changing Core connection settings.')
                     v.update(body);self.server.wallet_ops=None
                 elif self.path=='/api/toggle':
                     if set(body)!={'service','enabled'} or body['service'] not in SERVICES or type(body['enabled']) is not bool:raise ValueError('Invalid service toggle.')
@@ -173,7 +196,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev7'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev8'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -186,7 +209,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev7':
+    if installed!='2.0.0~dev8':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -196,7 +219,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev7') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev8') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

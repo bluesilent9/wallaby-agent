@@ -30,14 +30,14 @@ class PublicProtocol(unittest.TestCase):
     with self.assertRaises(ValueError):validate_proposal(bad)
     bad=copy.deepcopy(p);bad['public_wallet']['descriptors'][0]['desc']='wpkh(xprvFAIL)'
     with self.assertRaises(ValueError):validate_proposal(bad)
- def test_frozen_batch_alphabetical_and_new_requests_rejected(self):
+ def test_queue_alphabetical_and_browsing_does_not_freeze_requests(self):
     with tempfile.TemporaryDirectory() as root:
         store=Store(root);e=Exchange(1,'test',store)
         with patch('agent_exchange.local_ipv6',return_value='2001:db8::1'),patch('agent_exchange.http_json',return_value={'version':1,'accepted':[],'proposals':[proposal(name='Zulu'),proposal(name='Alpha')]}) as post:e.once()
         self.assertEqual(active(store)[1]['proposal']['public_wallet']['wallet_name'],'Alpha');self.assertEqual(len(store.read()['pending']),2)
         self.assertIn('wallet_transfer',post.call_args.args[2]['capabilities']);self.assertEqual(post.call_args.args[2]['node_info']['ipv6'],'2001:db8::1')
-        self.assertFalse(store.receive(proposal(name='Another')))
-        self.assertFalse(store.receive({'kind':'node_identity'}))
+        self.assertTrue(store.receive(proposal(name='Another')))
+        self.assertTrue(store.receive({'kind':'node_identity'}))
  def test_changed_wallet_name_does_not_change_descriptor_identity(self):
     self.assertEqual(descriptors(public('One')),descriptors(public('Two')))
  def test_conservative_firewall_diagnostics(self):

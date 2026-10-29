@@ -34,30 +34,30 @@ class Exchange:
         if not isinstance(r,dict) or set(r)!={'version','accepted','proposals'} or r['version']!=1 or not isinstance(r['accepted'],list) or not isinstance(r['proposals'],list) or len(r['proposals'])>16:raise ValueError('Invalid Dashboard exchange response.')
         sent={i['id'] for i in items}
         if any(not isinstance(k,str) or k not in sent for k in r['accepted']):raise ValueError('Dashboard acknowledged an item that was not sent.')
-        # Validate the entire bounded batch before storing any work. The initial wallet
-        # batch is sorted once; while active, all subsequent Dashboard work is refused.
+        # List membership belongs to Dashboard. Signed previews never grant local authority.
         from vault_policy import validate_proposal
         proposals=[validate_proposal(p) for p in r['proposals']]
-        for proposal in proposals:
-            if proposal['kind']=='wallet_transfer_preview':
+        for p in proposals:
+            if p['kind']=='wallet_sync_queue':self.store.receive(p)
+        for p in proposals:
+            if p['kind']=='wallet_transfer_preview':
                 from wallet_preview import receive
-                receive(self.store,{k:proposal[k] for k in ('preview','public_key','signature')})
-        if not state.get('active_transfer'):
-            transfers=sorted((p for p in proposals if p['kind']=='wallet_transfer'),key=lambda p:(p['public_wallet']['wallet_name'].casefold(),p['transfer_id']))
-            for p in transfers or proposals:
-                if p['kind']=='node_identity':
-                    if address:self.store.queue('node_identity',{'ipv6':address})
-                elif p['kind']!='wallet_transfer_preview':self.store.receive(p)
-            active(self.store)
-        key,row=active(self.store)
-        if row and row['proposal']['direction']=='send' and row['proposal'].get('preview_challenge') and key not in self.store.read().get('transfer_previews',{}):
+                receive(self.store,{k:p[k] for k in ('preview','public_key','signature')})
+            elif p['kind']=='node_identity':
+                if address:self.store.queue('node_identity',{'ipv6':address})
+            elif p['kind']!='wallet_sync_queue':self.store.receive(p)
+        saved=self.store.read()
+        if not saved.get('sync_batch') and not saved.get('active_transfer'):
             from configuration import Config,discover_cookie
             from node_client import Core
             from wallet_preview import prepare
             c=Config().values;c['cookie']=c['cookie'] or discover_cookie()
-            try:prepare(Core(c),self.store,key,row['proposal'])
-            except Exception as error:
-                with self.store.edit() as saved:saved['preview_error']=str(error) if isinstance(error,ValueError) else 'Sender node verification failed. Check the local node and wallet.'
+            for key,row in saved['pending'].items():
+                p=row['proposal']
+                if p['kind']!='wallet_transfer' or p['direction']!='send' or not p.get('preview_challenge') or key in saved.get('transfer_previews',{}):continue
+                try:prepare(Core(c),self.store,key,p)
+                except Exception as error:
+                    with self.store.edit() as state:state.setdefault('preview_errors',{})[key]=str(error) if isinstance(error,ValueError) else 'Sender node verification failed. Check the local node and wallet.'
         with self.store.edit() as s:
             for key in r['accepted']:s['outbox'].pop(key,None)
             s['sync']='Dashboard exchange connected. Pending changes require local authorisation.';s['last_exchange']=time.time()

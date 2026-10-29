@@ -17,7 +17,20 @@ MAX_TOTAL_BYTES=64*1024*1024
 MAX_REQUESTS=256
 MAX_PENDING_PER_NODE=16
 RESULT_RETENTION=600
-PRIVATE=re.compile(r'(?i)(?:[xtyzuv]prv[1-9A-HJ-NP-Za-km-z]{20,})|(?<![A-Za-z0-9])(?:[KL][1-9A-HJ-NP-Za-km-z]{51}|5[1-9A-HJ-NP-Za-km-z]{50})(?![A-Za-z0-9])')
+_PRIVATE_PATTERN=re.compile(r'(?i)(?:[xtyzuv]prv[1-9A-HJ-NP-Za-km-z]{20,})|(?<![A-Za-z0-9])(?:[KLc][1-9A-HJ-NP-Za-km-z]{51}|[59][1-9A-HJ-NP-Za-km-z]{50})(?![A-Za-z0-9])')
+
+class PrivateMaterial:
+    def search(self,value):
+        # Base64 PSBT signatures can resemble WIF text by chance. A real exported
+        # key must also have valid Base58Check encoding and a private-key payload.
+        from vendor.embit.base58 import decode_check
+        for match in _PRIVATE_PATTERN.finditer(value):
+            try:raw=decode_check(match[0])
+            except Exception:continue
+            if len(raw)==78 and raw[45]==0:return match
+            if raw[:1] in (b'\x80',b'\xef') and (len(raw)==33 or len(raw)==34 and raw[-1]==1):return match
+        return None
+PRIVATE=PrivateMaterial()
 
 def stamp():return datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00','Z')
 

@@ -21,7 +21,7 @@ class HTTPFailure(Exception):
     def __init__(self,status):self.status=status;super().__init__('HTTP request failed (%d).'%status)
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1'):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev8'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -118,7 +118,7 @@ class NodeClient:
             # Never retry an acknowledged Core call; a lost response has unknown outcome.
             try:
                 from approval_store import Store
-                if Store().read().get('active_transfer'):result={'error':{'code':'synchronisation_busy','message':'Local wallet synchronisation is active. Dashboard requests are temporarily refused.'}}
+                if Store().read().get('active_transfer') or Store().read().get('sync_batch') or Store().read().get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):result={'error':{'code':'synchronisation_busy','message':'Local wallet synchronisation is active. Dashboard requests are temporarily refused.'}}
                 else:result=self.core.call(ident,c['method'],params,c['wallet'],timeout=max(1,float(expiry)-(time.monotonic()-received)))
             except Exception:result={'error':{'code':'local_rpc_failed','message':'Local Core request failed; execution outcome may be unknown. It was not replayed.'}}
             self.post('result',{'id':ident,**result})

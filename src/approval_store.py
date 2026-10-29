@@ -35,9 +35,13 @@ class Store:
         with self.edit() as s:return copy.deepcopy(s)
     def receive(self,proposal):
         from vault_policy import validate_proposal
-        p=validate_proposal(proposal);key=digest(p)
+        p=validate_proposal(proposal)
+        if p['kind']=='wallet_sync_queue':
+            from sync_queue import apply_snapshot
+            apply_snapshot(self,p['revision'],p['requests']);return True
+        key=digest(p)
         with self.edit() as s:
-            if s.get('active_transfer'):
+            if s.get('active_transfer') or s.get('sync_batch'):
                 return False # Freeze all new Dashboard approval work until local completion/cancellation.
             if key in s['denied'] or key in s['completed'] or key in s['pending']:return False
             if p['kind']=='vault_sync' and digest(p['vault']) in s['vaults']:return False
@@ -47,6 +51,7 @@ class Store:
     def deny(self,key):
         with self.edit() as s:
             if s.get('active_transfer')==key:raise ValueError('Cancel the active transfer on Synchronisation first.')
+            if s['pending'][key]['proposal']['kind']=='wallet_transfer':raise ValueError('Only Dashboard can remove synchronisation requests. Uncheck a wallet to leave it pending.')
             row=s['pending'].pop(key);s['denied'][key]=row
             kind=row['proposal']['kind']
             result_kind={'sign_psbt_partial':'partial_sign_result','broadcast_transaction':'broadcast_result','wallet_transfer':'wallet_transfer_result'}.get(kind)
