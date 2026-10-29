@@ -42,8 +42,9 @@ def public_vault(v):
 def validate_proposal(p):
     if not isinstance(p,dict):raise ValueError('Invalid approval proposal.')
     if p.get('kind')=='vault_sync' and set(p)=={'kind','vault'}:public_vault(p['vault'])
-    elif p.get('kind')=='sign_psbt' and set(p)=={'kind','psbt','wallet','chain'}:
-        psbt_text(p['psbt']);text(p['wallet'])
-        if p['chain'] not in NETWORK:raise ValueError('Invalid signing network.')
-    else:raise ValueError('Only public vault sync and PSBT signing proposals are accepted.')
+    elif p.get('kind')=='sign_psbt':
+        raise ValueError('Legacy immediate-broadcast signing is disabled; update Dashboard.')
+    else:
+        from build8_policy import proposal
+        return proposal(p)
     return p

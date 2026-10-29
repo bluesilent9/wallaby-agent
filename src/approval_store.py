@@ -37,6 +37,8 @@ class Store:
         from vault_policy import validate_proposal
         p=validate_proposal(proposal);key=digest(p)
         with self.edit() as s:
+            if s.get('active_transfer'):
+                return False # Freeze all new Dashboard approval work until local completion/cancellation.
             if key in s['denied'] or key in s['completed'] or key in s['pending']:return False
             if p['kind']=='vault_sync' and digest(p['vault']) in s['vaults']:return False
             if len(s['pending'])>=MAX_ITEMS:raise ValueError('Authorisation queue is full.')
@@ -44,7 +46,12 @@ class Store:
         return True
     def deny(self,key):
         with self.edit() as s:
+            if s.get('active_transfer')==key:raise ValueError('Cancel the active transfer on Synchronisation first.')
             row=s['pending'].pop(key);s['denied'][key]=row
+            kind=row['proposal']['kind']
+            result_kind={'sign_psbt_partial':'partial_sign_result','broadcast_transaction':'broadcast_result','wallet_transfer':'wallet_transfer_result'}.get(kind)
+            if result_kind:
+                item={'kind':result_kind,'payload':{'request_hash':key,'status':'denied','message':'Denied locally.'}};s['outbox'][digest(item)]=item
             if len(s['denied'])>MAX_ITEMS:raise ValueError('Denied request list is full; remove a record first.')
     def forget(self,key):
         with self.edit() as s:s['denied'].pop(key,None)

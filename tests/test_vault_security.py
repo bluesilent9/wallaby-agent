@@ -27,7 +27,7 @@ class ReadOnly(unittest.TestCase):
   mean=r['expected_blocks'];self.assertLess(1-poisson_cdf_left(k,mean),.99)
  def test_legacy_dashboard_keeps_outbox_without_downgrading_rpc_session(self):
   with tempfile.TemporaryDirectory() as root:
-   s=Store(root);s.queue('sign_result',{'request_hash':'x','txid':'0'*64});e=Exchange(1,'fake-test-token',s)
+   s=Store(root);s.queue('vault_public',{'test':'public-only'});e=Exchange(1,'fake-test-token',s)
    with patch('agent_exchange.http_json',side_effect=HTTPFailure(404)):e.once();e.once()
    self.assertTrue(e.unsupported);self.assertEqual(len(s.read()['outbox']),1)
 
@@ -55,11 +55,11 @@ class RealCoreVault(unittest.TestCase):
   self.assertEqual(rpc(self.c,'getwalletinfo',[],self.source)['unlocked_until'],0)
   with self.assertRaises(ValueError):self.ops.sign(r['id'],'regtest-password','broadcast')
   self.assertTrue(self.store.read()['outbox']);self.assertTrue(next(v for v in self.ops.list_wallets()['wallets'] if v['name']==self.dest)['active_vault'])
- def test_export_is_signed_immutable_and_never_broadcast(self):
+ def test_export_is_unsigned_immutable_and_never_broadcast(self):
   r=self.build();before=rpc(self.c,'getrawmempool');out=self.ops.sign(r['id'],'regtest-password','transaction_builder')
   self.assertTrue(out['queued']);self.assertEqual(rpc(self.c,'getrawmempool'),before)
   items=list(self.store.read()['outbox'].values());item=next(x for x in items if x['kind']=='transaction_builder_psbt')['payload']
-  self.assertTrue(item['immutable']);self.assertEqual(item['stage'],2);self.assertTrue(rpc(self.c,'finalizepsbt',[item['psbt']])['complete'])
+  self.assertTrue(item['immutable']);self.assertEqual(item['stage'],2);self.assertFalse(rpc(self.c,'finalizepsbt',[item['psbt']])['complete']);self.assertEqual(rpc(self.c,'getwalletinfo',[],self.source)['unlocked_until'],0)
  def test_changed_wallet_inputs_require_new_review(self):
   r=self.build();rpc(self.c,'sendtoaddress',[rpc(self.c,'getnewaddress',[],self.source),'0.1'],'miner');rpc(self.c,'generatetoaddress',[1,self.miner])
   with self.assertRaisesRegex(ValueError,'inputs changed'):self.ops.sign(r['id'],'regtest-password','broadcast')
@@ -87,8 +87,8 @@ class RealCoreVault(unittest.TestCase):
   recipient=rpc(self.c,'getnewaddress',[],self.source)
   response=self.c.call('test-withdraw','walletcreatefundedpsbt',{'inputs':[{'txid':utxo['txid'],'vout':utxo['vout'],'sequence':4294967294}],'outputs':[{recipient:utxo['amount']}],'locktime':height,'options':{'add_inputs':False,'includeWatching':True,'replaceable':False,'subtractFeeFromOutputs':[0],'fee_rate':'2'}},monitor)
   self.assertNotIn('error',response,response);built=response['result']
-  proposal={'kind':'sign_psbt','wallet':self.dest,'chain':'regtest','psbt':built['psbt']};self.store.receive(proposal);key=digest(proposal);review=self.ops.prepare_request(key);self.assertEqual(review['review']['fee_sats'],str(round(float(built['fee'])*100000000)))
-  rpc(self.c,'generatetoaddress',[2,self.miner]);out=self.ops.sign(key,'regtest-password','broadcast');self.assertIn(out['txid'],rpc(self.c,'getrawmempool'));self.assertNotIn(key,self.store.read()['pending'])
+  proposal={'kind':'sign_psbt_partial','request_id':'a'*64,'wallet':self.dest,'chain':'regtest','psbt':built['psbt']};self.store.receive(proposal);key=digest(proposal);review=self.ops.prepare_request(key);self.assertEqual(review['review']['fee_sats'],str(round(float(built['fee'])*100000000)))
+  rpc(self.c,'generatetoaddress',[2,self.miner]);out=self.ops.sign(key,'regtest-password','partial');self.assertTrue(out['queued']);self.assertTrue(any(i['kind']=='partial_sign_result' for i in self.store.read()['outbox'].values()));self.assertNotIn(key,self.store.read()['pending'])
  def test_forged_psbt_input_amount_and_weak_sighash_are_rejected(self):
   import base64,io,struct
   r=self.build();raw=base64.b64decode(r['psbt']);value=int(r['review']['inputs'][0]['sats']);needle=struct.pack('<Q',value)
@@ -131,7 +131,7 @@ class RealCoreVault(unittest.TestCase):
   result=self.ops.sign(later['id'],'regtest-password','broadcast');self.assertIn(result['txid'],rpc(self.c,'getrawmempool'))
 
  def test_wrong_passphrase_can_be_reviewed_again_without_replaying_signing(self):
-  r=self.build();proposal={'kind':'sign_psbt','wallet':self.source,'chain':'regtest','psbt':r['psbt']};self.store.receive(proposal);key=digest(proposal);self.ops.prepare_request(key)
-  with self.assertRaises(ValueError):self.ops.sign(key,'incorrect-password','broadcast')
+  r=self.build();proposal={'kind':'sign_psbt_partial','request_id':'a'*64,'wallet':self.source,'chain':'regtest','psbt':r['psbt']};self.store.receive(proposal);key=digest(proposal);self.ops.prepare_request(key)
+  with self.assertRaises(ValueError):self.ops.sign(key,'incorrect-password','partial')
   self.assertEqual(self.store.read()['pending'][key]['state'],'pending');self.assertEqual(rpc(self.c,'getwalletinfo',[],self.source)['unlocked_until'],0)
-  self.ops.prepare_request(key);out=self.ops.sign(key,'regtest-password','broadcast');self.assertIn(out['txid'],rpc(self.c,'getrawmempool'))
+  self.ops.prepare_request(key);out=self.ops.sign(key,'regtest-password','partial');self.assertTrue(out['queued']);self.assertTrue(any(i['kind']=='partial_sign_result' for i in self.store.read()['outbox'].values()))

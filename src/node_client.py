@@ -116,7 +116,10 @@ class NodeClient:
             ack=self.post('ack',{'id':ident})
             if ack.get('execute') is not True:return
             # Never retry an acknowledged Core call; a lost response has unknown outcome.
-            try:result=self.core.call(ident,c['method'],params,c['wallet'],timeout=max(1,float(expiry)-(time.monotonic()-received)))
+            try:
+                from approval_store import Store
+                if Store().read().get('active_transfer'):result={'error':{'code':'synchronisation_busy','message':'Local wallet synchronisation is active. Dashboard requests are temporarily refused.'}}
+                else:result=self.core.call(ident,c['method'],params,c['wallet'],timeout=max(1,float(expiry)-(time.monotonic()-received)))
             except Exception:result={'error':{'code':'local_rpc_failed','message':'Local Core request failed; execution outcome may be unknown. It was not replayed.'}}
             self.post('result',{'id':ident,**result})
         except Exception as error:self.fail(error)

@@ -147,11 +147,11 @@ class WalletOps:
             if len(self.prepared)>=16:raise ValueError('Too many active reviews. Wait ten minutes before starting another.')
             self.prepared[key]={'kind':'vault','psbt':psbt,'wallet':source,'chain':listing['chain'],'vault':v,'destination':destination,'review':review,'created':time.time(),'estimate':estimate}
             return {'id':key,'vault':v,'estimate':estimate,'review':review,'proof':proof,'psbt':psbt,'command':{'method':'walletcreatefundedpsbt','wallet':source,'params':params},'descriptor_parts':[{'text':'wsh(','help':'Native SegWit script-hash output.'},{'text':f'and_v(v:pk({pub}),','help':'A valid signature from this destination wallet’s public key is mandatory.'},{'text':f"after({v['height']})",'help':'Bitcoin consensus enforces this block-height lock before spending.'},{'text':'))#'+checksum(body),'help':'Close the policy; the suffix is its descriptor checksum.'}]}
-    def review(self,psbt,wallet,chain):
+    def review(self,psbt,wallet,chain,require_owned=True):
         psbt_text(psbt)
         if network(self.core)!=chain:raise ValueError('PSBT network does not match this node.')
-        info=rpc(self.core,'getwalletinfo',[],wallet)
-        if not info.get('private_keys_enabled'):raise ValueError('Signing requires a local private-key-enabled wallet.')
+        info=rpc(self.core,'getwalletinfo',[],wallet) if require_owned else {}
+        if require_owned and not info.get('private_keys_enabled'):raise ValueError('Signing requires a local private-key-enabled wallet.')
         decoded=rpc(self.core,'decodepsbt',[psbt]);tx=decoded['tx'];scopes=decoded.get('inputs',[])
         if not tx.get('vin') or len(tx['vin'])!=len(scopes) or len(scopes)>1000 or len(tx.get('vout',[]))>1000:raise ValueError('Invalid or oversized transaction.')
         names=rpc(self.core,'listwallets');inputs=[];outputs=[];total=0;own=False
@@ -175,7 +175,7 @@ class WalletOps:
             try:previous=rpc(self.core,'getrawtransaction',[vin['txid'],True])
             except ValueError:
                 previous=None
-                for name in [wallet,*[n for n in names if n!=wallet]]:
+                for name in ([wallet] if wallet is not None else [])+[n for n in names if n!=wallet]:
                     try:previous=rpc(self.core,'decoderawtransaction',[rpc(self.core,'gettransaction',[vin['txid'],True],name)['hex']]);break
                     except ValueError:continue
                 if previous is None:raise ValueError('The local node cannot verify an input’s full previous transaction. Load its history before signing.')
@@ -191,7 +191,7 @@ class WalletOps:
             spk=row['scriptPubKey'];address=spk.get('address','');local,change=owners(address);amount=sats(row['value'])
             outputs.append({'n':row['n'],'sats':str(amount),'address':address or 'Script '+spk['hex'],'wallets':local,'change':change,'script':spk['hex']})
         fee=total-sum(int(o['sats']) for o in outputs)
-        if not own or fee<0 or fee>MAX_SATS:raise ValueError('No locally controlled signing input, or invalid transaction fee.')
+        if (require_owned and not own) or fee<0 or fee>MAX_SATS:raise ValueError('No locally controlled signing input, or invalid transaction fee.')
         if 'fee' in decoded and sats(decoded['fee'])!=fee:raise ValueError('PSBT fee differs from the independently verified fee.')
         # The transaction bytes, not remote labels, bind all amounts, outputs, sequences and locktime.
         return {'wallet':wallet,'chain':chain,'inputs':inputs,'outputs':outputs,'fee_sats':str(fee),'locktime':tx['locktime'],'tx_hash':digest(tx),'psbt_hash':hashlib.sha256(psbt.encode()).hexdigest()}
@@ -200,8 +200,15 @@ class WalletOps:
         if row['state']!='pending':raise ValueError('This request was already attempted; reconcile its outcome before proceeding.')
         p=row['proposal']
         if p['kind']=='vault_sync':return {'kind':'vault_sync','id':key,'vault':p['vault'],'proof':verify_vault(self.core,p['vault'])}
-        review=self.review(p['psbt'],p['wallet'],p['chain']);self.prepared[key]={**p,'wallet':p['wallet'],'review':review,'created':time.time(),'kind':'sign_psbt'}
-        return {'kind':'sign_psbt','id':key,'review':review}
+        if p['kind'] not in ('sign_psbt_partial','broadcast_transaction'):raise ValueError('This request requires the Synchronisation page or an updated Dashboard.')
+        wallet=p.get('wallet');review=self.review(p['psbt'],wallet,p['chain'],require_owned=p['kind']=='sign_psbt_partial')
+        from transaction_requests import intents
+        intents(self,p,review)
+        if p['kind']=='broadcast_transaction':
+            final=rpc(self.core,'finalizepsbt',[p['psbt']])
+            if not final.get('complete') or rpc(self.core,'decoderawtransaction',[final['hex']])['txid']!=p['txid']:raise ValueError('The completed PSBT does not match its requested transaction ID.')
+        self.prepared[key]={**p,'wallet':wallet,'review':review,'created':time.time()}
+        return {'kind':p['kind'],'id':key,'review':review}
     def approve_sync(self,key):
         with self.lock:
             with self.store.edit() as s:
@@ -212,12 +219,15 @@ class WalletOps:
             with self.store.edit() as s:s['completed'][key]={'kind':'vault_sync','at':time.time()};s['pending'].pop(key,None)
             return proof
     def sign(self,key,password,action):
-        if action not in ('broadcast','transaction_builder'):raise ValueError('Invalid signing action.')
+        if action not in ('broadcast','transaction_builder','partial'):raise ValueError('Invalid signing action.')
         with self.lock:
             p=self.prepared.pop(key,None)
             if not p or time.time()-p['created']>600:raise ValueError('Review expired. Recalculate or review again before signing.')
+            if p['kind']=='sign_psbt_partial' and action!='partial':raise ValueError('Dashboard signing requests return signatures only; broadcasting requires a separate local approval.')
+            if p['kind']=='broadcast_transaction' and action!='broadcast':raise ValueError('Review and authorise broadcast locally.')
+            if p['kind']=='vault' and action not in ('broadcast','transaction_builder'):raise ValueError('Invalid local vault action.')
             if action=='transaction_builder' and p['kind']!='vault':raise ValueError('Only Vault Builder exports can go to Transaction Builder.')
-            current=self.review(p['psbt'],p['wallet'],p['chain'])
+            current=self.review(p['psbt'],p['wallet'],p['chain'],require_owned=p['kind']!='broadcast_transaction')
             for i in current['inputs']:
                 if rpc(self.core,'gettxout',[i['txid'],i['vout'],True]) is None:raise ValueError('A reviewed input is no longer unspent. Review a fresh transaction.')
             if current!=p['review']:raise ValueError('Transaction or local wallet interpretation changed. Review again.')
@@ -227,10 +237,34 @@ class WalletOps:
                 if {(u['txid'],u['vout']) for u in actual}!={(u['txid'],u['vout']) for u in current['inputs']}:raise ValueError('Wallet inputs changed. Recalculate the full-wallet sweep.')
                 install_vault(self.core,p['vault'],self.store,p['destination'])
                 self.store.queue('vault_public',p['vault'])
-            else:
-                with self.store.edit() as s:
-                    if s['pending'][key]['state']!='pending':raise ValueError('Request was already attempted.')
-                    s['pending'][key]['state']='attempted'
+            from transaction_requests import unsigned,intents
+            if p['kind'] in ('sign_psbt_partial','broadcast_transaction'):intents(self,p,current)
+            if action=='transaction_builder':
+                psbt=p['psbt']
+                for record in self.store.read()['vaults'].values():
+                    if record['public']['address'] in [i['address'] for i in current['inputs']]:psbt=rpc(self.core,'walletprocesspsbt',{'psbt':psbt,'sign':False,'bip32derivs':True,'finalize':False},record['monitor_wallet'])['psbt']
+                psbt=rpc(self.core,'walletprocesspsbt',{'psbt':psbt,'sign':False,'bip32derivs':True,'finalize':False},p['wallet'])['psbt']
+                unsigned(self.core,psbt)
+                with self.store.edit() as state:state.setdefault('vault_proposals',{})[digest(current['inputs'])]={'psbt':psbt,'vault':p['vault']}
+                self.store.queue('transaction_builder_psbt',{'version':1,'chain':p['chain'],'psbt':psbt,'transaction_hash':current['tx_hash'],'vault':p['vault'],'review':current,'stage':2,'immutable':True})
+                return {'queued':True,'message':'Unsigned vault proposal queued for Transaction Builder Stage 2. Payments can be composed before local signing.'}
+            if p['kind']=='sign_psbt_partial' and action!='partial':raise ValueError('Dashboard signing requests return signatures only; broadcasting requires a separate local approval.')
+            if p['kind']=='broadcast_transaction':
+                with self.store.edit() as state:
+                    if state['pending'][key]['state']!='pending':raise ValueError('Request was already attempted.')
+                    state['pending'][key]['state']='attempted'
+                if action!='broadcast':raise ValueError('Review and authorise broadcast locally.')
+                final=rpc(self.core,'finalizepsbt',[p['psbt']])
+                if not final.get('complete') or rpc(self.core,'decoderawtransaction',[final['hex']])['txid']!=p['txid']:raise ValueError('The completed transaction ID changed.')
+                if not rpc(self.core,'testmempoolaccept',[[final['hex']]])[0].get('allowed'):raise ValueError('Core rejected the transaction; nothing was broadcast.')
+                txid=rpc(self.core,'sendrawtransaction',[final['hex']]);result={'request_hash':key,'status':'broadcast','txid':txid}
+                self.store.queue('broadcast_result',result)
+                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time()};state['pending'].pop(key,None)
+                return {'txid':txid,'message':'Locally authorised transaction broadcast.'}
+            if p['kind']=='sign_psbt_partial':
+                with self.store.edit() as state:
+                    if state['pending'][key]['state']!='pending':raise ValueError('Request was already attempted.')
+                    state['pending'][key]['state']='attempted'
             info={};sign_attempted=False
             try:
                 info=rpc(self.core,'getwalletinfo',[],p['wallet'])
@@ -242,7 +276,7 @@ class WalletOps:
                 sign_attempted=True
                 signed=rpc(self.core,'walletprocesspsbt',{'psbt':signing_psbt,'sign':True,'bip32derivs':True,'finalize':False},p['wallet'])
             except Exception:
-                if p['kind']=='sign_psbt' and not sign_attempted:
+                if p['kind']=='sign_psbt_partial' and not sign_attempted:
                     with self.store.edit() as s:s['pending'][key]['state']='pending'
                 raise
             finally:
@@ -252,21 +286,18 @@ class WalletOps:
                 except Exception:raise ValueError('Core wallet could not be relocked. Lock it in Core immediately; no transaction was broadcast.') from None
             signed_psbt=psbt_text(signed['psbt']);after=self.review(signed_psbt,p['wallet'],p['chain'])
             if after['tx_hash']!=current['tx_hash']:raise ValueError('Core changed the approved transaction; it was not broadcast.')
+            if p['kind']=='sign_psbt_partial':
+                self.store.queue('partial_sign_result',{'request_hash':key,'status':'signed','psbt':signed_psbt})
+                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time()};state['pending'].pop(key,None)
+                return {'queued':True,'message':'Approved signatures returned to Dashboard. No transaction was broadcast.'}
             final=rpc(self.core,'finalizepsbt',[signed_psbt])
             if not final.get('complete'):raise ValueError('This wallet did not provide all required signatures. Nothing was broadcast.')
             if p['kind']=='vault':
                 with self.store.edit() as s:s['vaults'][digest(p['vault'])]['funding_state']='signed'
-            if action=='transaction_builder':
-                export={'version':1,'chain':p['chain'],'psbt':signed_psbt,'transaction_hash':after['tx_hash'],'vault':p['vault'],'review':after,'stage':2,'immutable':True}
-                self.store.queue('transaction_builder_psbt',export);result={'queued':True,'message':'Signed PSBT queued for Dashboard Transaction Builder Stage 2. It has not been broadcast.'}
-            else:
-                accept=rpc(self.core,'testmempoolaccept',[[final['hex']]])[0]
-                if not accept.get('allowed'):raise ValueError('Core mempool policy rejected the signed transaction. Nothing was broadcast.')
-                txid=rpc(self.core,'sendrawtransaction',[final['hex']])
-                if p['kind']=='vault':
-                    with self.store.edit() as s:s['vaults'][digest(p['vault'])]['funding_state']='broadcast'
-                result={'txid':txid,'message':'Signed transaction broadcast by the local node.'}
-            if p['kind']=='sign_psbt':
-                with self.store.edit() as s:s['completed'][key]={'kind':'sign_psbt','result':result,'at':time.time()};s['pending'].pop(key,None)
-                self.store.queue('sign_result',{'request_hash':key,**result})
+            accept=rpc(self.core,'testmempoolaccept',[[final['hex']]])[0]
+            if not accept.get('allowed'):raise ValueError('Core mempool policy rejected the signed transaction. Nothing was broadcast.')
+            txid=rpc(self.core,'sendrawtransaction',[final['hex']])
+            if p['kind']=='vault':
+                with self.store.edit() as state:state['vaults'][digest(p['vault'])]['funding_state']='broadcast'
+            result={'txid':txid,'message':'Signed transaction broadcast by the local node.'}
             return result
