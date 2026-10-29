@@ -1,8 +1,8 @@
-# Required Dashboard update: signed initial wallet preview
+# Signed initial wallet preview — implemented in Dashboard Build 9
 
-**For the Wallaby Dashboard chat. Agent V2 Development Build 7 implements this contract. Dashboard V1 Build 8 needs this addition before wallet-file synchronisation is enabled.** Its existing unsigned vault import, partial signing and broadcast contracts already work with this Agent. Do not weaken the direct public/read-only RPC policy or add a private wallet upload endpoint.
+**Agent V2 Build 7 and Dashboard V1 Build 9 implement this contract.** Dashboard verifies and relays the signed snapshot, freezes both requests and serialises paired transfers. Unsigned vault composition, partial signing and separate broadcast remain supported. The requirements below document the implemented protocol. Direct RPC remains public/read-only; no private wallet upload endpoint is added.
 
-## What needs changing
+## Implemented Dashboard requirements
 
 The sending Agent must verify descriptors, current funded outputs, amounts, receipt times and receipt block heights using its own Core connection **during the initial request**. Both users must review the same initial snapshot before SSH transfer authorisation. A Dashboard-rendered balance is insufficient. Dashboard must courier the signed public snapshot below. Agent identity fingerprints must be compared directly between the computers; neither a fingerprint delivered by Dashboard nor a hash displayed only on Dashboard is trusted.
 
@@ -43,7 +43,7 @@ Both Agents display SHA256 of the canonical `preview`, and the sender displays i
 
 ## Compatibility and private transfer
 
-Build 7 recognises old Build 8 paired requests but disables Authorise/Send with an update message because they lack preview negotiation. It does **not** send an unsupported new outbox item to Build 8. Do not claim that initial wallet sync works against an unchanged Build 8 server. Add both negotiation fields only after this new relay path is implemented; no new capability string is needed (Build 8 rejects unknown capabilities).
+Use Dashboard Build 9 for the implemented relay. Agent Build 7 still recognises older Build 8 paired requests but disables Authorise/Send because they lack preview negotiation. It does **not** send an unsupported new outbox item to Build 8. Do not claim that initial wallet sync works against an unchanged Build 8 server. Add both negotiation fields only after this new relay path is implemented; no new capability string is needed (Build 8 rejects unknown capabilities).
 
 After initial review, receiving Authorise verifies the sender identity fingerprint and opens a temporary owner-only Agent receiving socket for 15 minutes. System OpenSSH on IPv6 port 22 authenticates the receiving machine username/password. Sender separately pins the receiver's **system SSH host** fingerprint from the receiving screen before sending credentials. These are two distinct identities; label them clearly. Wallet file travels directly via IPv6 SSH, never Dashboard. The live peer manifest must match the already approved initial snapshot; the receiver verifies the live manifest before file transmission. Private-key wallets must already be encrypted and locked in Core. Core creates the backup; receiver restores under a new generated name, verifies exact public descriptors/encryption/scanning and reported funded outputs, and sends direct loaded confirmation. Both queue public completion, display Success for about five seconds, close the direct connection and return to Services. No automatic mempool broadcast or signing occurs during sync.
 

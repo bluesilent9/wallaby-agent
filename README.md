@@ -10,7 +10,7 @@ Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable relea
 
 Build 7 keeps Build 6’s live settings and authenticated shared IPv6 SSH connection. It adds unsigned vault composition, separately approved signature-return/broadcast operations and a direct wallet synchronisation workflow with signed initial previews.
 
-**Dashboard V1 Build 8 already supports the new unsigned vault/partial-signing/broadcast contracts. Wallet-file synchronisation requires the additional signed-preview relay documented in [DASHBOARD_PREVIEW_UPDATE.md](DASHBOARD_PREVIEW_UPDATE.md). Agent deliberately disables receipt/sending for old requests that lack it.** Dashboard code is not changed by this build. Passing the integration document to the Dashboard chat is the next step; this build must not be represented as completed live two-laptop synchronisation against an unchanged Build 8 server.
+**Dashboard V1 Build 9 now implements the signed initial preview relay and paired transfer scheduling required by Agent Build 7, alongside unsigned vault composition, partial signing and separate broadcast approval.** Use [Dashboard Build 9](https://github.com/bluesilent9/wallaby-dashboard/tree/Development). Actual Agent sender/receiver preview interoperability is tested; physical two-laptop SSH/firewall/user-approval checks remain live deployment work. Build 8 still lacks the signed-preview extension.
 
 ## Build 6 and Build 7 downloads and source
 
@@ -23,7 +23,7 @@ Build 7 keeps Build 6’s live settings and authenticated shared IPv6 SSH connec
 
 Verify installers against [SHA256SUMS.txt](https://github.com/bluesilent9/wallaby-agent/blob/Development/dist/SHA256SUMS.txt). Both installers are in [Development/dist](https://github.com/bluesilent9/wallaby-agent/tree/Development/dist). The repository root contains the current Build 7 source; Build 6's matching source is retained in the linked Git history.
 
-Build 6 introduced live settings and one authenticated IPv6 SSH connection shared by the services, replacing ping checks. Build 7 adds unsigned vault proposals, separately authorised signing/broadcast and verified wallet-sync previews. **Build 7 wallet-file synchronisation still requires the Dashboard changes in [DASHBOARD_PREVIEW_UPDATE.md](DASHBOARD_PREVIEW_UPDATE.md).** See [validation and remaining live tests](VALIDATION.md).
+Build 6 introduced live settings and one authenticated IPv6 SSH connection shared by the services, replacing ping checks. Build 7 adds unsigned vault proposals, separately authorised signing/broadcast and verified wallet-sync previews. **Build 7 wallet-file synchronisation is supported by Dashboard V1 Build 9; the shared contract is in [DASHBOARD_PREVIEW_UPDATE.md](DASHBOARD_PREVIEW_UPDATE.md).** See [validation and remaining live tests](VALIDATION.md).
 
 ## Services and local settings
 
