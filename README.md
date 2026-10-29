@@ -12,6 +12,19 @@ Build 7 keeps Build 6’s live settings and authenticated shared IPv6 SSH connec
 
 **Dashboard V1 Build 8 already supports the new unsigned vault/partial-signing/broadcast contracts. Wallet-file synchronisation requires the additional signed-preview relay documented in [DASHBOARD_PREVIEW_UPDATE.md](DASHBOARD_PREVIEW_UPDATE.md). Agent deliberately disables receipt/sending for old requests that lack it.** Dashboard code is not changed by this build. Passing the integration document to the Dashboard chat is the next step; this build must not be represented as completed live two-laptop synchronisation against an unchanged Build 8 server.
 
+## Build 6 and Build 7 downloads and source
+
+**These builds are published on the [Development branch](https://github.com/bluesilent9/wallaby-agent/tree/Development). GitHub opens Stable by default; select Development to see the current source and installers.** Neither build is a Stable release.
+
+| Build | Ubuntu 26.04 LTS amd64 installer | Matching source |
+| --- | --- | --- |
+| **V2 Development Build 7 — latest** | [Download Build 7 DEB](https://github.com/bluesilent9/wallaby-agent/raw/refs/heads/Development/dist/wallaby-agent_2.0.0~dev7_amd64.deb) | [Browse Build 7 source](https://github.com/bluesilent9/wallaby-agent/tree/8731a90f4adc24f0ac0345b1ab7f70aed5ffdee0) · [Download source ZIP](https://github.com/bluesilent9/wallaby-agent/archive/8731a90f4adc24f0ac0345b1ab7f70aed5ffdee0.zip) |
+| V2 Development Build 6 | [Download Build 6 DEB](https://github.com/bluesilent9/wallaby-agent/raw/refs/heads/Development/dist/wallaby-agent_2.0.0~dev6_amd64.deb) | [Browse Build 6 source](https://github.com/bluesilent9/wallaby-agent/tree/b2b44e7983940e7a758969e4244df5d2e6f4c6dc) · [Download source ZIP](https://github.com/bluesilent9/wallaby-agent/archive/b2b44e7983940e7a758969e4244df5d2e6f4c6dc.zip) |
+
+Verify installers against [SHA256SUMS.txt](https://github.com/bluesilent9/wallaby-agent/blob/Development/dist/SHA256SUMS.txt). Both installers are in [Development/dist](https://github.com/bluesilent9/wallaby-agent/tree/Development/dist). The repository root contains the current Build 7 source; Build 6's matching source is retained in the linked Git history.
+
+Build 6 introduced live settings and one authenticated IPv6 SSH connection shared by the services, replacing ping checks. Build 7 adds unsigned vault proposals, separately authorised signing/broadcast and verified wallet-sync previews. **Build 7 wallet-file synchronisation still requires the Dashboard changes in [DASHBOARD_PREVIEW_UPDATE.md](DASHBOARD_PREVIEW_UPDATE.md).** See [validation and remaining live tests](VALIDATION.md).
+
 ## Services and local settings
 
 The black sidebar has **Services**, **Vault Builder**, **Synchronisation** and **Authorise**. Services remains available. Vault Builder needs a local Core connection; Synchronisation is enabled only for an active paired request or its brief success screen. Authorise holds local transaction/public-vault approvals and persistent deny records. New requests switch the current Agent page or open its local page in the default browser if no Agent page is active.
