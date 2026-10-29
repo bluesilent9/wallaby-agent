@@ -8,7 +8,7 @@ Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable relea
 
 [Download Build 8 DEB](dist/wallaby-agent_2.0.0~dev8_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Dashboard changes to pass on](DASHBOARD_BUILD8_UPDATE.md)
 
-Build 8 adds a locally selectable multi-wallet synchronisation list, genuine public-only transfers (including labelled fixed-address Extinct wallets), vault monitoring records, and locally authorised history recovery. **Dashboard code is unchanged.** Dashboard V1 Build 9 supports the older Build 7 single-wallet preview contract; the new queue, version-2 previews and recovery result states need the changes documented in [DASHBOARD_BUILD8_UPDATE.md](DASHBOARD_BUILD8_UPDATE.md).
+Build 8 adds a locally selectable multi-wallet synchronisation list, genuine public-only transfers (including labelled fixed-address Extinct wallets), vault monitoring records, and locally authorised history recovery. **Dashboard V1 Build 10 now implements the companion complete queues, version-2 signed metadata previews, labelled historical groups and recovery result states.** Use [Dashboard Build 10](https://github.com/bluesilent9/wallaby-dashboard/tree/Development); older synchronization paths have been removed there. The protocol is documented in [DASHBOARD_BUILD8_UPDATE.md](DASHBOARD_BUILD8_UPDATE.md). Dashboard's new wallet-retirement proposal requires a future Agent capability and is not executed by this build.
 
 ## Development downloads
 

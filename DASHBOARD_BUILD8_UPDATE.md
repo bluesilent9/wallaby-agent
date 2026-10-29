@@ -1,6 +1,6 @@
 # Dashboard handoff for Agent V2 Development Build 8
 
-This document is for the Dashboard chat. **No Dashboard source is changed here.** Dashboard V1 Build 9 implements Agent Build 7's single-wallet signed-preview relay. Keep that older contract for older Agents. The following additions enable Build 8's multiple requests, watch-only/address-label transfers and recovery status.
+**Implemented by Dashboard V1 Build 10.** Its current Agent-only synchronization path uses the multiple-request queue, version-2 signed metadata previews and recovery states below. Older synchronization compatibility was intentionally removed at the user's request. Agent application code is unchanged by this documentation update.
 
 ## Feature detection and compatibility
 
