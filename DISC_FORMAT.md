@@ -11,3 +11,9 @@ This supplies complete-copy redundancy and integrity detection, alongside the me
 The drive is asked for 1x but may select its lowest supported media speed. Blu-ray 1x is 36 Mbit/s (4.5 MB/s), so a nominal 25 GB takes about 92.6 minutes of writing; lead-in/finalisation and full read-back are additional. DVD 1x is approximately 1.385 MB/s. Capacity is queried from the drive, not hardcoded as 25 GB. [Manufacturer optical-media brochure](https://docs.rs-online.com/a827/0900766b812db220.pdf).
 
 No physical optical burn has been performed during development validation. Inspect this format and protection implementation before relying on archival recovery.
+
+## Build 12: separate discs and speed selection
+
+Choose 1–99 separate physical discs, default **1**, for each authorised physical role. Each disc retains the capacity-filling repeated-copy format above. The default **Slowest supported** requests xorriso minimum speed (`speed=-1`); it does not assume that 1× is supported. A read-only media query supplies optional numeric choices, which are revalidated before writing. The hardware controls the actual speed. Nominal 25 GB / 4.5 MB per second is about 93 minutes at 1×, excluding finalisation/read-back; minimum supported speed can be faster.
+
+One encrypted package and small base ISO remain in protected RAM for the set. Every new disc requires explicit fresh-blank confirmation, and the complete written track is verified before advancing. Options are fixed once the set starts. No disc is automatically retried. A write/read-back failure is uncertain and requires a fresh blank disc and deliberate confirmation. If all discs verify but completion acknowledgement fails, reconcile completion; do not reburn automatically. Existing completion proof is sent only after the selected count verifies. RAM staging is removed after successful set completion.

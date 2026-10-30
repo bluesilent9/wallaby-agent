@@ -59,8 +59,12 @@ class RealCoreBuild9(unittest.TestCase):
         for session in setup.sessions.values():
             if session.get('core'):session['core'].close()
     self.addCleanup(cleanup)
-    with patch('wallet_setup.secret_dialog',return_value='fixture-only-Core-passphrase'):
-        setup.approve_proposal(key,{r['id']:own['fingerprint'] for r in p['cosigners']})
+    with patch('wallet_setup.secret_dialog',return_value='fixture-only-Core-passphrase') as prompts:
+        with self.assertRaises(ValueError):setup.approve_proposal(key,{own['fingerprint']:'SHA256:wrong'})
+        self.assertEqual(prompts.call_count,0)
+        setup.approve_proposal(key,{own['fingerprint']:own['fingerprint']})
+    self.assertEqual(prompts.call_count,3)
+    for call in prompts.call_args_list:self.assertIn('Create encrypted Bitcoin Core signing wallet key_',call.args[0])
     session=setup.sessions[digest(p)];contributions=session['contributions'];descs=policy(p,[e['message'] for e in contributions]);self.assertEqual(len(set(e['message']['receive_key'] for e in contributions)),3)
     complete={'kind':'wallet_setup_policy','version':1,'proposal':p,'contributions':contributions,'receive_descriptor':descs[0],'change_descriptor':descs[1]};self.store.receive(complete);key=digest(complete);review=setup.review(key);self.assertEqual(len(review['setup']['samples']),6)
     changed=copy.deepcopy(complete);changed['receive_descriptor']=descs[1];self.store.receive(changed)
@@ -84,7 +88,7 @@ class RealCoreBuild9(unittest.TestCase):
     # persisted public policies and encrypted account wallets establish ownership.
     with self.store.edit() as saved:saved['approved_wallets']={};saved.pop('setup_active',None)
     for i,wallet in enumerate(record['signing_wallets'].values()):
-        req={'kind':'sign_psbt_partial','request_id':str(i+1)*64,'chain':'regtest','wallet':wallet,'psbt':psbt};self.store.receive(req);k=digest(req);ops.prepare_request(k);ops.sign(k,'fixture-only-Core-passphrase','partial');psbt=[x['payload']['psbt'] for x in self.store.read()['outbox'].values() if x['kind']=='partial_sign_result'][-1];self.assertEqual(len(rpc(self.core,'decodepsbt',[psbt])['inputs'][0].get('partial_signatures',{})),i+1)
+        req={'kind':'sign_psbt_partial','request_id':str(i+1)*64,'chain':'regtest','wallet':wallet,'psbt':psbt};self.store.receive(req);k=digest(req);ops.prepare_request(k);ops.sign(k,'fixture-only-Core-passphrase','partial',fee_ack=True);psbt=[x['payload']['psbt'] for x in self.store.read()['outbox'].values() if x['kind']=='partial_sign_result'][-1];self.assertEqual(len(rpc(self.core,'decodepsbt',[psbt])['inputs'][0].get('partial_signatures',{})),i+1)
     final=rpc(self.core,'finalizepsbt',[psbt]);self.assertTrue(final['complete']);self.assertTrue(rpc(self.core,'testmempoolaccept',[[final['hex']]])[0]['allowed']);self.assertFalse(rpc(self.core,'getrawmempool'))
     # Dashboard request validation never allows changing a mandatory height path.
     wrong=rpc(self.core,'createpsbt',[[{'txid':coin['txid'],'vout':coin['vout'],'sequence':4294967295}],{dest:'1.9999'},0]);req={'kind':'sign_psbt_partial','request_id':'f'*64,'chain':'regtest','wallet':next(iter(record['signing_wallets'].values())),'psbt':wrong};self.store.receive(req)

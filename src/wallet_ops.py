@@ -12,7 +12,6 @@ from vendor.embit import script
 from vendor.embit.networks import NETWORKS
 from approval_store import Store,digest
 from vault_policy import public_vault,psbt_text
-from block_clock import calculate
 
 MAX_SATS=21000000*100000000
 
@@ -20,6 +19,14 @@ def sats(value):
     amount=Decimal(str(value))*100000000
     if not amount.is_finite() or amount!=amount.to_integral_value() or not 0<=amount<=MAX_SATS:raise ValueError('Invalid Bitcoin amount.')
     return int(amount)
+
+def assess_fee(inputs,outputs,fee,vsize):
+    if type(vsize) is not int or vsize<=0:raise ValueError('Core did not provide a usable transaction size.')
+    owners={name for row in inputs for name in row['wallets']}
+    payments=sum(int(row['sats']) for row in outputs if not (row['change'] and owners.intersection(row['wallets'])))
+    basis=payments or sum(int(row['sats']) for row in outputs)
+    share=fee>0 and (basis==0 or fee*10>=basis);rate=fee>=100*vsize
+    return {'requires_ack':share or rate,'high_share':share,'high_rate':rate,'basis_sats':str(basis),'basis':'locally identified non-change outputs' if payments else 'all returned output value (no non-change payment identified)','unsigned_vsize':vsize,'rate_upper_bound':format(Decimal(fee)/vsize,'.2f'),'notice':'The rate uses the unsigned transaction size as a conservative upper bound; signatures may lower the actual rate. Change is excluded only when Core marks it as change for a locally identified input owner.'}
 
 def rpc(core,method,params=None,wallet=None,timeout=30):
     r=core.call('local-'+uuid.uuid4().hex,method,params or [],wallet,timeout=timeout)
@@ -31,50 +38,6 @@ def rpc(core,method,params=None,wallet=None,timeout=30):
 def network(core):return rpc(core,'getblockchaininfo')['chain']
 
 def watch_name(v):return 'Wallaby Vault '+digest(v)[:16]
-
-def source_keys(core,wallet):
-    rows=rpc(core,'listdescriptors',{'private':False},wallet)['descriptors'];result=[]
-    for row in sorted(rows,key=lambda r:not r.get('active',False)):
-        if row.get('internal'):continue
-        try:
-            d=Descriptor.from_string(row['desc'].split('#')[0]);index=row.get('next_index',0) if d.is_wildcard else 0
-            derived=d.derive(index) if d.is_wildcard else d
-            if len(d.keys)!=1 or any(k.is_private for k in d.keys):continue
-            pub=derived.key.get_public_key().sec().hex()
-            if len(pub)!=66:continue
-            result.append((row,index,pub))
-        except Exception:continue
-    return result
-
-def wallet_funds(core,name,store):
-    """Include this key wallet's public vault monitors without counting an outpoint twice."""
-    info=rpc(core,'getwalletinfo',[],name)
-    descs=rpc(core,'listdescriptors',{'private':False},name).get('descriptors',[]) if info.get('descriptors') else []
-    bodies={r['desc'] for r in descs};loaded=rpc(core,'listwallets');parts=[(name,None)]
-    if info.get('private_keys_enabled'):
-        for record in store.read()['vaults'].values():
-            if record['public']['source']['descriptor'] in bodies and record['monitor_wallet'] in loaded:
-                parts.append((record['monitor_wallet'],record))
-    coins={};balance=0;locked=False;active=False;height=rpc(core,'getblockcount');policies=[]
-    for wallet,record in parts:
-        values=rpc(core,'getbalances',[],wallet);section=values.get('mine',{})
-        balance+=sum(sats(section.get(k,0)) for k in ('trusted','untrusted_pending','immature'))
-        locked=locked or bool(rpc(core,'listlockunspent',[],wallet))
-        part_coins=rpc(core,'listunspent',[0,9999999,[],True],wallet)
-        for u in part_coins:
-            item=copy.deepcopy(u);item['vault_monitor']=bool(record);coins[(u['txid'],u['vout'])]=item
-        if record:
-            if sum(sats(section.get(k,0)) for k in ('trusted','untrusted_pending','immature'))>0 and record['public']['height']>height:active=True
-            if part_coins:policies.append(record['public']['descriptor'])
-    return {'balance':balance,'coins':list(coins.values()),'locked':locked,'active':active,'policies':policies}
-
-def wallets(core,store):
-    chain=rpc(core,'getblockchaininfo');result=[]
-    for name in rpc(core,'listwallets'):
-        info=rpc(core,'getwalletinfo',[],name);funds=wallet_funds(core,name,store)
-        keys=source_keys(core,name) if info.get('descriptors') else []
-        result.append({'name':name,'private_keys_enabled':bool(info.get('private_keys_enabled')),'balance_sats':str(funds['balance']),'active_vault':funds['active'],'source':bool(info.get('private_keys_enabled')) and funds['balance']>0 and not funds['active'],'destination':bool(keys)})
-    return {'connected':True,'chain':chain['chain'],'height':chain['blocks'],'wallets':result}
 
 def verify_vault(core,v):
     public_vault(v)
@@ -115,38 +78,6 @@ def install_vault(core,v,store,owner=None):
 class WalletOps:
     def __init__(self,core,store=None):
         self.core=core;self.store=store or Store();self.lock=threading.Lock();self.prepared={}
-    def list_wallets(self):return wallets(self.core,self.store)
-    def build(self,source,destination,fee_rate,day,zone):
-        with self.lock:
-            chain=rpc(self.core,'getblockchaininfo')
-            if chain.get('initialblockdownload') or chain.get('headers',chain['blocks'])>chain['blocks']:raise ValueError('Wait for the local node to finish synchronising before calculating a vault.')
-            listing=self.list_wallets();by={w['name']:w for w in listing['wallets']}
-            if not by.get(source,{}).get('source'):raise ValueError('Choose a funded private-key wallet with no active vault.')
-            if not by.get(destination,{}).get('destination'):raise ValueError('Choose a wallet containing a derivable public spending key, not an address-only watch wallet.')
-            rate=Decimal(str(fee_rate))
-            if not rate.is_finite() or not Decimal('0')<rate<=Decimal('10000') or rate.as_tuple().exponent < -3:raise ValueError('Enter a fee rate above zero and at most 10,000 sats/vB, with up to three decimals.')
-            estimate=calculate(listing['height'],day,zone);row,index,pub=source_keys(self.core,destination)[0]
-            body=f"wsh(and_v(v:pk({pub}),after({estimate['height']})))";desc=body+'#'+checksum(body)
-            address=rpc(self.core,'deriveaddresses',[desc])[0]
-            v={'version':1,'chain':listing['chain'],'descriptor':desc,'address':address,'height':estimate['height'],'source':{'descriptor':row['desc'],'index':index},'timestamp':int(time.time())-7200}
-            public_vault(v);proof=verify_vault(self.core,v)
-            if destination not in proof['local_key_wallets']:raise ValueError('Core public descriptor does not bind this key to the selected destination wallet.')
-            # Explicit every-input selection; fail instead of silently leaving coins behind.
-            funds=wallet_funds(self.core,source,self.store);unspent=funds['coins'];total_balance=funds['balance']
-            if funds['locked'] or not unspent or any((not u.get('spendable') and not (u['vault_monitor'] and u.get('solvable'))) or not u.get('safe',True) for u in unspent) or sum(sats(u['amount']) for u in unspent)!=total_balance:
-                raise ValueError('The whole wallet cannot currently be swept: locked, immature, unsafe, unavailable or unsignable funds exist. Resolve these before building.')
-            locktime=max([0,*[int(h) for desc in funds['policies'] for h in re.findall(r'after\(([0-9]+)\)',desc)]])
-            inputs=[{'txid':u['txid'],'vout':u['vout'],'sequence':4294967294} for u in unspent]
-            options={'add_inputs':False,'subtractFeeFromOutputs':[0],'fee_rate':str(rate),'lockUnspents':False,'replaceable':False}
-            if funds['policies']:options['solving_data']={'descriptors':funds['policies']}
-            params={'inputs':inputs,'outputs':[{address:format(Decimal(total_balance)/100000000,'.8f')}],'locktime':locktime,'options':options,'bip32derivs':True}
-            built=rpc(self.core,'walletcreatefundedpsbt',params,source);psbt=psbt_text(built['psbt']);proof=install_vault(self.core,v,self.store,destination);review=self.review(psbt,source,listing['chain'])
-            if { (x['txid'],x['vout']) for x in review['inputs']}!={(u['txid'],u['vout']) for u in unspent}:raise ValueError('Core did not include every wallet input.')
-            if len(review['outputs'])!=1 or review['outputs'][0]['address']!=address:raise ValueError('Core added an unexpected destination or change output.')
-            key=uuid.uuid4().hex;self.prepared={k:p for k,p in self.prepared.items() if time.time()-p['created']<600}
-            if len(self.prepared)>=16:raise ValueError('Too many active reviews. Wait ten minutes before starting another.')
-            self.prepared[key]={'kind':'vault','psbt':psbt,'wallet':source,'chain':listing['chain'],'vault':v,'destination':destination,'review':review,'created':time.time(),'estimate':estimate}
-            return {'id':key,'vault':v,'estimate':estimate,'review':review,'proof':proof,'psbt':psbt,'command':{'method':'walletcreatefundedpsbt','wallet':source,'params':params},'descriptor_parts':[{'text':'wsh(','help':'Native SegWit script-hash output.'},{'text':f'and_v(v:pk({pub}),','help':'A valid signature from this destination wallet’s public key is mandatory.'},{'text':f"after({v['height']})",'help':'Bitcoin consensus enforces this block-height lock before spending.'},{'text':'))#'+checksum(body),'help':'Close the policy; the suffix is its descriptor checksum.'}]}
     def review(self,psbt,wallet,chain,require_owned=True):
         psbt_text(psbt)
         if network(self.core)!=chain:raise ValueError('PSBT network does not match this node.')
@@ -204,7 +135,8 @@ class WalletOps:
         if (require_owned and not own) or fee<0 or fee>MAX_SATS:raise ValueError('No locally controlled signing input, or invalid transaction fee.')
         if 'fee' in decoded and sats(decoded['fee'])!=fee:raise ValueError('PSBT fee differs from the independently verified fee.')
         # The transaction bytes, not remote labels, bind all amounts, outputs, sequences and locktime.
-        return {'wallet':wallet,'chain':chain,'inputs':inputs,'outputs':outputs,'fee_sats':str(fee),'locktime':tx['locktime'],'tx_hash':digest(tx),'psbt_hash':hashlib.sha256(psbt.encode()).hexdigest()}
+        fee_review=assess_fee(inputs,outputs,fee,tx.get('vsize'))
+        return {'fee_review':fee_review,'wallet':wallet,'chain':chain,'inputs':inputs,'outputs':outputs,'fee_sats':str(fee),'locktime':tx['locktime'],'tx_hash':digest(tx),'psbt_hash':hashlib.sha256(psbt.encode()).hexdigest()}
     def prepare_request(self,key):
         row=self.store.read()['pending'][key]
         if row['state']!='pending':raise ValueError('This request was already attempted; reconcile its outcome before proceeding.')
@@ -228,37 +160,23 @@ class WalletOps:
             proof=install_vault(self.core,v,self.store)
             with self.store.edit() as s:s['completed'][key]={'kind':'vault_sync','at':time.time()};s['pending'].pop(key,None)
             return proof
-    def sign(self,key,password,action):
-        if action not in ('broadcast','transaction_builder','partial'):raise ValueError('Invalid signing action.')
+    def sign(self,key,password,action,fee_ack=False):
+        if type(fee_ack) is not bool:raise ValueError('Invalid local fee acknowledgement.')
+        if action not in ('broadcast','partial'):raise ValueError('Invalid signing action.')
         with self.lock:
-            p=self.prepared.pop(key,None)
+            p=self.prepared.get(key)
             if not p or time.time()-p['created']>600:raise ValueError('Review expired. Recalculate or review again before signing.')
             if p['kind']=='sign_psbt_partial' and action!='partial':raise ValueError('Dashboard signing requests return signatures only; broadcasting requires a separate local approval.')
             if p['kind']=='broadcast_transaction' and action!='broadcast':raise ValueError('Review and authorise broadcast locally.')
-            if p['kind']=='vault' and action not in ('broadcast','transaction_builder'):raise ValueError('Invalid local vault action.')
-            if action=='transaction_builder' and p['kind']!='vault':raise ValueError('Only Vault Builder exports can go to Transaction Builder.')
+            if p['kind'] not in ('sign_psbt_partial','broadcast_transaction'):raise ValueError('This retired local builder operation is unavailable.')
             current=self.review(p['psbt'],p['wallet'],p['chain'],require_owned=p['kind']!='broadcast_transaction')
             for i in current['inputs']:
                 if rpc(self.core,'gettxout',[i['txid'],i['vout'],True]) is None:raise ValueError('A reviewed input is no longer unspent. Review a fresh transaction.')
             if current!=p['review']:raise ValueError('Transaction or local wallet interpretation changed. Review again.')
-            if p['kind']=='vault':
-                # Stop if new wallet funds arrived since the whole-wallet review.
-                actual=wallet_funds(self.core,p['wallet'],self.store)['coins']
-                if {(u['txid'],u['vout']) for u in actual}!={(u['txid'],u['vout']) for u in current['inputs']}:raise ValueError('Wallet inputs changed. Recalculate the full-wallet sweep.')
-                install_vault(self.core,p['vault'],self.store,p['destination'])
-                self.store.queue('vault_public',p['vault'])
-            from transaction_requests import unsigned,intents
-            if p['kind'] in ('sign_psbt_partial','broadcast_transaction'):intents(self,p,current)
-            if action=='transaction_builder':
-                psbt=p['psbt']
-                for record in self.store.read()['vaults'].values():
-                    if record['public']['address'] in [i['address'] for i in current['inputs']]:psbt=rpc(self.core,'walletprocesspsbt',{'psbt':psbt,'sign':False,'bip32derivs':True,'finalize':False},record['monitor_wallet'])['psbt']
-                psbt=rpc(self.core,'walletprocesspsbt',{'psbt':psbt,'sign':False,'bip32derivs':True,'finalize':False},p['wallet'])['psbt']
-                unsigned(self.core,psbt)
-                with self.store.edit() as state:state.setdefault('vault_proposals',{})[digest(current['inputs'])]={'psbt':psbt,'vault':p['vault']}
-                self.store.queue('transaction_builder_psbt',{'version':1,'chain':p['chain'],'psbt':psbt,'transaction_hash':current['tx_hash'],'vault':p['vault'],'review':current,'stage':2,'immutable':True})
-                return {'queued':True,'message':'Unsigned vault proposal queued for Transaction Builder Stage 2. Payments can be composed before local signing.'}
-            if p['kind']=='sign_psbt_partial' and action!='partial':raise ValueError('Dashboard signing requests return signatures only; broadcasting requires a separate local approval.')
+            if current['fee_review']['requires_ack'] and fee_ack is not True:raise ValueError('Review and explicitly acknowledge the unusually high total network fee on this Agent.')
+            self.prepared.pop(key)
+            from transaction_requests import intents
+            intents(self,p,current)
             if p['kind']=='broadcast_transaction':
                 with self.store.edit() as state:
                     if state['pending'][key]['state']!='pending':raise ValueError('Request was already attempted.')
@@ -307,14 +225,3 @@ class WalletOps:
                 self.store.queue('partial_sign_result',{'request_hash':key,'status':'signed','psbt':signed_psbt})
                 with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time()};state['pending'].pop(key,None)
                 return {'queued':True,'message':'Approved signatures returned to Dashboard. No transaction was broadcast.'}
-            final=rpc(self.core,'finalizepsbt',[signed_psbt])
-            if not final.get('complete'):raise ValueError('This wallet did not provide all required signatures. Nothing was broadcast.')
-            if p['kind']=='vault':
-                with self.store.edit() as s:s['vaults'][digest(p['vault'])]['funding_state']='signed'
-            accept=rpc(self.core,'testmempoolaccept',[[final['hex']]])[0]
-            if not accept.get('allowed'):raise ValueError('Core mempool policy rejected the signed transaction. Nothing was broadcast.')
-            txid=rpc(self.core,'sendrawtransaction',[final['hex']])
-            if p['kind']=='vault':
-                with self.store.edit() as state:state['vaults'][digest(p['vault'])]['funding_state']='broadcast'
-            result={'txid':txid,'message':'Signed transaction broadcast by the local node.'}
-            return result

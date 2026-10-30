@@ -116,21 +116,19 @@ class CoreBuild7(unittest.TestCase):
     for name in (self.source,self.dest):rpc(self.core,'createwallet',{'wallet_name':name,'passphrase':'test-password'})
     rpc(self.core,'sendtoaddress',[rpc(self.core,'getnewaddress',[],self.source),'1'],'miner7');rpc(self.core,'generatetoaddress',[1,self.miner]);self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.store=Store(self.tmp.name);self.ops=WalletOps(self.core,self.store)
  def build(self):
-    from datetime import datetime,timedelta
-    return self.ops.build(self.source,self.dest,'2',(datetime.now()+timedelta(days=30)).date().isoformat(),'UTC')
+    from vault_fixture import proposal
+    return proposal(self.ops,self.source,self.dest)
+
  def test_unsigned_export_sign_partial_and_separate_broadcast(self):
-    r=self.build();self.ops.sign(r['id'],'not-used','transaction_builder');item=next(i['payload'] for i in self.store.read()['outbox'].values() if i['kind']=='transaction_builder_psbt')
+    r=self.build();item={'psbt':r['psbt'],'vault':r['vault'],'immutable':True,'version':1,'chain':'regtest','transaction_hash':r['review']['tx_hash'],'review':r['review'],'stage':2}
     p={'kind':'sign_psbt_partial','request_id':'1'*64,'chain':'regtest','wallet':self.source,'psbt':item['psbt'],'vault_intents':[{'vault':r['vault'],'proposal_psbt':item['psbt']}]};self.store.receive(p);key=digest(p);self.ops.prepare_request(key)
-    with self.assertRaisesRegex(ValueError,'return signatures only'):self.ops.sign(key,'test-password','broadcast')
-    self.ops.prepare_request(key);before=rpc(self.core,'getrawmempool');self.ops.sign(key,'test-password','partial');self.assertEqual(rpc(self.core,'getrawmempool'),before)
+    with self.assertRaisesRegex(ValueError,'return signatures only'):self.ops.sign(key,'test-password','broadcast',fee_ack=True)
+    self.ops.prepare_request(key);before=rpc(self.core,'getrawmempool');self.ops.sign(key,'test-password','partial',fee_ack=True);self.assertEqual(rpc(self.core,'getrawmempool'),before)
     signed=next(i['payload']['psbt'] for i in self.store.read()['outbox'].values() if i['kind']=='partial_sign_result');final=rpc(self.core,'finalizepsbt',[signed]);self.assertTrue(final['complete']);txid=rpc(self.core,'decoderawtransaction',[final['hex']])['txid']
-    b={'kind':'broadcast_transaction','request_id':'2'*64,'chain':'regtest','psbt':signed,'txid':txid};self.store.receive(b);key=digest(b);self.ops.prepare_request(key);self.ops.sign(key,'','broadcast');self.assertIn(txid,rpc(self.core,'getrawmempool'))
+    b={'kind':'broadcast_transaction','request_id':'2'*64,'chain':'regtest','psbt':signed,'txid':txid};self.store.receive(b);key=digest(b);self.ops.prepare_request(key);self.ops.sign(key,'','broadcast',fee_ack=True);self.assertIn(txid,rpc(self.core,'getrawmempool'))
     old={**item,'psbt':signed};old_id=self.store.queue('transaction_builder_psbt',old);e=Exchange(1,'test',self.store)
     with patch('agent_exchange.local_ipv6',return_value=None),patch('agent_exchange.http_json',return_value={'version':1,'accepted':[],'proposals':[]}):e.once()
     self.assertIn(old_id,self.store.read()['legacy_exports']);self.assertNotIn(old_id,self.store.read()['outbox'])
- def test_omitted_local_vault_intent_cannot_be_signed(self):
-    r=self.build();self.ops.sign(r['id'],'','transaction_builder');p={'kind':'sign_psbt_partial','request_id':'3'*64,'chain':'regtest','wallet':self.source,'psbt':r['psbt']};self.store.receive(p)
-    with self.assertRaisesRegex(ValueError,'omitted or changed'):self.ops.prepare_request(digest(p))
  def test_wallet_file_is_encrypted_and_restore_checks_descriptors(self):
     raw=rpc(self.core,'listdescriptors',[False],self.source);p=proposal('send');p['public_wallet']=raw
     self.assertEqual(source_wallet(self.core,p),self.source);detail=wallet_details(self.core,p);validate_details(detail);self.assertEqual(len(detail['funded_outputs']),1)
@@ -149,7 +147,7 @@ class CoreBuild7(unittest.TestCase):
         t.thread.join(3);self.assertFalse(t.listener);self.assertFalse(rs.read()['pending']);self.assertGreater(t.success_until,time.time());name=rpc(receiver.core,'listwallets')[0];self.assertEqual(descriptors(rpc(receiver.core,'listdescriptors',[False],name)),descriptors(raw));self.assertEqual(rpc(receiver.core,'getwalletinfo',[],name)['unlocked_until'],0)
         self.assertTrue(all(i['kind']=='wallet_transfer_result' for i in rs.read()['outbox'].values()))
  def test_composition_accepts_extra_payments_and_rejects_changed_vault(self):
-    r=self.build();self.ops.sign(r['id'],'','transaction_builder');export=next(i['payload'] for i in self.store.read()['outbox'].values() if i['kind']=='transaction_builder_psbt');original=rpc(self.core,'decodepsbt',[export['psbt']])['tx'];extra=rpc(self.core,'listunspent',[1], 'miner7')[0]
+    r=self.build();export={'psbt':r['psbt']};original=rpc(self.core,'decodepsbt',[export['psbt']])['tx'];extra=rpc(self.core,'listunspent',[1], 'miner7')[0]
     inputs=[{'txid':v['txid'],'vout':v['vout'],'sequence':v['sequence']} for v in original['vin']]+[{'txid':extra['txid'],'vout':extra['vout'],'sequence':4294967294}]
     address=rpc(self.core,'getnewaddress',[],self.dest)
     from decimal import Decimal

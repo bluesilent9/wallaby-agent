@@ -57,7 +57,7 @@ class Workspace:
         import secrets,importlib.util
         try:available=importlib.util.find_spec('PyQt6.QtWebEngineWidgets')
         except ModuleNotFoundError:available=None
-        if available is None:raise ValueError('The protected HTML5 viewer is unavailable. Install the complete Build 11 DEB with its PyQt6 WebEngine dependencies; wallet data will not be opened in an ordinary browser.')
+        if available is None:raise ValueError('The protected HTML5 viewer is unavailable. Install the complete Build 12 DEB with its PyQt6 WebEngine dependencies; wallet data will not be opened in an ordinary browser.')
         if self.view_server is None:
             from app import Server,Handler
             owner=self
@@ -138,7 +138,7 @@ class Workspace:
                 if saved.get('setup_active') or saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):raise ValueError('Finish the current wallet setup, transfer or history operation first.')
             if method=='disc.read':
                 if self.archives.reading:raise ValueError('An optical read is already active.')
-                password=secret_dialog('Decrypt the selected disc recovery package',self.environment)
+                password=secret_dialog('Disc-backup passphrase · decrypt the selected recovery package (not your Core wallet passphrase)',self.environment)
                 self.archives.reading=True;self.archives.error='';self.archives.message='Reading encrypted optical recovery copies.'
                 def read_disc():
                     nonlocal password
@@ -168,14 +168,18 @@ class Workspace:
                 return media(*args)
             if method=='disc.drives':return [{'device':'/dev/'+p.name,'name':(p/'device/model').read_text().strip()} for p in Path('/sys/class/block').glob('sr[0-9]*')]
             if method=='wallet.sign':
-                key,action=args
+                key,action,fee_ack=args
+                if type(fee_ack) is not bool:raise ValueError('Invalid local fee acknowledgement.')
                 if action not in ('partial','broadcast'):raise ValueError('Vault Builder has moved to Dashboard. Only reviewed transaction signing or broadcast is available.')
                 prepared=self.ops.prepared.get(key,{})
-                encrypted=action=='partial' and 'unlocked_until' in __import__('wallet_ops').rpc(self.ops.core,'getwalletinfo',[],prepared.get('wallet'))
-                password=secret_dialog('Unlock the reviewed local signing wallet',self.environment) if encrypted else ''
-                try:return self.ops.sign(key,password,action)
+                if not prepared:raise ValueError('Review this transaction again before authorising it.')
+                if prepared['review']['fee_review']['requires_ack'] and not fee_ack:raise ValueError('Acknowledge the high fee locally before entering a wallet passphrase.')
+                info=__import__('wallet_ops').rpc(self.ops.core,'getwalletinfo',[],prepared['wallet']) if action=='partial' else {}
+                encrypted='unlocked_until' in info
+                prompt='Bitcoin Core wallet passphrase · sign the reviewed transaction\nCore wallet: '+json.dumps(info.get('walletname',''),ensure_ascii=False)+'\nLocal signing account: '+json.dumps(prepared['wallet'],ensure_ascii=False)
+                password=secret_dialog(prompt,self.environment) if encrypted else ''
+                try:return self.ops.sign(key,password,action,fee_ack)
                 finally:password=None
-            if method=='wallet.list_wallets':return self.ops.list_wallets()
             if method.startswith('transfer.'):
                 name=method.split('.',1)[1]
                 if name=='firewall':

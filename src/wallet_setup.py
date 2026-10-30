@@ -88,9 +88,16 @@ class WalletSetup:
     def approve_proposal(self,key,pins):
         self.enforce();row=self.store.read()['pending'][key];p=proposal(row['proposal']);own=self.own_identity()
         if rpc(self.core,'getblockchaininfo')['chain']!=p['chain']:raise ValueError('The proposed network differs from this local node.')
-        if p['kind']!='wallet_setup' or row['state']!='pending' or not isinstance(pins,dict) or set(pins)!={r['id'] for r in p['cosigners']}:raise ValueError('Review and independently verify every assigned Agent identity.')
-        for role in p['cosigners']:
-            if pins[role['id']]!=fingerprint(role['agent_key']):raise ValueError('An independently entered Agent fingerprint does not match.')
+        identities={r['agent_key'] for r in p['cosigners']}
+        expected={fingerprint(key) for key in identities}
+        # Current UI enters each distinct producer once. Accept exact legacy role
+        # maps only when every role still matches its full independent fingerprint.
+        if p['kind']!='wallet_setup' or row['state']!='pending' or not isinstance(pins,dict):raise ValueError('Review and independently verify every distinct producing Agent.')
+        if set(pins)==expected:
+            if any(pins[f]!=f for f in expected):raise ValueError('An independently entered Agent fingerprint does not match.')
+        elif set(pins)=={r['id'] for r in p['cosigners']}:
+            if any(pins[r['id']]!=fingerprint(r['agent_key']) for r in p['cosigners']):raise ValueError('An independently entered Agent fingerprint does not match.')
+        else:raise ValueError('Verify each distinct producing Agent in this exact wallet setup.')
         if any(session['phase']!='complete' for session in self.sessions.values()):raise ValueError('Finish the current wallet setup and its physical backups before starting another wallet.')
         binding=digest(p)
         if binding in self.sessions:raise ValueError('This setup already generated keys. No secret generation was repeated.')
@@ -101,7 +108,8 @@ class WalletSetup:
             local=[r for r in p['cosigners'] if r['agent_key']==own['public_key']]
             if local:session['core']=MemoryCore(self.store.root/'setup-cores'/binding,p['chain'],self.binary)
             for role in local:
-                password=secret_dialog('Core wallet passphrase for '+role['name'],self.environment,confirm=True)
+                name='key_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20]
+                password=secret_dialog('Create encrypted Bitcoin Core signing wallet '+name+' · role '+role['id']+'\nThis creates keys only; it does not fund the wallet.',self.environment,confirm=True)
                 if len(password)<12:raise ValueError('Use at least 12 characters for the encrypted signing wallet.')
                 name='key_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20];c=session['core'].core
                 try:rpc(c,'createwallet',{'wallet_name':name,'passphrase':password,'descriptors':True,'load_on_startup':False})
@@ -118,7 +126,7 @@ class WalletSetup:
                 self.store.queue('wallet_setup_contribution',envelope)
             session['phase']='contributed';self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'session_id':p['session_id'],'proposal_hash':binding,'status':'participating'}))
             with self.store.edit() as s:s['pending'].pop(key,None);s['completed'][key]={'kind':'wallet_setup','at':time.time()}
-            return {'message':'Public contributions queued. Private keys remain in encrypted wallets inside protected RAM. Keep this workspace running until the complete policy is approved and all assigned backups are verified.'}
+            return {'message':'Participation complete · wallet creation moves no Bitcoin. Public contributions queued. Private keys remain in encrypted wallets inside protected RAM. Keep this workspace running until the complete policy is approved and all assigned backups are verified.'}
         except Exception:session['phase']='error';raise
     def approve_policy(self,key):
         self.enforce();old=self.reviews.get(key)
@@ -186,7 +194,9 @@ class WalletSetup:
         self.finish_session(session)
         self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'proposal_hash':binding,'status':'denied'}))
         return {'message':'Unfinished temporary keys discarded after local confirmation. Start again with a fresh setup session.'}
-    def burn(self,device,confirmed):
-        self.enforce();password=secret_dialog('Encrypt the complete disc backup · keep this password separately',self.environment,confirm=True)
-        try:return self.burner.start(device,confirmed,password)
+    def burn(self,device,confirmed,disc_count=1,speed='slowest'):
+        self.enforce();self.burner.validate_options(device,confirmed,disc_count,speed)
+        password=None
+        if not self.burner.job.get('_prepared'):password=secret_dialog('Disc-backup passphrase · encrypt the complete recovery package (not your Core wallet passphrase)',self.environment,confirm=True)
+        try:return self.burner.start(device,confirmed,password,disc_count,speed)
         finally:password=None

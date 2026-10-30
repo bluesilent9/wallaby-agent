@@ -2,17 +2,21 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 11
+# Wallaby Agent V2 — Development Build 12
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 11 DEB](dist/wallaby-agent_2.0.0~dev11_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Dashboard integration handoff](DASHBOARD_BUILD11_UPDATE.md)
+[Build 12 DEB](dist/wallaby-agent_2.0.0~dev12_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 12 incorporates the Agent follow-up for **Dashboard V1 Build 13**. Transaction diagrams show the verified **Total network fee**, with a separate local acknowledgement for unusually high fees. Native prompts identify the exact Core signing wallet and action; disc-backup and computer-login passwords are explicitly distinguished. Wallet creation verifies one full fingerprint per distinct producing Agent, binding all its roles to that identity. Retired local Vault Builder generation helpers are removed; current wallet-policy creation, archive restoration, vault checks and signing remain.
+
+Disc Operations now supports **1–99 separate discs** and reported numeric burn speeds. Defaults are **one disc** and **slowest supported speed**. Each disc is still filled with redundant encrypted recovery copies, then completely read back. Subsequent discs reuse one protected-RAM encrypted package and require a fresh local blank-disc confirmation. The full requested set must be verified before its completion proof is sent. Failed writes and uncertain completion are never repeated automatically. See [disc format](DISC_FORMAT.md).
 
 Build 11 makes the **wallet synchronisation Denial list persistent on the Agent**. Disable an incoming wallet policy once; it remains disabled after closing the protected workspace or rebooting. Enable it on Authorise to remove its entry and allow the current or next sync offer. Disabled entries never count as unfinished work or light notification dots. One-off declined signing/setup requests remain session-only; there is no persistent request history.
 
 The Agent owns this list. Dashboard cannot restore, clear or override it. Dashboard code does not need changing for local enforcement or reboot persistence. A small optional [permission-status query](DASHBOARD_BUILD11_UPDATE.md) lets Dashboard display “disabled on this Agent” and suppress its own missing-wallet alerts; it creates no second control list. This supersedes Build 10's proposal for server-retained preference snapshots.
 
-Disc Operations, archived-key signing, redundant optical backups, BIP-322 messages and the multi-request Authorise queue remain. Dashboard V1 Build 11 already supports wallet setup, completion proofs and restored-cosigner transaction routing. Remote RPC remains public/read-only; local wallet/signing/broadcast approval boundaries are unchanged. No Dashboard code is changed in this build.
+Disc Operations, archived-key signing, redundant optical backups, BIP-322 messages and the multi-request Authorise queue remain. Dashboard V1 Build 13 already supports wallet setup, completion proofs and restored-cosigner transaction routing. Remote RPC remains public/read-only; local wallet/signing/broadcast approval boundaries are unchanged. No Dashboard code is changed in this build.
 
 ## Install and start
 
@@ -32,7 +36,7 @@ After switching off the node interface and finishing sensitive work, **Close wor
 
 The Agent accepts one active wallet setup at a time, with 1–15 independent cosigners and a threshold between 1 and N. Each local role produces a different key. Copies of one key are not additional cosigners.
 
-1. Review the full public proposal: name, network, M-of-N threshold, every assigned Agent identity, node/disc storage roles and optional block height. Independently compare and enter every complete Agent fingerprint; Dashboard names are only display hints.
+1. Review the full public proposal: name, network, M-of-N threshold, every assigned Agent identity, node/disc storage roles and optional block height. Independently compare and enter one complete fingerprint per distinct producing Agent, for this ceremony; Dashboard names are only display hints.
 2. After participation approval, Core creates encrypted signing wallets in the protected temporary node. Passphrases are local. Only assigned roles are generated; physical-only keys are not duplicated on observers or other Agents. Signed public account contributions go to Dashboard.
 3. Review the complete policy. The Agent verifies every contribution signature, producer assignment, its own unchanged keys, distinct accounts, network and receiving/change derivations. It independently constructs the exact supported policy and compares six sample addresses with Core. Compare the complete policy code and sample addresses directly across Agents.
 4. Locally approve the exact policy. Only node-assigned encrypted wallets are retained in your chosen existing Core, together with a public policy monitor. Physical-only private wallets stay in protected RAM for disc preparation. The complete public recovery policy accompanies every physical backup.
@@ -47,7 +51,7 @@ This page is available whenever the node interface is connected. Read an existin
 
 For writing, choose blank write-once DVD-R or BD-R M-Disc media. Used/rewritable media are rejected. A separate passphrase encrypts the complete package with AES-256-GCM and scrypt (N=131072,r=8,p=1), including its Core-encrypted role wallet, full public policy, network/height, authenticated contributions and recovery instructions. Keep both package and Core passphrases separately from the disc.
 
-The small recovery filesystem is followed by as many independently checksummed copies of that encrypted package as fit the detected writable capacity. Copies stream from one RAM package: a 100 GB disc does not require a 100 GB RAM image or millions of filesystem entries. Every recorded byte is read back directly before a signed success acknowledgement is issued. The drive is asked for 1×; its supported speeds govern the actual write. A nominal 25 GB Blu-ray at 1× takes roughly 93 minutes to write, with finalisation and full read-back taking additional time. See [disc format and recovery limits](DISC_FORMAT.md).
+The small recovery filesystem is followed by as many independently checksummed copies of that encrypted package as fit the detected writable capacity. Copies stream from one RAM package: a 100 GB disc does not require a 100 GB RAM image or millions of filesystem entries. Every recorded byte is read back directly before a signed success acknowledgement is issued. The default asks the drive for its slowest supported speed (`xorriso speed=-1`). An optional numeric selection must be reported by the current drive/media. The drive governs actual write speed; slowest need not mean 1×. A nominal 25 GB Blu-ray at 1× takes roughly 93 minutes to write, with finalisation and full read-back taking additional time. See [disc format and recovery limits](DISC_FORMAT.md).
 
 For reading, enter the backup passphrase in the native dialogue. The Agent skips unreadable or checksum-invalid copies until it finds an intact authenticated package. Review its complete policy code, cosigner role, threshold, network, height and sample addresses against a trusted record. Explicitly confirm before loading. Archived creation-request expiry does not invalidate a historical backup.
 
@@ -105,6 +109,7 @@ Bitcoin Agent inbox/outbox/reviews and temporary jobs are volatile. Keep the wor
 
 The source and compiled Ubuntu 26.04 amd64 DEB are on **Development**. The GitHub default is Stable; open [Development explicitly](https://github.com/bluesilent9/wallaby-agent/tree/Development). Stable is unchanged.
 
+- [Build 11 installer](dist/wallaby-agent_2.0.0~dev11_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/e8fbfbaa916532681b3f4344737ef254bf76ae5b)
 - [Build 10 installer](dist/wallaby-agent_2.0.0~dev10_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/51e483e8559dec9a6f5855c5fa7d68736201354f)
 - [Build 9 installer](dist/wallaby-agent_2.0.0~dev9_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/0be3e95c236ebc8ffd57e4bf7f675d82cdfb0916)
 - [Build 8 installer](dist/wallaby-agent_2.0.0~dev8_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/4f6c168f8faa646452bbbba14b3f4f5619e2e785)

@@ -21,7 +21,7 @@ class HTTPFailure(Exception):
     def __init__(self,status):self.status=status;super().__init__('HTTP request failed (%d).'%status)
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1'):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev11'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev12'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()

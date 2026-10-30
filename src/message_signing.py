@@ -158,7 +158,7 @@ class Messages:
         for name in p['wallets']:
             info=rpc(self.core,'getwalletinfo',[],name);password=None
             try:
-                if 'unlocked_until' in info:password=self.secret('Unlock '+name+' to sign the reviewed message');rpc(self.core,'walletpassphrase',[password,30],name)
+                if 'unlocked_until' in info:password=self.secret('Bitcoin Core wallet passphrase · sign the reviewed message\nCore wallet: '+__import__('json').dumps(info['walletname'],ensure_ascii=False)+'\nLocal signing account: '+__import__('json').dumps(name,ensure_ascii=False));rpc(self.core,'walletpassphrase',[password,30],name)
                 psbt=rpc(self.core,'walletprocesspsbt',{'psbt':psbt,'sign':True,'bip32derivs':True,'finalize':False,'sighashtype':'DEFAULT' if p['descriptor'].is_taproot else 'ALL'},name)['psbt']
             finally:
                 password=None

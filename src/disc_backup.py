@@ -44,7 +44,7 @@ def pack(root,wallets,recovery,password):
     try:encrypt_file(plain,disc/'recovery.wallaby',password)
     finally:plain.unlink(missing_ok=True)
     (disc/'README.txt').write_text('Wallaby encrypted recovery package v1\nAES-256-GCM; scrypt N=131072,r=8,p=1.\nContains encrypted Core signing wallets plus the complete public receive/change policy and authenticated cosigner contributions.\nKeep your backup and Core wallet passphrases separately.\nUse the accompanying recovery.py only in a protected volatile environment.\n')
-    (disc/'REDUNDANCY.txt').write_text('Build 10 repeats this exact encrypted recovery package in independently checksummed, sector-aligned raw-track slots after this small ISO filesystem. Disc Operations scans copies and skips unreadable/damaged ones. No giant RAM image or directory listing is needed. The filesystem copy also remains readable by standard tools.\n')
+    (disc/'REDUNDANCY.txt').write_text('Wallaby repeats this exact encrypted recovery package in independently checksummed, sector-aligned raw-track slots after this small ISO filesystem. Disc Operations scans copies and skips unreadable/damaged ones. No giant RAM image or directory listing is needed. The filesystem copy also remains readable by standard tools.\n')
     # Independent, inspectable decryption utility; it refuses an ordinary disk output.
     (disc/'recovery.py').write_text(RECOVERY_TOOL)
     (disc/'redundancy.py').write_text(Path(__file__).with_name('disc_archive.py').read_text())
@@ -90,6 +90,18 @@ with os.fdopen(fd,'wb') as f:f.write(plain)
 print('Authenticated recovery.zip written in protected RAM. It contains sensitive material; retain sleep inhibition and extract only in protected RAM.')
 '''
 
+def parse_speeds(text,kind):
+    from decimal import Decimal
+    values={Decimal(m[1]) for m in re.finditer(r'^Write speed[^\n]*?([0-9]+(?:\.[0-9]+)?)x'+kind+r'\b',text,re.M|re.I) if 0<Decimal(m[1])<=64}
+    return [format(x.normalize(),'f') for x in sorted(values)]
+
+def speed_value(speed):
+    if speed=='slowest':return '-1'
+    if not isinstance(speed,str) or not re.fullmatch(r'(?:[1-9][0-9]?(?:\.[0-9]{1,2})?|0\.[0-9]{1,2})',speed):raise ValueError('Choose slowest supported speed or a reported numeric speed.')
+    from decimal import Decimal
+    if not 0<Decimal(speed)<=64:raise ValueError('Unsupported optical write speed.')
+    return speed
+
 def media(device):
     if not isinstance(device,str) or not re.fullmatch(r'/dev/sr[0-9]{1,2}',device):raise ValueError('Select a local optical drive.')
     st=os.stat(device,follow_symlinks=False)
@@ -99,7 +111,13 @@ def media(device):
     if r.returncode or not re.search(r'Media current\s*:\s*(?:BD-R\b|DVD-R\b)',output) or re.search(r'Media current\s*:.*(?:RW|RE\b)',output) or not re.search(r'Media status\s*:\s*is blank',output):raise ValueError('Insert a blank, write-once DVD-R or BD-R M-Disc in a compatible burner. Used, rewritable and unknown media are refused.')
     blocks=re.search(r'Media blocks\s*:.*?([0-9]+) writable',output)
     capacity=max(0,int(blocks[1])*2048-2*1024*1024) if blocks else None
-    return {'device':device,'capacity_bytes':capacity,'estimated_1x_seconds':round(capacity/(4500000 if 'BD-R' in output else 1385000)) if capacity else None,'write_once':True,'blank':True,'message':'Blank write-once media detected. Confirm that the disc and drive support M-Disc; software cannot authenticate the physical media branding.'}
+    speeds=[]
+    try:
+        query=subprocess.run(['/usr/bin/xorriso','-abort_on','FAILURE','-outdev',device,'-list_speeds','-end'],capture_output=True,timeout=30)
+        text=(query.stdout+query.stderr).decode(errors='replace')
+        if query.returncode==0:speeds=parse_speeds(text,'BD' if 'BD-R' in output else 'DVD')
+    except (OSError,subprocess.TimeoutExpired):pass
+    return {'speeds':speeds,'device':device,'capacity_bytes':capacity,'estimated_1x_seconds':round(capacity/(4500000 if 'BD-R' in output else 1385000)) if capacity else None,'write_once':True,'blank':True,'message':'Blank write-once media detected. Confirm that the disc and drive support M-Disc; software cannot authenticate the physical media branding.'}
 
 def image(disc,path):
     r=subprocess.run(['/usr/bin/xorriso','-abort_on','FAILURE','-as','mkisofs','-V','WALLABY_RECOVERY','-o',str(path),str(disc)],capture_output=True,timeout=300)
@@ -121,9 +139,10 @@ def readback(device,size,expected,progress=None):
     finally:os.close(fd)
     if result.hexdigest()!=expected:raise ValueError('Disc read-back differs from the protected RAM image. Keep the RAM session open and use a fresh disc.')
 
-def write_stream(device,source,total,progress):
+def write_stream(device,source,total,progress,speed='slowest'):
+    selected=speed_value(speed)
     import selectors
-    process=subprocess.Popen(['/usr/bin/xorriso','-abort_on','FAILURE','-as','cdrecord','-sao','speed=1','fs=16m','dev='+device,'tsize='+str(total//2048)+'s','-data','-'],stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    process=subprocess.Popen(['/usr/bin/xorriso','-abort_on','FAILURE','-as','cdrecord','-sao','speed='+selected,'fs=16m','dev='+device,'tsize='+str(total//2048)+'s','-data','-'],stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     digest=hashlib.sha256();written=0;deadline=time.monotonic()+48*3600
     try:
         os.set_blocking(process.stdin.fileno(),False)
@@ -147,38 +166,57 @@ def write_stream(device,source,total,progress):
         raise
 
 class Burner:
-    def __init__(self,root,on_complete):self.root=Path(root);self.root.mkdir(mode=0o700,parents=True,exist_ok=True);self.on_complete=on_complete;self.job=None;self.lock=threading.Lock();self.pending=[]
+    def __init__(self,root,on_complete):self.root=Path(root);self.root.mkdir(mode=0o700,parents=True,exist_ok=True);self.on_complete=on_complete;self.job=None;self.lock=threading.Lock();self.pending=[];self.thread=None
     def state(self):
         if self.job and self.job['phase']=='complete' and time.time()-self.job['finished']>5:
             self.job=None
             if self.pending:self.authorise(*self.pending.pop(0))
-        return {k:v for k,v in (self.job or {}).items() if k not in ('recovery','wallets')}
+        return {k:v for k,v in (self.job or {}).items() if k not in ('recovery','wallets') and not k.startswith('_')}
     def authorise(self,job_id,wallets,recovery):
-        if self.job:raise ValueError('Finish or explicitly discard the current disc session first.')
-        self.job={'id':job_id,'phase':'authorised','policy_hash':recovery['policy_hash'],'wallets':wallets,'recovery':recovery,'message':'Authorised locally. Insert a blank M-Disc and choose the optical drive.'}
+        if self.job:raise ValueError('Finish the current disc session first.')
+        self.job={'id':job_id,'phase':'authorised','policy_hash':recovery['policy_hash'],'wallets':wallets,'recovery':recovery,'disc_count':1,'discs_verified':0,'speed':'slowest','message':'Authorised locally. Choose the number of discs and write speed. Defaults: one disc, slowest supported speed.'}
     def queue(self,job_id,wallets,recovery):
         if self.job:self.pending.append((job_id,wallets,recovery))
         else:self.authorise(job_id,wallets,recovery)
-    def start(self,device,confirmed,password):
+    def validate_options(self,device,confirmed,disc_count=1,speed='slowest'):
+        if not self.job or self.job['phase'] not in ('authorised','awaiting_disc','error','uncertain') or confirmed is not True:raise ValueError('Authorise and confirm a fresh blank M-Disc before writing.')
+        if type(disc_count) is not int or not 1<=disc_count<=99:raise ValueError('Choose between 1 and 99 separate discs.')
+        speed_value(speed)
+        if self.job.get('_options') and (disc_count,speed)!=self.job['_options']:raise ValueError('Disc count and speed are fixed for this authorised set.')
+        details=media(device)
+        if speed!='slowest' and (not details['speeds'] or speed not in details['speeds']):raise ValueError('That speed is not reported for the current drive and disc. Refresh media details or choose slowest supported.')
+        return details
+    def start(self,device,confirmed,password=None,disc_count=1,speed='slowest'):
         with self.lock:
-            if not self.job or self.job['phase'] not in ('authorised','error') or confirmed is not True:raise ValueError('Authorise and confirm M-Disc media before burning.')
-            media(device);self.job.update(phase='preparing',message='Encrypting the complete recovery package in protected RAM.')
+            self.validate_options(device,confirmed,disc_count,speed)
+            job=self.job;job['_options']=(disc_count,speed);job.update(disc_count=disc_count,speed=speed,phase='preparing',message='Preparing disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+' in protected RAM.')
             def work():
                 nonlocal password
+                written=False;all_verified=False
                 try:
-                    directory=self.root/self.job['id'];directory.mkdir(mode=0o700,exist_ok=True)
-                    disc=pack(directory,self.job['wallets'],self.job['recovery'],password);password=None;iso=directory/'disc.iso';image(disc,iso)
-                    capacity=media(device)['capacity_bytes']
+                    directory=self.root/job['id'];directory.mkdir(mode=0o700,exist_ok=True);disc=directory/'disc';iso=directory/'disc.iso'
+                    if not job.get('_prepared'):
+                        disc=pack(directory,job['wallets'],job['recovery'],password);password=None;image(disc,iso);job['_prepared']=True
+                    password=None
+                    details=media(device)
+                    if speed!='slowest' and speed not in details['speeds']:raise ValueError('The inserted medium no longer supports the chosen speed. No write was started.')
+                    capacity=details['capacity_bytes']
                     if capacity is None:raise ValueError('The drive did not report writable capacity. No write was started.')
                     from disc_archive import plan,chunks
                     layout=plan(iso,disc/'recovery.wallaby',capacity)
-                    self.job.update(phase='burning',copies=layout['copies'],total_bytes=layout['total_bytes'],written_bytes=0,message='Writing '+str(layout['copies'])+' redundant encrypted copies. Requesting 1×; the drive may use its lowest supported speed. Read-back follows writing.')
-                    sha=write_stream(device,chunks(iso,disc/'recovery.wallaby',layout),layout['total_bytes'],lambda count:self.job.update(written_bytes=count))
-                    self.job.update(phase='verifying',message='Reading the complete recorded track directly and checking every byte. This can take as long as writing.')
-                    readback(device,layout['total_bytes'],sha,lambda count:self.job.update(verified_bytes=count));self.on_complete(self.job['id'],sha)
+                    job.update(phase='burning',copies=layout['copies'],total_bytes=layout['total_bytes'],written_bytes=0,verified_bytes=0,message='Writing disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+' with '+str(layout['copies'])+' repeated recovery copies. Speed: '+('slowest supported' if speed=='slowest' else speed+'×')+'. Full read-back follows writing.')
+                    written=True;sha=write_stream(device,chunks(iso,disc/'recovery.wallaby',layout),layout['total_bytes'],lambda count:job.update(written_bytes=count),speed)
+                    job.update(phase='verifying',message='Checking every recorded byte on disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+'.')
+                    readback(device,layout['total_bytes'],sha,lambda count:job.update(verified_bytes=count))
+                    job['discs_verified']+=1;job.setdefault('verified_discs',[]).append({'disc':job['discs_verified'],'sha256':sha,'bytes':layout['total_bytes']})
+                    if job['discs_verified']<disc_count:
+                        job.update(phase='awaiting_disc',message='Disc '+str(job['discs_verified'])+' verified. Remove it, insert a fresh blank disc, then explicitly continue. The remaining recovery material stays in protected RAM.');return
+                    all_verified=True;job['phase']='completing';self.on_complete(job['id'],sha)
                     import shutil
-                    shutil.rmtree(directory)
-                    self.job.update(phase='complete',message='Success! Every recorded byte, including every redundant copy, passed direct read-back verification.',finished=time.time())
-                except Exception as error:self.job.update(phase='error',message=str(error) if isinstance(error,ValueError) else 'Disc work stopped. Keep the RAM session open and inspect the drive before a fresh attempt.')
+                    shutil.rmtree(directory);job.update(phase='complete',message='Success! All '+str(disc_count)+' requested disc(s) passed complete direct read-back verification.',finished=time.time())
+                except Exception as error:
+                    phase='completion_uncertain' if all_verified else 'uncertain' if written else 'error'
+                    message=str(error) if isinstance(error,ValueError) else 'Disc work stopped. Inspect the local drive and outcome; no operation was repeated.'
+                    job.update(phase=phase,message=message+(' All requested discs were verified; reconcile completion before doing anything else.' if all_verified else ' Keep the RAM workspace open. Any retry requires a fresh blank disc and your confirmation.'))
                 finally:password=None
-            threading.Thread(target=work,daemon=True).start();return {'message':'Disc preparation started.'}
+            self.thread=threading.Thread(target=work,daemon=True);self.thread.start();return {'message':'Disc '+str(job['discs_verified']+1)+' preparation started. No additional disc will be written without a new local confirmation.'}

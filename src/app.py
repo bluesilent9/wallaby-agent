@@ -101,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.allowed() or self.headers.get('Sec-Fetch-Site')!='same-origin' or self.headers.get('X-Wallaby-UI')!='1':return self.reply(403,{'error':'Local page session access denied.'})
             return self.reply(200,{'token':self.server.token})
         if not self.allowed(self.path.startswith('/api/')):return self.reply(403,{'error':'The local Agent session needs to reconnect.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev11'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev12'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
@@ -151,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path=='/api/disc/unload' and set(body)=={'id'}:return self.reply(200,call('disc.unload',body['id'],timeout=120))
                 if self.path=='/api/disc/drives' and not body:return self.reply(200,call('disc.drives'))
                 if self.path=='/api/disc/probe' and set(body)=={'device'}:return self.reply(200,call('disc.probe',body['device']))
-                if self.path=='/api/disc/burn' and set(body)=={'device','confirmed'}:return self.reply(200,call('disc.burn',body['device'],body['confirmed'],timeout=600))
+                if self.path=='/api/disc/burn' and set(body)=={'device','confirmed','disc_count','speed'}:return self.reply(200,call('disc.burn',body['device'],body['confirmed'],body['disc_count'],body['speed'],timeout=600))
                 raise ValueError('Invalid disc action.')
             if self.path=='/api/pick-cookie':return self.reply(200,{'path':picker()})
             if self.path.startswith('/api/synchronisation/'):
@@ -197,7 +197,7 @@ class Handler(BaseHTTPRequestHandler):
                 from protected_memory import required
                 if required():
                     from secure_bridge import call
-                    actions={'disable-sync':('sync.disable',('id',)),'enable-sync':('sync.enable',('id',)),'cancel-sync':('sync.cancel',('id',)),'cancel-setup':('setup.cancel',('id',)),'history':('authorise.history',('id',)),'review':('authorise.review',('id',)),'approve':('authorise.approve',('id',)),'deny':('authorise.deny',('id',)),'forget':('authorise.forget',('id',)),'participate':('setup.participate',('id','pins')),'sign':('wallet.sign',('id','action'))}
+                    actions={'disable-sync':('sync.disable',('id',)),'enable-sync':('sync.enable',('id',)),'cancel-sync':('sync.cancel',('id',)),'cancel-setup':('setup.cancel',('id',)),'history':('authorise.history',('id',)),'review':('authorise.review',('id',)),'approve':('authorise.approve',('id',)),'deny':('authorise.deny',('id',)),'forget':('authorise.forget',('id',)),'participate':('setup.participate',('id','pins')),'sign':('wallet.sign',('id','action','fee_ack'))}
                     action=self.path.rsplit('/',1)[1]
                     if action not in actions:raise ValueError('Invalid local authorisation action.')
                     method,fields=actions[action]
@@ -250,7 +250,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev11'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev12'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -268,7 +268,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev11':
+    if installed!='2.0.0~dev12':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -278,7 +278,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev11') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev12') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)
