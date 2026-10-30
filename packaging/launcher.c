@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 int main(int argc,char **argv){
+  setenv("WALLABY_REQUIRE_PROTECTION","1",1);
   char **args=calloc((size_t)argc+3,sizeof(char *));
   if(!args)return 1;
   args[0]="/usr/bin/python3";args[1]="/usr/lib/wallaby-agent/src/app.py";

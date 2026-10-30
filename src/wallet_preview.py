@@ -40,11 +40,15 @@ def validate_preview(payload):
     return p
 
 def sign(store,preview):
-    key=store.root/'preview_identity'
+    key=getattr(store,'identity_root',store.root)/'preview_identity'
     # Store cross-process lock protects first creation; no use of login/Bitcoin keys.
     with store.edit():
         if not key.exists():subprocess.run(['/usr/bin/ssh-keygen','-q','-t','ed25519','-N','','-C','','-f',str(key)],check=True,capture_output=True,timeout=10)
-        key.chmod(0o600);public=' '.join(key.with_suffix('.pub').read_text().split()[:2])
+        from protected_memory import inside
+        if inside():
+            if key.stat().st_mode&0o077:raise ValueError('Fix the local Agent identity permissions before using its protected workspace.')
+        else:key.chmod(0o600)
+        public=' '.join(key.with_suffix('.pub').read_text().split()[:2])
     with tempfile.TemporaryDirectory(dir=store.root) as root:
         file=Path(root)/'preview';file.write_bytes(canonical(preview));file.chmod(0o600)
         subprocess.run(['/usr/bin/ssh-keygen','-Y','sign','-f',str(key),'-n',NAMESPACE,str(file)],check=True,capture_output=True,timeout=10)

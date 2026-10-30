@@ -92,7 +92,11 @@ def worker(kind):
                 def status(color,message,event=session_stop):
                     if not event.is_set():publish(color,message,tunnel=True,stage='node')
                 status('amber','SSH connected. Checking local Bitcoin Core RPC…')
-                node=NodeClient(config,tunnel.port,session_stop,status)
+                from protected_memory import required
+                if required():
+                    from protected_node import ProtectedNode
+                    node=ProtectedNode(config,tunnel.port,session_stop,status)
+                else:node=NodeClient(config,tunnel.port,session_stop,status)
                 def run_node(client=node,event=session_stop,errors=node_errors):
                     try:client.run()
                     except Exception as error:errors.append(describe('dashboard',error))
@@ -127,7 +131,7 @@ def worker(kind):
 
 def monitor():
     retire_jellyfin()
-    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev8','pid':os.getpid()}))
+    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev9','pid':os.getpid()}))
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     master=None;current=None;attempt_started=0;due=0;delay=15;notice=None;reconciled=None;last_rpc=None;status=('red','Enter your server hostname or domain.');extra={}
     try:
@@ -185,6 +189,15 @@ def monitor():
 def notify_approvals():
     # Only locally installed code opens the local review page; remote URLs are never used.
     try:
+        from protected_memory import required
+        if required():
+            from secure_bridge import call
+            status=call('service_status');notice=runtime_dir()/'approval-notice.json'
+            previous=json.loads(notice.read_text()) if notice.exists() else {}
+            if status['has_approvals'] and previous.get('batch')!=status['notice']:
+                if not status['viewer_open']:subprocess.Popen(['/usr/bin/wallaby-agent','authorise'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                notice.write_text(json.dumps({'batch':status['notice']}))
+            return
         from approval_store import Store,digest
         store=Store();saved=store.read();pending=sorted(k for k,v in saved['pending'].items() if v['state']=='pending' and v['proposal']['kind']!='wallet_transfer')
         batch=digest({'pending':pending,'previews':{k:digest(v['preview']) for k,v in saved.get('transfer_previews',{}).items() if k in pending}});notice=runtime_dir()/'approval-notice.json';ui=runtime_dir()/'ui-seen.json'

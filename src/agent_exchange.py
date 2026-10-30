@@ -9,8 +9,13 @@ from approval_store import Store
 from node_client import http_json,HTTPFailure
 
 class Exchange:
-    def __init__(self,port,token,store=None):self.port=port;self.token=token;self.store=store or Store();self.unsupported=False
+    def __init__(self,port,token,store=None):self.port=port;self.token=token;self.store=store;self.unsupported=False
     def once(self):
+        from protected_memory import required,inside
+        if required() and not inside():
+            from secure_bridge import call
+            return call('exchange',self.port,self.token,timeout=40)
+        if self.store is None:self.store=Store()
         if self.unsupported:return
         from transaction_requests import has_signatures
         with self.store.edit() as saved:
@@ -21,7 +26,7 @@ class Exchange:
                     except (ValueError,KeyError):old=True
                 if old:saved.setdefault('legacy_exports',{})[key]=saved['outbox'].pop(key)
         state=self.store.read();items=[{'id':key,**row} for key,row in list(state['outbox'].items())[:8]]
-        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer']}
+        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement']}
         address=local_ipv6()
         if address:body['node_info']={'ipv6':address}
         try:r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)
@@ -43,6 +48,18 @@ class Exchange:
             if p['kind']=='wallet_transfer_preview':
                 from wallet_preview import receive
                 receive(self.store,{k:p[k] for k in ('preview','public_key','signature')})
+            elif p['kind']=='wallet_setup_complete':
+                from setup_completion import apply
+                from configuration import Config,discover_cookie
+                from node_client import Core
+                config=Config().values;config['cookie']=config['cookie'] or discover_cookie();apply(Core(config),self.store,p)
+            elif p['kind']=='wallet_setup_identity':
+                from setup_messages import sign
+                from wallet_preview import fingerprint
+                from pathlib import Path
+                import socket
+                key=getattr(self.store,'identity_root',self.store.root)/'preview_identity.pub'
+                public=' '.join(key.read_text().split()[:2]);self.store.queue('wallet_setup_identity',sign(self.store,{'version':1,'challenge':p['challenge'],'public_key':public,'fingerprint':fingerprint(public),'hostname':socket.gethostname()}))
             elif p['kind']=='node_identity':
                 if address:self.store.queue('node_identity',{'ipv6':address})
             elif p['kind']!='wallet_sync_queue':self.store.receive(p)
@@ -65,5 +82,7 @@ class Exchange:
         while not stop.is_set() and not self.unsupported:
             try:self.once()
             except Exception:
+                if self.store is None:
+                    stop.wait(30);continue
                 with self.store.edit() as s:s['sync']='Dashboard exchange failed validation or is unavailable. Queued data retained; retry in 30 seconds.'
             stop.wait(30)

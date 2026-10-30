@@ -146,6 +146,10 @@ def wallet_details(core,p,store=None):
     return result
 
 def work_dir(core):
+    from protected_memory import required,root
+    if required():
+        p=root()/'transfer-files';p.mkdir(mode=0o700,exist_ok=True);return p
+
     # The Core cookie's parent is accessible to the same Core, including Snap data roots.
     root=Path(core.config['cookie']).expanduser().resolve().parent/'wallaby-transfers';
     if root.is_symlink():raise ValueError('Unsafe transfer staging directory.')
@@ -313,7 +317,7 @@ class Transfer:
                 require(self.store,key,name,details,staged);self.pending_recovery(key)
                 frame_write(stream,{'status':'recovery_required','transfer_id':p['transfer_id']});frame_read(stream);return
             if any(w['name']==name for w in rpc(self.core,'listwalletdir')['wallets']):raise ValueError('A previous restoration exists. Inspect it in Core; it will not be overwritten.')
-            rpc(self.core,'restorewallet',{'wallet_name':name,'backup_file':str(path),'load_on_startup':True},timeout=600)
+            rpc(self.core,'restorewallet',{'wallet_name':name,'backup_file':__import__('core_ram_path').for_core(self.core,path),'load_on_startup':True},timeout=600)
             info=rpc(self.core,'getwalletinfo',[],name);actual=descriptors(rpc(self.core,'listdescriptors',[False],name))
             if actual!=wanted or info.get('private_keys_enabled')!=p['source_has_private_keys'] or (info.get('private_keys_enabled') and ('unlocked_until' not in info or info['unlocked_until']!=0)) or info.get('scanning'):
                 rpc(self.core,'unloadwallet',{'wallet_name':name,'load_on_startup':False});raise ValueError('Restored wallet failed descriptor, encryption or scan verification; unloaded. Inspect it in Core before retrying.')
@@ -412,7 +416,7 @@ class Transfer:
                             if reply.get('status')!='loaded' or reply.get('transfer_id')!=p['transfer_id'] or reply.get('wallet_identity')!=digest(sorted(descriptors(p['public_wallet']))):raise ValueError('Receiver did not confirm a matching watch wallet.')
                             frame_write(process.stdin,{'status':'confirmed'});self.complete(key);return {'ok':True}
                         # Revalidate the source immediately before making a consistent Core backup.
-                        source_wallet(self.core,p,require_encrypted=True);rpc(self.core,'backupwallet',[str(backup)],name)
+                        source_wallet(self.core,p,require_encrypted=True);rpc(self.core,'backupwallet',[__import__('core_ram_path').for_core(self.core,backup)],name)
                         size=backup.stat().st_size
                         if not 0<size<=MAX_FILE:raise ValueError('Wallet backup exceeds the 256 MiB transfer limit.')
                         h=hashlib.sha256()
@@ -440,9 +444,14 @@ class Transfer:
                     ask.unlink(missing_ok=True)
                     password=None
 
-def peer_receive():
+def peer_receive(input_stream=None,output_stream=None,ssh_connection=None):
+    from protected_memory import required,inside
+    if required() and not inside():
+        from protected_peer import handoff
+        return handoff()
+    input_stream=input_stream or sys.stdin.buffer;output_stream=output_stream or sys.stdout.buffer
     # Called as the logged-in SSH user. Relay only; no RPC/file paths accepted here.
-    source=os.environ.get('SSH_CONNECTION','').split()
+    source=(ssh_connection if ssh_connection is not None else os.environ.get('SSH_CONNECTION','')).split()
     if len(source)!=4:raise ValueError('This command is only available through an SSH session.')
     address=ipv6(source[0]);store=Store();saved=store.read();key,row=active(store)
     batch=saved.get('sync_batch')
@@ -451,13 +460,13 @@ def peer_receive():
     with socket.socket(socket.AF_UNIX) as s:
         s.settimeout(LIFETIME);s.connect(str(socket_path(store)))
         # Verify the peer-claimed IP against sshd, then reconstruct the framed header.
-        header=frame_read(sys.stdin.buffer)
+        header=frame_read(input_stream)
         if header.get('peer_ipv6')!=address:raise ValueError('SSH source differs from transfer header.')
         remote=s.makefile('rwb',buffering=0);frame_write(remote,header)
         def upload():
             try:
                 while True:
-                    data=os.read(sys.stdin.fileno(),65536)
+                    data=input_stream.read1(65536) if hasattr(input_stream,'read1') else input_stream.read(65536)
                     if not data:break
                     s.sendall(data)
                 s.shutdown(socket.SHUT_WR)
@@ -466,7 +475,7 @@ def peer_receive():
         while True:
             data=s.recv(65536)
             if not data:break
-            sys.stdout.buffer.write(data);sys.stdout.buffer.flush()
+            output_stream.write(data);output_stream.flush()
 
 def askpass():
     path=Path(os.environ['WALLABY_ASKPASS_SOCKET'])

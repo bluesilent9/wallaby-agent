@@ -88,8 +88,9 @@ class WebSecurityTests(unittest.TestCase):
  def tearDown(self):self.server.shutdown();self.server.server_close();self.thread.join();self.env.stop();self.temp.cleanup()
  def call(self,path,headers=None,body=None):
   c=http.client.HTTPConnection('127.0.0.1',self.server.server_port);c.request('POST' if body is not None else 'GET',path,body,headers or {});r=c.getresponse();data=r.read();c.close();return r.status,json.loads(data) if path.startswith('/api') else data
- def test_bundled_timezone_json_is_served_as_json_bytes(self):
-  status,raw=self.call('/timezones.json');self.assertEqual(status,200);self.assertIsInstance(json.loads(raw),list)
+ def test_retired_vault_builder_assets_are_not_served(self):
+  self.assertEqual(self.call('/timezones.json')[0],404)
+  self.assertEqual(self.call('/api/wallets',{'Authorization':'Bearer secret'})[0],404)
  def test_token_and_origin(self):
   self.assertEqual(self.call('/api/state')[0],403)
   self.assertEqual(self.call('/api/state',{'Authorization':'Bearer secret','Origin':'https://evil.test'})[0],403)
@@ -103,7 +104,7 @@ class WebSecurityTests(unittest.TestCase):
  def test_retired_service_is_not_exposed_or_accepted(self):
   headers={'Authorization':'Bearer secret','Content-Type':'application/json'}
   code,data=self.call('/api/state',headers)
-  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development build 8')
+  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development build 9')
   self.assertEqual(set(data['config']['enabled']),{'ddns','dashboard','node'});self.assertNotIn('jellyfin',data['status'])
   self.assertEqual(self.call('/api/toggle',headers,json.dumps({'service':'jellyfin','enabled':True}))[0],400)
  def test_dashboard_toggle_does_not_require_cookie_or_enable_node(self):

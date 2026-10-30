@@ -14,7 +14,10 @@ def digest(value):
 
 class Store:
     def __init__(self,root=None):
-        self.root=Path(root or Config().root);self.root.mkdir(parents=True,exist_ok=True,mode=0o700)
+        from protected_memory import required,root as secure_root
+        self.root=Path(root or (secure_root()/'state' if required() else Config().root));self.root.mkdir(parents=True,exist_ok=True,mode=0o700)
+        from protected_memory import inside
+        if inside():self.identity_root=Config().root
         self.path=self.root/'approvals.json'
     @contextlib.contextmanager
     def edit(self):
@@ -43,6 +46,7 @@ class Store:
         with self.edit() as s:
             if s.get('active_transfer') or s.get('sync_batch'):
                 return False # Freeze all new Dashboard approval work until local completion/cancellation.
+            if s.get('setup_active') and (p['kind']!='wallet_setup_policy' or digest(p['proposal'])!=s['setup_active']):return False
             if key in s['denied'] or key in s['completed'] or key in s['pending']:return False
             if p['kind']=='vault_sync' and digest(p['vault']) in s['vaults']:return False
             if len(s['pending'])>=MAX_ITEMS:raise ValueError('Authorisation queue is full.')
@@ -54,7 +58,7 @@ class Store:
             if s['pending'][key]['proposal']['kind']=='wallet_transfer':raise ValueError('Only Dashboard can remove synchronisation requests. Uncheck a wallet to leave it pending.')
             row=s['pending'].pop(key);s['denied'][key]=row
             kind=row['proposal']['kind']
-            result_kind={'sign_psbt_partial':'partial_sign_result','broadcast_transaction':'broadcast_result','wallet_transfer':'wallet_transfer_result'}.get(kind)
+            result_kind={'sign_psbt_partial':'partial_sign_result','broadcast_transaction':'broadcast_result','wallet_transfer':'wallet_transfer_result','wallet_retire':'wallet_retirement_result'}.get(kind)
             if result_kind:
                 item={'kind':result_kind,'payload':{'request_hash':key,'status':'denied','message':'Denied locally.'}};s['outbox'][digest(item)]=item
             if len(s['denied'])>MAX_ITEMS:raise ValueError('Denied request list is full; remove a record first.')

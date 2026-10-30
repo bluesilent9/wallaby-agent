@@ -9,7 +9,6 @@ from wallet_ops import WalletOps
 from peer_wallet import peer_receive,askpass,check_firewall
 from batch_transfer import BatchTransfer as Transfer
 from approval_store import Store
-from block_clock import timezones_with_offsets
 from configuration import Config,hostname,discover_cookie,SERVICES
 from runtime import runtime_dir,read_status,write_status,apply_config,ctl,worker,monitor,retire_jellyfin
 
@@ -17,6 +16,11 @@ LOCAL_ACTION_LOCK=threading.RLock()
 TRANSFER_LOCK=threading.RLock()
 
 def local_busy(server):
+    from protected_memory import required
+    if required():
+        from secure_bridge import call
+        try:return call('service_status')['busy']
+        except ValueError:return False
     saved=Store().read()
     return bool(getattr(getattr(server,'transfer',None),'sending',False) or saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'))
 
@@ -34,6 +38,10 @@ def picker():
     return str(path.resolve())
 
 def wallet_ops(server):
+    from protected_memory import required
+    if required():
+        from secure_bridge import Proxy
+        return Proxy('wallet')
     v=Config().values
     if not v['cookie']:v['cookie']=discover_cookie()
     existing=getattr(server,'wallet_ops',None)
@@ -45,6 +53,10 @@ def transfer(server):
     with TRANSFER_LOCK:return _transfer(server)
 
 def _transfer(server):
+    from protected_memory import required
+    if required():
+        from secure_bridge import Proxy
+        return Proxy('transfer')
     ops=wallet_ops(server)
     if not getattr(server,'transfer',None):server.transfer=Transfer(ops.core,ops.store)
     if any(server.transfer.core.config.get(k)!=ops.core.config.get(k) for k in ('cookie','rpc_port')):
@@ -52,7 +64,14 @@ def _transfer(server):
     return server.transfer
 
 def workspace(server):
-    (runtime_dir()/'ui-seen.json').write_text(json.dumps({'at':time.time()}))
+    from protected_memory import inside,root as protected_root
+    seen_root=protected_root() if inside() else runtime_dir()
+    (seen_root/'ui-seen.json').write_text(json.dumps({'at':time.time()}))
+    from protected_memory import required
+    if required():
+        from secure_bridge import call
+        try:return call('status' if inside() else 'service_status')
+        except ValueError as error:return {'connected':False,'pending':[],'denied':[],'sync':str(error),'outbox_count':0,'transfer':{},'burn':{},'protected':{'running':False,'message':str(error)},'busy':False}
     saved=wallet_ops(server).store.read()
     try:
         wallet_ops(server).core.ready();connected=True
@@ -82,21 +101,15 @@ class Handler(BaseHTTPRequestHandler):
             if not self.allowed() or self.headers.get('Sec-Fetch-Site')!='same-origin' or self.headers.get('X-Wallaby-UI')!='1':return self.reply(403,{'error':'Local page session access denied.'})
             return self.reply(200,{'token':self.server.token})
         if not self.allowed(self.path.startswith('/api/')):return self.reply(403,{'error':'The local Agent session needs to reconnect.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev8'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev9'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
                 if not v['cookie']:
                     cookie=discover_cookie()
                     if cookie:v['cookie']=cookie;c.save(v)
-                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development build 8','workspace':workspace(self.server)})
-        if self.path.startswith('/api/timezones?'):
-            try:return self.reply(200,timezones_with_offsets(int(parse_qs(urlsplit(self.path).query).get('year',['2026'])[0])))
-            except ValueError:return self.reply(400,{'error':'Choose a valid calendar year.'})
-        if self.path=='/api/wallets':
-            try:return self.reply(200,wallet_ops(self.server).list_wallets())
-            except Exception:return self.reply(503,{'error':'Connect local Bitcoin Core RPC first. Check the cookie and RPC port on Services.'})
-        paths={'/':'index.html','/app.js':'app.js','/workspace.js':'workspace.js','/synchronisation.js':'synchronisation.js','/timezones.json':'timezones.json','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
+                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development build 9','workspace':workspace(self.server)})
+        paths={'/':'index.html','/app.js':'app.js','/workspace.js':'workspace.js','/synchronisation.js':'synchronisation.js','/wallet_setup.js':'wallet_setup.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
         asset_path=urlsplit(self.path).path
         if asset_path not in paths:return self.reply(404,{'error':'Not found.'})
         f=ASSETS/paths[asset_path];mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.json':'application/json; charset=utf-8'}[f.suffix]
@@ -108,12 +121,40 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Content-Type')!='application/json':return self.reply(415,{'error':'JSON required.'})
         try:
             n=int(self.headers.get('Content-Length','0'))
-            if not 0<n<=(3*1024*1024 if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/')) else 16384):raise ValueError('Invalid request size.')
+            if not 0<n<=(3*1024*1024 if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/protected/')) else 16384):raise ValueError('Invalid request size.')
             body=decode(self.rfile.read(n))
             if not isinstance(body,dict):raise ValueError('Invalid settings.')
+            if self.path=='/api/protected/open' and set(body)=={'page'}:
+                from secure_bridge import call
+                return self.reply(200,call('ui.open',body['page']))
+            from protected_memory import required,inside
+            if required() and not inside() and self.path.startswith(('/api/authorise/','/api/synchronisation/','/api/disc/','/api/vault/')):raise ValueError('Open the protected Bitcoin workspace from Services. Wallet information never passes through the ordinary browser service.')
+            if self.path=='/api/protected/stop' and not body:
+                from secure_bridge import stop
+                return self.reply(200,stop())
+            if self.path=='/api/protected/start' and not body:
+                if self.server.preview:raise ValueError('Protected operations are disabled in preview mode.')
+                from secure_bridge import start
+                return self.reply(200,start())
+            if self.path.startswith('/api/disc/'):
+                if self.server.preview:raise ValueError('Disc operations are disabled in preview mode.')
+                from secure_bridge import call
+                if self.path=='/api/disc/drives' and not body:return self.reply(200,call('disc.drives'))
+                if self.path=='/api/disc/probe' and set(body)=={'device'}:return self.reply(200,call('disc.probe',body['device']))
+                if self.path=='/api/disc/burn' and set(body)=={'device','confirmed'}:return self.reply(200,call('disc.burn',body['device'],body['confirmed'],timeout=600))
+                raise ValueError('Invalid disc action.')
             if self.path=='/api/pick-cookie':return self.reply(200,{'path':picker()})
             if self.path.startswith('/api/synchronisation/'):
                 if self.server.preview:raise ValueError('Transfers are disabled in preview mode.')
+                from protected_memory import required
+                if required():
+                    from secure_bridge import call
+                    endpoints={'review':('transfer.review',('id',)),'selection':('transfer.selection',('id','selected','watch_only')),'authorise-batch':('transfer.authorise_batch',('fingerprints',)),'end-receiving':('transfer.stop_receiving',()),'recovery-plan':('recovery.plan',()),'recovery-start':('recovery.start',('id',)),'send-batch':('transfer.send_batch',('credentials',)),'firewall':('transfer.firewall',('id',))}
+                    action=self.path.rsplit('/',1)[1]
+                    if action not in endpoints:raise ValueError('Invalid synchronisation action.')
+                    method,fields=endpoints[action]
+                    if set(body)!=set(fields):raise ValueError('Invalid synchronisation fields.')
+                    return self.reply(200,call(method,*[body[f] for f in fields],timeout=600))
                 t=transfer(self.server)
                 if self.path=='/api/synchronisation/firewall' and set(body)=={'id'}:
                     if transfer(self.server).state()['id']!=body['id']:raise ValueError('Active request changed.')
@@ -141,20 +182,23 @@ class Handler(BaseHTTPRequestHandler):
                     t.sending=True;t.error='';threading.Thread(target=send_batch,daemon=True).start();result={'ok':True}
                 else:raise ValueError('Invalid synchronisation action.')
                 return self.reply(200,result)
-            if self.path.startswith(('/api/vault/','/api/authorise/')):
-                if local_busy(self.server):raise ValueError('Finish the active wallet transfer or history recovery first.')
-                ops=wallet_ops(self.server);store=ops.store
+            if self.path.startswith('/api/authorise/'):
                 if self.server.preview:raise ValueError('Wallet operations are disabled in preview mode.')
-                if self.path=='/api/vault/build' and set(body)=={'source','destination','fee_rate','date','timezone'}:
-                    result=ops.build(body['source'],body['destination'],body['fee_rate'],body['date'],body['timezone'])
-                elif self.path=='/api/vault/sign' and set(body)=={'id','password','action'}:
-                    if not isinstance(body['password'],str) or len(body['password'])>1024:raise ValueError('Invalid wallet passphrase.')
-                    result=ops.sign(body['id'],body['password'],body['action'])
-                elif self.path=='/api/authorise/review' and set(body)=={'id'}:result=ops.prepare_request(body['id'])
+                from protected_memory import required
+                if required():
+                    from secure_bridge import call
+                    actions={'cancel-setup':('setup.cancel',('id',)),'history':('authorise.history',('id',)),'review':('authorise.review',('id',)),'approve':('authorise.approve',('id',)),'deny':('authorise.deny',('id',)),'forget':('authorise.forget',('id',)),'participate':('setup.participate',('id','pins')),'sign':('wallet.sign',('id','action'))}
+                    action=self.path.rsplit('/',1)[1]
+                    if action not in actions:raise ValueError('Invalid local authorisation action.')
+                    method,fields=actions[action]
+                    if set(body)!=set(fields):raise ValueError('Only public authorisation fields are accepted; passphrases are entered in the protected native dialogue.')
+                    return self.reply(200,call(method,*[body[f] for f in fields],timeout=600))
+                ops=wallet_ops(self.server);store=ops.store
+                if self.path=='/api/authorise/review' and set(body)=={'id'}:result=ops.prepare_request(body['id'])
                 elif self.path=='/api/authorise/approve' and set(body)=={'id'}:result=ops.approve_sync(body['id'])
                 elif self.path=='/api/authorise/deny' and set(body)=={'id'}:store.deny(body['id']);result={'ok':True}
                 elif self.path=='/api/authorise/forget' and set(body)=={'id'}:store.forget(body['id']);result={'ok':True}
-                else:raise ValueError('Invalid local approval action or fields.')
+                else:raise ValueError('Invalid local authorisation action.')
                 return self.reply(200,result)
 
             with self.server.config_lock:
@@ -184,9 +228,9 @@ class Handler(BaseHTTPRequestHandler):
                 if self.server.preview:c.save(v)
                 else:apply_config(c,v)
             self.reply(200,{'ok':True})
-        except ValueError as error:self.reply(400,{'error':str(error) if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/')) else 'Check the hostname, settings and file paths. IP addresses are not allowed.'})
+        except ValueError as error:self.reply(400,{'error':str(error) if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/protected/')) else 'Check the hostname, settings and file paths. IP addresses are not allowed.'})
         except (TypeError,KeyError):self.reply(400,{'error':'Invalid request or expired review. Refresh this page and review again.'})
-        except Exception:self.reply(503,{'error':'The wallet operation failed or its outcome is uncertain. Check Core and review again; it was not automatically replayed.' if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/')) else 'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
+        except Exception:self.reply(503,{'error':'The wallet operation failed or its outcome is uncertain. Check Core and review again; it was not automatically replayed.' if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/protected/')) else 'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
 
 class Server(ThreadingHTTPServer):
     daemon_threads=True
@@ -196,7 +240,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev8'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev9'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -204,12 +248,17 @@ def serve(preview=False):
 
 def bootstrap():
     retire_jellyfin()
+    from protected_memory import required
+    if required() and Config().values['enabled']['node']:
+        from secure_bridge import ensure_running
+        try:ensure_running()
+        except (ValueError,subprocess.TimeoutExpired):pass
     names=[key for key in ('DISPLAY','WAYLAND_DISPLAY','XAUTHORITY','DBUS_SESSION_BUS_ADDRESS','SSH_AUTH_SOCK') if key in os.environ]
     if names:ctl('import-environment',*names)
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev8':
+    if installed!='2.0.0~dev9':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -219,13 +268,17 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev8') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev9') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)
             import http.client
             conn=http.client.HTTPConnection('127.0.0.1',d['port'],timeout=1);conn.request('GET','/api/health',headers={'Authorization':'Bearer '+d['token']});r=conn.getresponse();r.read();conn.close()
             if r.status==200:
+                from protected_memory import required
+                if required() and page!='services':
+                    from secure_bridge import call
+                    call('ui.open',page);return
                 webbrowser.open(f"http://127.0.0.1:{d['port']}/?page="+page);return
         except (OSError,ValueError):pass
         time.sleep(.1)

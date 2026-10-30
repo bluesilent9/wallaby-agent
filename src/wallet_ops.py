@@ -156,6 +156,8 @@ class WalletOps:
         if not tx.get('vin') or len(tx['vin'])!=len(scopes) or len(scopes)>1000 or len(tx.get('vout',[]))>1000:raise ValueError('Invalid or oversized transaction.')
         names=rpc(self.core,'listwallets');inputs=[];outputs=[];total=0;own=False
         local_vaults=self.store.read()['vaults']
+        from wallet_setup_signing import inventory
+        shared_inventory=inventory(self.core)
         def owners(address):
             result=[];change=False
             if address:
@@ -168,6 +170,10 @@ class WalletOps:
                 if v['address']==address:
                     for name in verify_vault(self.core,v)['local_key_wallets']:
                         if name not in result:result.append(name)
+            from wallet_setup_signing import matches
+            for record in matches(self.core,self.store,address,shared_inventory):
+                for name in record['wallets']:
+                    if name not in result:result.append(name)
             return result,change
         for vin,scope in zip(tx['vin'],scopes):
             if scope.get('sighash','ALL') not in ('ALL','DEFAULT'):raise ValueError('Only signatures committing to the entire transaction are accepted.')
@@ -182,6 +188,10 @@ class WalletOps:
             if previous.get('txid')!=vin['txid'] or type(vin['vout']) is not int or not 0<=vin['vout']<len(previous['vout']):raise ValueError('Input outpoint failed verification.')
             prev=previous['vout'][vin['vout']];value=sats(prev['value']);spk=prev['scriptPubKey'];address=spk.get('address','');local,change=owners(address)
             if wallet in local:own=True
+            from wallet_setup_signing import matches
+            for policy in matches(self.core,self.store,address,shared_inventory):
+                if not policy['setup_ready']:raise ValueError('This wallet setup lacks independently verified policy or physical-backup completion. Dashboard cannot declare it ready without the signed proofs.')
+                if policy['height'] is not None and (tx['locktime']>=500000000 or tx['locktime']<policy['height'] or vin['sequence']==0xffffffff):raise ValueError('The final transaction bypasses or changes an approved mandatory vault height.')
             witness=scope.get('witness_utxo')
             if witness and (sats(witness['amount'])!=value or witness['scriptPubKey']['hex']!=spk['hex']):raise ValueError('PSBT witness input differs from the locally verified previous output.')
             nonwitness=scope.get('non_witness_utxo')
@@ -273,6 +283,13 @@ class WalletOps:
                 for record in self.store.read()['vaults'].values():
                     if record['public']['address'] in [i['address'] for i in current['inputs']]:
                         signing_psbt=rpc(self.core,'walletprocesspsbt',{'psbt':signing_psbt,'sign':False,'bip32derivs':True,'finalize':False},record['monitor_wallet'])['psbt']
+                for record in self.store.read().get('approved_wallets',{}).values():
+                    if p['wallet'] in record['signing_wallets'].values():signing_psbt=rpc(self.core,'walletprocesspsbt',{'psbt':signing_psbt,'sign':False,'bip32derivs':True,'finalize':False},record['monitor_wallet'])['psbt']
+                from wallet_setup_signing import matches
+                from wallet_setup_signing import inventory
+                known_shared=inventory(self.core)
+                monitors={record['monitor_wallet'] for vin in current['inputs'] for record in matches(self.core,self.store,vin['address'],known_shared) if p['wallet'] in record['wallets']}
+                for name in sorted(monitors):signing_psbt=rpc(self.core,'walletprocesspsbt',{'psbt':signing_psbt,'sign':False,'bip32derivs':True,'finalize':False},name)['psbt']
                 sign_attempted=True
                 signed=rpc(self.core,'walletprocesspsbt',{'psbt':signing_psbt,'sign':True,'bip32derivs':True,'finalize':False},p['wallet'])
             except Exception:

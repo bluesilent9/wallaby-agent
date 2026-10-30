@@ -64,6 +64,7 @@ def selected(store,direction):
 def freeze(store,keys,direction):
     if not keys or len(keys)!=len(set(keys)):raise ValueError('Select at least one wallet.')
     with store.edit() as s:
+        if s.get('setup_active'):raise ValueError('Finish the current wallet setup and physical backups first.')
         if s.get('active_transfer') or s.get('sync_batch') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):raise ValueError('Another wallet operation or history recovery is active.')
         options={}
         for key in keys:

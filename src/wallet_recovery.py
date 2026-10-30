@@ -181,6 +181,7 @@ class Recovery:
         with self.lock:
             saved=self.store.read();p=saved.get('recovery_plan',{})
             if p.get('id')!=key or time.time()-p['plan']['created']>300 or p['plan']['requirements']!=digest(saved.get('history_jobs',{})):raise ValueError('Recovery plan changed or expired. Review again.')
+            if saved.get('setup_active'):raise ValueError('Finish wallet setup and its physical backups before recovery.')
             if saved.get('sync_batch') or saved.get('active_transfer'):raise ValueError('Finish the direct wallet transfer before recovering history.')
             if self.thread and self.thread.is_alive():raise ValueError('Recovery is already running.')
             if saved.get('recovery',{}).get('state') not in TERMINAL|{None}:raise ValueError('Previous recovery is still active. Inspect its status before continuing.')
@@ -242,7 +243,7 @@ class Recovery:
         with self.store.edit() as saved:
             if saved['history_jobs'][key]['state']!='pending':raise ValueError('A previous restoration was attempted. Inspect/load that wallet in Core; restoration will not be repeated automatically.')
             saved['history_jobs'][key]['state']='attempted'
-        rpc(self.core,'restorewallet',{'wallet_name':name,'backup_file':job['staged'],'load_on_startup':True},timeout=86400)
+        rpc(self.core,'restorewallet',{'wallet_name':name,'backup_file':__import__('core_ram_path').for_core(self.core,job['staged']),'load_on_startup':True},timeout=86400)
     def register_watch_history(self,name,details):
         requests=[]
         for row in details['public_wallet']['descriptors']:
@@ -314,7 +315,9 @@ class Recovery:
                     else:rpc(self.core,'rescanblockchain',[chain.get('pruneheight',-1)+1 if chain.get('pruned') else 0],name,timeout=86400)
                 self.check_wallet(name,job)
                 verify_history(self.core,name,job['details'],self.store);processed.add(name)
-                self.store.queue('wallet_transfer_result',{'request_hash':key,'status':'complete','message':'Wallet and vault history verified; pruning settings were unchanged throughout recovery.'})
+                from build8_policy import descriptors
+                with self.store.edit() as saved:saved.setdefault('history_coverage',{})[name]={'identity':digest(sorted(descriptors(job['details']['public_wallet']))),'from_time':job['timestamp'],'tip':chain['bestblockhash']}
+                if not job.get('local_only'):self.store.queue('wallet_transfer_result',{'request_hash':key,'status':'complete','message':'Wallet and vault history verified; pruning settings were unchanged throughout recovery.'})
                 with self.store.edit() as saved:
                     saved['history_jobs'].pop(key);saved['pending'].pop(key,None);saved['completed'][key]={'kind':'wallet_transfer','at':time.time()}
                 if stage:Path(stage).unlink(missing_ok=True)

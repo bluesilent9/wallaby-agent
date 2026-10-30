@@ -58,6 +58,7 @@ def discover_cookie(home=None,proc=Path('/proc')):
             args=(p/'cmdline').read_bytes().decode().strip('\0').split('\0')
             if Path(args[0]).name not in ('bitcoind','bitcoin-qt'):continue
             opts={a.split('=',1)[0]:a.split('=',1)[1] for a in args[1:] if '=' in a}
+            if opts.get('-datadir','').startswith('/run/wallaby-agent-secure/'):continue
             if '-datadir' in opts:roots.append(Path(opts['-datadir']).expanduser())
             if '-rpccookiefile' in opts:
                 q=Path(opts['-rpccookiefile']).expanduser()

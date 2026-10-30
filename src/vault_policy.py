@@ -41,6 +41,9 @@ def public_vault(v):
 
 def validate_proposal(p):
     if not isinstance(p,dict):raise ValueError('Invalid approval proposal.')
+    if p.get('kind') in ('wallet_retire','wallet_setup','wallet_setup_policy','wallet_setup_identity','wallet_setup_complete'):
+        from setup_policy import proposal
+        return proposal(p)
     if p.get('kind')=='vault_sync' and set(p)=={'kind','vault'}:public_vault(p['vault'])
     elif p.get('kind')=='sign_psbt':
         raise ValueError('Legacy immediate-broadcast signing is disabled; update Dashboard.')
