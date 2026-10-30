@@ -2,11 +2,13 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 12
+# Wallaby Agent V2 — Development Build 13
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 12 DEB](dist/wallaby-agent_2.0.0~dev12_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 13 DEB](dist/wallaby-agent_2.0.0~dev13_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 13 fixes tunnel-only installation on Ubuntu 26.04. The unavailable legacy `policykit-1` dependency is removed. Bitcoin Core, PyQt6 WebEngine, optical writing tools and administrator-authorisation tools are **optional** and are not automatically installed with the Agent. DDNS-GO and Dashboard browser-access tunnels work without Bitcoin Core. A missing Bitcoin prerequisite leaves the node switch off and greyed; clicking it explains what is missing without enabling its service or changing other tunnels. Existing node services report prerequisite problems before creating their tunnel; login does not launch an unavailable Bitcoin workspace.
 
 Build 12 incorporates the Agent follow-up for **Dashboard V1 Build 13**. Transaction diagrams show the verified **Total network fee**, with a separate local acknowledgement for unusually high fees. Native prompts identify the exact Core signing wallet and action; disc-backup and computer-login passwords are explicitly distinguished. Wallet creation verifies one full fingerprint per distinct producing Agent, binding all its roles to that identity. Retired local Vault Builder generation helpers are removed; current wallet-policy creation, archive restoration, vault checks and signing remain.
 
@@ -20,7 +22,13 @@ Disc Operations, archived-key signing, redundant optical backups, BIP-322 messag
 
 ## Install and start
 
-Install the DEB with your normal package manager so its dependencies are installed: Python/cryptography, PyQt6 WebEngine, OpenSSH client, systemd, policykit, xorriso and a native password dialogue (kdialog or zenity). All connection services remain off on a fresh install. Existing saved service choices are retained on upgrade.
+Install the DEB with your normal package manager. Mandatory runtime dependencies are Python 3, OpenSSH client, systemd, xdg-utils, iproute2, Python cryptography and util-linux. All connection services remain off on a fresh install. Existing saved service choices are retained on upgrade.
+
+**Tunnel-only computer:** no Bitcoin, Qt WebEngine, xorriso or polkit installation is needed. Ignore the unavailable node-interface explanation and use DDNS-GO or Dashboard normally.
+
+**Bitcoin computer:** install optional protected-desktop components with `sudo apt install pkexec polkitd python3-pyqt6 python3-pyqt6.qtwebengine kdialog` (an existing zenity can replace kdialog). Qt WebEngine is in Ubuntu Universe; if apt cannot find it, check that repository and the machine’s package configuration. Install Bitcoin Core separately using your chosen supported distribution, including Snap, enable its RPC server and choose/discover its readable cookie. There is no dependency or recommendation on an apt package named `bitcoind`. Prerequisite detection uses the configured cookie and optional viewer/dialogue tools; actual Core RPC and Dashboard readiness are checked when connecting. An installed but stopped/misconfigured Core is not declared connected.
+
+**Optical operations:** additionally install `xorriso` when needed: `sudo apt install xorriso`. Its absence produces a specific message when media is checked and does not block node reporting or SSH tunnels.
 
 On upgrade, finish sensitive work, switch off the node interface and close the existing protected workspace before restarting it with this build. The installer does not forcibly terminate a running RAM signing/setup session. A reboot after finishing that work also starts the new installed code.
 
@@ -109,6 +117,7 @@ Bitcoin Agent inbox/outbox/reviews and temporary jobs are volatile. Keep the wor
 
 The source and compiled Ubuntu 26.04 amd64 DEB are on **Development**. The GitHub default is Stable; open [Development explicitly](https://github.com/bluesilent9/wallaby-agent/tree/Development). Stable is unchanged.
 
+- [Build 12 installer](dist/wallaby-agent_2.0.0~dev12_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/8aaa31b823c898260162a0dc28329ccf43f40fae)
 - [Build 11 installer](dist/wallaby-agent_2.0.0~dev11_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/e8fbfbaa916532681b3f4344737ef254bf76ae5b)
 - [Build 10 installer](dist/wallaby-agent_2.0.0~dev10_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/51e483e8559dec9a6f5855c5fa7d68736201354f)
 - [Build 9 installer](dist/wallaby-agent_2.0.0~dev9_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/0be3e95c236ebc8ffd57e4bf7f675d82cdfb0916)

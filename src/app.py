@@ -4,6 +4,7 @@ import argparse, copy, fcntl, hmac, json, os, secrets, shutil, subprocess, sys, 
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
+from capabilities import node_support,require_node,NodeUnavailable
 from node_client import Core,decode
 from wallet_ops import WalletOps
 from peer_wallet import peer_receive,askpass,check_firewall
@@ -101,14 +102,14 @@ class Handler(BaseHTTPRequestHandler):
             if not self.allowed() or self.headers.get('Sec-Fetch-Site')!='same-origin' or self.headers.get('X-Wallaby-UI')!='1':return self.reply(403,{'error':'Local page session access denied.'})
             return self.reply(200,{'token':self.server.token})
         if not self.allowed(self.path.startswith('/api/')):return self.reply(403,{'error':'The local Agent session needs to reconnect.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev12'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev13'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
                 if not v['cookie']:
                     cookie=discover_cookie()
                     if cookie:v['cookie']=cookie;c.save(v)
-                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development build 9','workspace':workspace(self.server)})
+                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development Build 13','node_support':node_support(v),'workspace':workspace(self.server)})
         paths={'/':'index.html','/app.js':'app.js','/workspace.js':'workspace.js','/synchronisation.js':'synchronisation.js','/wallet_setup.js':'wallet_setup.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
         asset_path=urlsplit(self.path).path
         if asset_path not in paths:return self.reply(404,{'error':'Not found.'})
@@ -233,11 +234,13 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path=='/api/toggle':
                     if set(body)!={'service','enabled'} or body['service'] not in SERVICES or type(body['enabled']) is not bool:raise ValueError('Invalid service toggle.')
                     if body['enabled'] and not v['hostname']:raise ValueError('Accept a server name first.')
+                    if body['service']=='node' and body['enabled']:require_node(v)
                     v['enabled'][body['service']]=body['enabled']
                 else:return self.reply(404,{'error':'Not found.'})
                 if self.server.preview:c.save(v)
                 else:apply_config(c,v)
             self.reply(200,{'ok':True})
+        except NodeUnavailable as error:self.reply(400,{'error':str(error)})
         except ValueError as error:self.reply(400,{'error':str(error) if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/protected/')) else 'Check the hostname, settings and file paths. IP addresses are not allowed.'})
         except (TypeError,KeyError):self.reply(400,{'error':'Invalid request or expired review. Refresh this page and review again.'})
         except Exception:self.reply(503,{'error':'The wallet operation failed or its outcome is uncertain. Check Core and review again; it was not automatically replayed.' if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/protected/')) else 'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
@@ -250,7 +253,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev12'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev13'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -261,14 +264,14 @@ def bootstrap():
     from protected_memory import required
     if required() and Config().values['enabled']['node']:
         from secure_bridge import ensure_running
-        try:ensure_running()
-        except (ValueError,subprocess.TimeoutExpired):pass
+        try:require_node();ensure_running()
+        except (ValueError,subprocess.TimeoutExpired) as error:write_status('node','red',str(error) if isinstance(error,NodeUnavailable) else 'Protected Bitcoin workspace could not start. Open Services to review its setup.',tunnel=False)
     names=[key for key in ('DISPLAY','WAYLAND_DISPLAY','XAUTHORITY','DBUS_SESSION_BUS_ADDRESS','SSH_AUTH_SOCK') if key in os.environ]
     if names:ctl('import-environment',*names)
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev12':
+    if installed!='2.0.0~dev13':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -278,7 +281,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev12') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev13') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

@@ -38,6 +38,8 @@ def ensure_running():
     raise ValueError('Protected workspace did not become ready.')
 
 def start():
+    from capabilities import require_node
+    require_node()
     # Permission is requested by the native OS dialogue for this fixed helper only.
     from configuration import Config
     config=Config();config.root.mkdir(parents=True,mode=0o700,exist_ok=True)

@@ -1,8 +1,12 @@
-# Agent V2 Development Build 12 validation
+# Agent V2 Development Build 13 validation
 
 Target: Ubuntu 26.04 LTS amd64, Bitcoin Core 31. Development only.
 
 ## Verified
+
+- Build 13 adds ten targeted tests for optional Bitcoin dependencies, installation metadata, a Snap/manual Core cookie without an apt bitcoind requirement, clear missing-disc-tool advice, refusal before OS authorisation, usable DDNS-GO/Dashboard HTTP controls with Bitcoin unavailable, rejected node enable without saving it or changing other tunnels, unconditional ability to switch an old node setting off, login without unavailable Bitcoin-workspace startup, and worker prerequisite checks before creating a node tunnel.
+- Shipped service-control JavaScript passes a Node VM test: missing prerequisites grey only the node switch, its click reports the reason without sending an enable request, existing node enablement can be switched off, and Services/DDNS-GO/Dashboard controls remain available. This supplements the real HTTP API tests.
+- Build 13 removes policykit-1 and all Bitcoin/Qt/optical requirements from Depends/Recommends. Optional packages are in Suggests only. Local Ubuntu 26.04 apt metadata confirms policykit-1 has no candidate while pkexec/polkitd and PyQt6 WebEngine have candidates. Installer dependency simulation and final package parity are recorded with this build’s artifacts; no real package installation is performed by the build workflow.
 
 - Build 12 final regression suite: **152 tests passed in 253.304 seconds** with isolated Bitcoin Core 31 regtest nodes. Eleven new tests cover local fee thresholds and Core-owned change, acknowledgement before unlock/attempt, exact routed Core wallet/action prompts, retired builder removal, default one disc/slowest speed, reported-speed parsing, invalid settings, explicit multi-disc continuation, single package reuse, full per-disc verification, failed read-back and uncertain completion without replay. Existing real Core creation tests now also verify one fingerprint binds three distinct roles from one producer and rejects a mismatched fingerprint before any native passphrase prompt.
 - Actual xorriso virtual-track streaming accepts the new minimum-speed default and passes full direct read-back/salvage. Physical drive speed selection and multi-disc M-Disc handling remain hardware checks. The shipped Disc Operations controls were checked in a browser with synthetic public data: one disc and Slowest supported remain selected after reported 2×/4×/6× choices appear. No physical write was requested.

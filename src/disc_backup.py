@@ -1,5 +1,5 @@
 """Encrypted optical recovery packages. All paths belong to the protected RAM workspace."""
-import hashlib,json,mmap,os,re,stat,subprocess,threading,time,zipfile
+import hashlib,json,mmap,os,re,stat,subprocess,threading,time,zipfile,shutil
 from pathlib import Path
 from cryptography.hazmat.primitives.ciphers import Cipher,algorithms,modes
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -103,6 +103,7 @@ def speed_value(speed):
     return speed
 
 def media(device):
+    if not shutil.which('xorriso'):raise ValueError('Disc Operations requires the optional xorriso package. Install it with: sudo apt install xorriso. SSH tunnels and node reporting do not require it.')
     if not isinstance(device,str) or not re.fullmatch(r'/dev/sr[0-9]{1,2}',device):raise ValueError('Select a local optical drive.')
     st=os.stat(device,follow_symlinks=False)
     if not stat.S_ISBLK(st.st_mode) or os.major(st.st_rdev)!=11:raise ValueError('Device is not a Linux optical drive.')

@@ -57,7 +57,7 @@ class Workspace:
         import secrets,importlib.util
         try:available=importlib.util.find_spec('PyQt6.QtWebEngineWidgets')
         except ModuleNotFoundError:available=None
-        if available is None:raise ValueError('The protected HTML5 viewer is unavailable. Install the complete Build 12 DEB with its PyQt6 WebEngine dependencies; wallet data will not be opened in an ordinary browser.')
+        if available is None:raise ValueError('The protected HTML5 viewer is unavailable. Install optional python3-pyqt6 and python3-pyqt6.qtwebengine packages; wallet data will not be opened in an ordinary browser.')
         if self.view_server is None:
             from app import Server,Handler
             owner=self

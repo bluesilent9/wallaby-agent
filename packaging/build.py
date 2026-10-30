@@ -9,14 +9,13 @@ def put(path,text,mode=0o644):
  p=stage/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);p.chmod(mode)
 arch=subprocess.check_output(['dpkg','--print-architecture'],text=True).strip()
 put('DEBIAN/control',f'''Package: wallaby-agent
-Version: 2.0.0~dev12
+Version: 2.0.0~dev13
 Section: utils
 Priority: optional
 Architecture: {arch}
 Maintainer: Wallaby Suite <347047153+bluesilent9@users.noreply.github.com>
-Depends: python3 (>= 3.11), openssh-client, systemd, xdg-utils, iproute2, python3-cryptography, policykit-1, xorriso, util-linux, python3-pyqt6.qtwebengine, python3-pyqt6
-Recommends: kdialog | zenity, bitcoind
-Suggests: openssh-server, ufw, policykit-1
+Depends: python3 (>= 3.11), openssh-client, systemd, xdg-utils, iproute2, python3-cryptography, util-linux
+Suggests: pkexec, polkitd, python3-pyqt6, python3-pyqt6.qtwebengine, kdialog | zenity, xorriso, openssh-server, ufw
 Description: Wallaby Agent V2 Development
  Per-user IPv6 tunnels, read-only node RPC and local wallet authorisation.
  All tunnels are off on first install. Includes an HTML5 configuration page.
@@ -194,6 +193,6 @@ if [ -d /sys/kernel/security/apparmor ] && command -v apparmor_parser >/dev/null
 if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q || true; fi
 exit 0
 ''',0o755)
-out=root/'dist'/f'wallaby-agent_2.0.0~dev12_{arch}.deb';out.parent.mkdir(exist_ok=True)
+out=root/'dist'/f'wallaby-agent_2.0.0~dev13_{arch}.deb';out.parent.mkdir(exist_ok=True)
 subprocess.run(['dpkg-deb','--root-owner-group','--build',str(stage),str(out)],check=True)
 print(out)

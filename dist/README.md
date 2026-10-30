@@ -1,11 +1,11 @@
 # Wallaby Agent Development installers
 
-Current: **V2 Development Build 12**, Ubuntu 26.04 LTS amd64.
+Current: **V2 Development Build 13**, Ubuntu 26.04 LTS amd64.
 
-Install `wallaby-agent_2.0.0~dev12_amd64.deb` with your normal package manager. Finish sensitive work and close the existing protected workspace before restarting it with this build; the installer does not forcibly destroy an active RAM session. Services settings are retained. New installations start with all tunnels off.
+Install `wallaby-agent_2.0.0~dev13_amd64.deb` using your normal package manager. Tunnel-only clients do not need Bitcoin Core, PyQt6 WebEngine, xorriso or pkexec/polkitd. These are optional suggestions, not dependencies or automatically installed recommendations. The unavailable policykit-1 dependency and bitcoind recommendation are removed.
 
-Build 12 adds Dashboard Build 13's local fee/prompt/identity follow-up and separate-disc count/speed controls. Burning defaults to one disc at the slowest supported drive/media speed; every disc still holds repeated recovery copies and is fully verified. Later discs require new local confirmation.
+DDNS-GO and Dashboard browser-access tunnels remain usable. An unavailable node switch stays off and explains its prerequisites. Bitcoin clients can install pkexec, polkitd, PyQt6/WebEngine and a native passphrase dialogue separately, then install/start Core with RPC and configure its cookie. Snap/manual Core installations do not require an apt package named bitcoind. Optical work additionally needs xorriso.
 
-Build 11's storage boundary remains: it persists only the local wallet-sync Denial list in addition to existing Services settings. Ordinary signing/setup declines and Bitcoin working data remain volatile. No Dashboard update is needed for the Agent to enforce its list across reboots.
+Services settings are retained on upgrade. Fresh installations have all tunnels off. Finish sensitive Bitcoin work and close an existing protected workspace before upgrading/restarting it; the installer does not destroy active RAM sessions.
 
-Verify SHA256SUMS.txt before installation. Earlier installers remain here; matching source commits are linked in the main README. Development only. See VALIDATION.md for deployment limits.
+Verify SHA256SUMS.txt before installation. Earlier installers remain here. Development only. See the main README and VALIDATION.md for tests and deployment limits.
