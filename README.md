@@ -8,9 +8,9 @@ Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable relea
 
 [Build 9 DEB](dist/wallaby-agent_2.0.0~dev9_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Dashboard integration handoff](DASHBOARD_BUILD9_UPDATE.md)
 
-Build 9 adds locally approved wallet retirement, authenticated single-signature/M-of-N wallet setup, mandatory-height variants, and encrypted M-Disc preparation/verification in a protected RAM workflow. The local Vault Builder page is removed; proposals originate from the future Dashboard Wallet Builder and are independently verified on **Authorise**. **Burn Disc** unlocks only after the exact local policy is authorised for a physical role.
+Build 9 adds locally approved wallet retirement, authenticated single-signature/M-of-N wallet setup, mandatory-height variants, and encrypted M-Disc preparation/verification in a protected RAM workflow. The local Vault Builder page is removed; proposals originate from Dashboard V1 Build 11’s Wallet Builder and are independently verified on **Authorise**. **Burn Disc** unlocks only after the exact local policy is authorised for a physical role.
 
-**Dashboard V1 Build 10 already supports the synchronization queue and retirement proposal. Its Wallet Builder is not implemented yet.** Add the new protocol in [DASHBOARD_BUILD9_UPDATE.md](DASHBOARD_BUILD9_UPDATE.md) before using new-wallet/disc orchestration. No Dashboard source is changed here. Existing RPC remains a positive public/read-only allowlist; Dashboard cannot directly create/unlock/import/delete wallets, export keys, sign, broadcast or restart Core.
+**Dashboard V1 Build 11 implements Wallet Builder and this setup protocol.** [Dashboard Development](https://github.com/bluesilent9/wallaby-dashboard/tree/Development) verifies signed setup contributions, policy approvals and every required physical-backup proof, then relays authenticated completion. It collects distinct cosigner signatures per input and avoids synchronizing intentional signing accounts as missing wallets. Agent Build 9 still lacks a guided disc-restore signing UI; restore an encrypted cosigner locally before Dashboard routes a signing request to its matching account. No private recovery package or passphrase goes to Dashboard. Existing RPC remains a positive public/read-only allowlist; Dashboard cannot directly create/unlock/import/delete wallets, export keys, sign, broadcast or restart Core.
 
 ## Install and start
 
@@ -51,7 +51,7 @@ For an existing Snap Core's encrypted file transfers/restoration, a small privil
 
 ## Make Extinct
 
-Dashboard Build 10's request is handled locally on Authorise. The Agent verifies public descriptor identity against the exact private Core wallet or a restricted shared policy with matching local private signing accounts, complete confirmed history and zero funds, including pending/immature/watch balances, locked outputs and associated vault/shared-policy monitors. It reconstructs used receiving and change addresses for review. Existing exact address-specific `LOST` labels are preserved; retirement never invents a loss declaration.
+Dashboard Build 11's request is handled locally on Authorise. The Agent verifies public descriptor identity against the exact private Core wallet or a restricted shared policy with matching local private signing accounts, complete confirmed history and zero funds, including pending/immature/watch balances, locked outputs and associated vault/shared-policy monitors. It reconstructs used receiving and change addresses for review. Existing exact address-specific `LOST` labels are preserved; retirement never invents a loss declaration.
 
 Approval imports public `addr()` records into a private-key-disabled historical archive. The original private wallet is **never deleted or unloaded**. If history cannot be established on a pruned node, the user can prepare a local history requirement and separately authorise recovery on Synchronisation. Retirement still requires a fresh review afterwards. An uncertain import is not replayed automatically.
 
