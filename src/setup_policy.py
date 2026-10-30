@@ -9,7 +9,7 @@ from vendor.embit.descriptor.checksum import checksum
 
 HEX=re.compile(r'[0-9a-f]{64}')
 
-def proposal(p):
+def proposal(p,allow_expired=False):
     if not isinstance(p,dict):raise ValueError('Invalid wallet setup message.')
     if p.get('kind')=='wallet_setup_complete':
         if set(p)!={'kind','version','proposal_hash','policy_hash','acknowledgements'} or p['version']!=1 or any(not HEX.fullmatch(str(p[k])) for k in ('proposal_hash','policy_hash')) or not isinstance(p['acknowledgements'],list) or len(p['acknowledgements'])>64:raise ValueError('Invalid completion proof fields.')
@@ -22,7 +22,7 @@ def proposal(p):
         return validate(p)
     if p.get('kind')=='wallet_setup':
         if set(p)!={'kind','version','session_id','chain','name','threshold','cosigners','height','expires_at'} or p['version']!=1:raise ValueError('Invalid setup proposal fields.')
-        if not HEX.fullmatch(str(p['session_id'])) or p['chain'] not in NETWORK or type(p['expires_at']) is not int or not time.time()<p['expires_at']<=time.time()+86400:raise ValueError('Expired or invalid setup session.')
+        if not HEX.fullmatch(str(p['session_id'])) or p['chain'] not in NETWORK or type(p['expires_at']) is not int or (not allow_expired and not time.time()<p['expires_at']<=time.time()+86400) or (allow_expired and p['expires_at']<=0):raise ValueError('Expired or invalid setup session.')
         text(p['name'],128)
         if '|' in p['name']:raise ValueError('Wallet name must not contain archive separators.')
         if not isinstance(p['cosigners'],list) or not 1<=len(p['cosigners'])<=15 or type(p['threshold']) is not int or not 1<=p['threshold']<=len(p['cosigners']):raise ValueError('Use 1 to 15 independent cosigners and a valid threshold.')
@@ -54,8 +54,8 @@ def public_key(value,branch,chain):
     if not value.split(']')[0].replace("'",'h').endswith('/84h/'+str(expected)+'h/0h'):raise ValueError('Contribution coin type mismatch.')
     return key
 
-def policy(p,contributions):
-    proposal(p);roles={r['id']:r for r in p['cosigners']};seen=set();keys={0:[],1:[]};account_ids=set()
+def policy(p,contributions,allow_expired=False):
+    proposal(p,allow_expired);roles={r['id']:r for r in p['cosigners']};seen=set();keys={0:[],1:[]};account_ids=set()
     for c in contributions:
         if not isinstance(c,dict) or set(c)!={'session_id','proposal_hash','cosigner_id','receive_key','change_key'} or c['session_id']!=p['session_id'] or c['proposal_hash']!=digest(p) or c['cosigner_id'] not in roles or c['cosigner_id'] in seen:raise ValueError('Contribution identity or proposal binding differs.')
         seen.add(c['cosigner_id']);accounts=[]

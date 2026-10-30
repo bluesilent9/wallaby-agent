@@ -101,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.allowed() or self.headers.get('Sec-Fetch-Site')!='same-origin' or self.headers.get('X-Wallaby-UI')!='1':return self.reply(403,{'error':'Local page session access denied.'})
             return self.reply(200,{'token':self.server.token})
         if not self.allowed(self.path.startswith('/api/')):return self.reply(403,{'error':'The local Agent session needs to reconnect.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev9'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev10'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
@@ -121,14 +121,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Content-Type')!='application/json':return self.reply(415,{'error':'JSON required.'})
         try:
             n=int(self.headers.get('Content-Length','0'))
-            if not 0<n<=(3*1024*1024 if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/protected/')) else 16384):raise ValueError('Invalid request size.')
+            if not 0<n<=(3*1024*1024 if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/protected/')) else 16384):raise ValueError('Invalid request size.')
             body=decode(self.rfile.read(n))
             if not isinstance(body,dict):raise ValueError('Invalid settings.')
             if self.path=='/api/protected/open' and set(body)=={'page'}:
                 from secure_bridge import call
                 return self.reply(200,call('ui.open',body['page']))
             from protected_memory import required,inside
-            if required() and not inside() and self.path.startswith(('/api/authorise/','/api/synchronisation/','/api/disc/','/api/vault/')):raise ValueError('Open the protected Bitcoin workspace from Services. Wallet information never passes through the ordinary browser service.')
+            if required() and not inside() and self.path.startswith(('/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/vault/')):raise ValueError('Open the protected Bitcoin workspace from Services. Wallet information never passes through the ordinary browser service.')
             if self.path=='/api/protected/stop' and not body:
                 from secure_bridge import stop
                 return self.reply(200,stop())
@@ -136,9 +136,19 @@ class Handler(BaseHTTPRequestHandler):
                 if self.server.preview:raise ValueError('Protected operations are disabled in preview mode.')
                 from secure_bridge import start
                 return self.reply(200,start())
+            if self.path.startswith('/api/message/'):
+                if self.server.preview:raise ValueError('Message signing is disabled in preview mode.')
+                from secure_bridge import call
+                actions={'wallets':('message.wallets',()),'prepare':('message.prepare',('wallets','address','message','partial')),'sign':('message.sign',('id',))}
+                key=self.path.rsplit('/',1)[-1]
+                if key not in actions or set(body)!=set(actions[key][1]):raise ValueError('Invalid message action.')
+                name,fields=actions[key];return self.reply(200,call(name,*[body[k] for k in fields],timeout=600))
             if self.path.startswith('/api/disc/'):
                 if self.server.preview:raise ValueError('Disc operations are disabled in preview mode.')
                 from secure_bridge import call
+                if self.path=='/api/disc/read' and set(body)=={'device'}:return self.reply(200,call('disc.read',body['device'],timeout=600))
+                if self.path=='/api/disc/load' and set(body)=={'id','confirmed'}:return self.reply(200,call('disc.load',body['id'],body['confirmed'],timeout=120))
+                if self.path=='/api/disc/unload' and set(body)=={'id'}:return self.reply(200,call('disc.unload',body['id'],timeout=120))
                 if self.path=='/api/disc/drives' and not body:return self.reply(200,call('disc.drives'))
                 if self.path=='/api/disc/probe' and set(body)=={'device'}:return self.reply(200,call('disc.probe',body['device']))
                 if self.path=='/api/disc/burn' and set(body)=={'device','confirmed'}:return self.reply(200,call('disc.burn',body['device'],body['confirmed'],timeout=600))
@@ -187,7 +197,7 @@ class Handler(BaseHTTPRequestHandler):
                 from protected_memory import required
                 if required():
                     from secure_bridge import call
-                    actions={'cancel-setup':('setup.cancel',('id',)),'history':('authorise.history',('id',)),'review':('authorise.review',('id',)),'approve':('authorise.approve',('id',)),'deny':('authorise.deny',('id',)),'forget':('authorise.forget',('id',)),'participate':('setup.participate',('id','pins')),'sign':('wallet.sign',('id','action'))}
+                    actions={'disable-sync':('sync.disable',('id',)),'enable-sync':('sync.enable',('id',)),'cancel-sync':('sync.cancel',('id',)),'cancel-setup':('setup.cancel',('id',)),'history':('authorise.history',('id',)),'review':('authorise.review',('id',)),'approve':('authorise.approve',('id',)),'deny':('authorise.deny',('id',)),'forget':('authorise.forget',('id',)),'participate':('setup.participate',('id','pins')),'sign':('wallet.sign',('id','action'))}
                     action=self.path.rsplit('/',1)[1]
                     if action not in actions:raise ValueError('Invalid local authorisation action.')
                     method,fields=actions[action]
@@ -228,9 +238,9 @@ class Handler(BaseHTTPRequestHandler):
                 if self.server.preview:c.save(v)
                 else:apply_config(c,v)
             self.reply(200,{'ok':True})
-        except ValueError as error:self.reply(400,{'error':str(error) if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/protected/')) else 'Check the hostname, settings and file paths. IP addresses are not allowed.'})
+        except ValueError as error:self.reply(400,{'error':str(error) if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/protected/')) else 'Check the hostname, settings and file paths. IP addresses are not allowed.'})
         except (TypeError,KeyError):self.reply(400,{'error':'Invalid request or expired review. Refresh this page and review again.'})
-        except Exception:self.reply(503,{'error':'The wallet operation failed or its outcome is uncertain. Check Core and review again; it was not automatically replayed.' if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/protected/')) else 'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
+        except Exception:self.reply(503,{'error':'The wallet operation failed or its outcome is uncertain. Check Core and review again; it was not automatically replayed.' if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/protected/')) else 'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
 
 class Server(ThreadingHTTPServer):
     daemon_threads=True
@@ -240,7 +250,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev9'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev10'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -258,7 +268,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev9':
+    if installed!='2.0.0~dev10':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -268,7 +278,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev9') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev10') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

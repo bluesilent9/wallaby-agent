@@ -1,0 +1,13 @@
+# Build 10 optical layout and recovery
+
+A small ISO-9660 recovery filesystem contains recovery.wallaby (one encrypted package), policy-independent recovery instructions, the protected recovery utility and redundancy.py. The encrypted package contains exactly policy.json and one Core-encrypted role wallet. AES-256-GCM authenticates the package; scrypt N=131072/r=8/p=1 derives its key. Public header checksums do not replace GCM or trusted-policy review.
+
+At the next 1 MiB boundary, a raw data track contains complete repeated packages. Every copy starts with a 4096-byte independently SHA256-protected JSON header: magic WALLABY-REDUNDANT-DISC-2, little-endian JSON length, canonical JSON, its SHA256 and zero padding. Fields are version, package_bytes, package_sha256, start, stride, copies, total_bytes, index, offset. Copy slots are rounded to 4096 bytes. The remaining tail is padding; the detected writable capacity reserves 2 MiB for drive overhead. Package limit is 272 MiB; supported medium capacity is at most 1 TiB. Streaming write timeout is 48 hours plus bounded finalisation.
+
+The writer streams one encrypted package repeatedly through xorriso; it does not allocate a full-medium image or a directory entry for each copy. A complete direct-I/O track digest must match before success. Reading discovers a valid layout header, then jumps among exact slots, checking each complete ciphertext digest. Unreadable headers, short reads and corrupt payloads are skipped. Only a complete intact copy is decrypted, authenticated, policy-verified and offered for local review. Build 9's single-file layout remains readable through the ISO recovery file fallback.
+
+This supplies complete-copy redundancy and integrity detection, alongside the medium's native error correction. It does not add parity able to reconstruct a package when every copy is damaged. Copies on the same disc do not protect against losing or destroying that disc. If all copies fail, try another disc or drive. Recovery passphrases cannot be replaced by knowing the block height or policy code.
+
+The drive is asked for 1x but may select its lowest supported media speed. Blu-ray 1x is 36 Mbit/s (4.5 MB/s), so a nominal 25 GB takes about 92.6 minutes of writing; lead-in/finalisation and full read-back are additional. DVD 1x is approximately 1.385 MB/s. Capacity is queried from the drive, not hardcoded as 25 GB. [Manufacturer optical-media brochure](https://docs.rs-online.com/a827/0900766b812db220.pdf).
+
+No physical optical burn has been performed during development validation. Inspect this format and protection implementation before relying on archival recovery.

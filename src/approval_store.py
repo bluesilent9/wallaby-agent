@@ -44,9 +44,9 @@ class Store:
             apply_snapshot(self,p['revision'],p['requests']);return True
         key=digest(p)
         with self.edit() as s:
-            if s.get('active_transfer') or s.get('sync_batch'):
-                return False # Freeze all new Dashboard approval work until local completion/cancellation.
-            if s.get('setup_active') and (p['kind']!='wallet_setup_policy' or digest(p['proposal'])!=s['setup_active']):return False
+            if p['kind']=='wallet_transfer' and p['direction']=='receive':
+                from sync_preferences import policy_id
+                if policy_id(p) in s.get('sync_exclusions',{}):return False
             if key in s['denied'] or key in s['completed'] or key in s['pending']:return False
             if p['kind']=='vault_sync' and digest(p['vault']) in s['vaults']:return False
             if len(s['pending'])>=MAX_ITEMS:raise ValueError('Authorisation queue is full.')

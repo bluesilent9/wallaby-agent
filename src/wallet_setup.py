@@ -159,7 +159,7 @@ class WalletSetup:
                 job_id=fresh['proposal_hash']+'-'+ident[:12];self.disc_sessions[job_id]=(fresh['proposal_hash'],ident)
                 self.burner.queue(job_id,{ident:path},{**recovery,'physical_cosigner_file':ident,'local_cosigners':[role['id'] for role in p['proposal']['cosigners'] if hashlib.sha256(role['id'].encode()).hexdigest()==ident]})
         else:self.finish_session(session)
-        return {'message':'Exact policy approved and public monitor installed.'+(' Burn Disc is now available. Private-only disc keys remain in protected RAM.' if disc else ' Encrypted local signing wallets installed.'),'burn_authorised':bool(disc)}
+        return {'message':'Exact policy approved and public monitor installed.'+(' Disc Operations is now available. Private-only disc keys remain in protected RAM.' if disc else ' Encrypted local signing wallets installed.'),'burn_authorised':bool(disc)}
     def burn_complete(self,ident,sha):
         binding,cosigner=self.disc_sessions[ident];session=self.sessions[binding];review=session['review']
         self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'session_id':session['proposal']['session_id'],'proposal_hash':binding,'policy_hash':review['policy_hash'],'status':'backup_verified','cosigner_file':cosigner,'image_sha256':sha}))

@@ -2,15 +2,15 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 9
+# Wallaby Agent V2 — Development Build 10
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 9 DEB](dist/wallaby-agent_2.0.0~dev9_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Dashboard integration handoff](DASHBOARD_BUILD9_UPDATE.md)
+[Build 10 DEB](dist/wallaby-agent_2.0.0~dev10_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Dashboard integration handoff](DASHBOARD_BUILD10_UPDATE.md)
 
-Build 9 adds locally approved wallet retirement, authenticated single-signature/M-of-N wallet setup, mandatory-height variants, and encrypted M-Disc preparation/verification in a protected RAM workflow. The local Vault Builder page is removed; proposals originate from Dashboard V1 Build 11’s Wallet Builder and are independently verified on **Authorise**. **Burn Disc** unlocks only after the exact local policy is authorised for a physical role.
+Build 10 adds **Disc Operations**, restoration of archived signing accounts into protected RAM, redundant full-medium optical backups, **Sign Message** with BIP-322 multisignature proofs, an Authorise queue, sidebar notification dots and per-node incoming wallet-sync exclusions. Vault Builder remains removed: wallet construction originates in Dashboard Wallet Builder and is independently approved on Authorise.
 
-**Dashboard V1 Build 11 implements Wallet Builder and this setup protocol.** [Dashboard Development](https://github.com/bluesilent9/wallaby-dashboard/tree/Development) verifies signed setup contributions, policy approvals and every required physical-backup proof, then relays authenticated completion. It collects distinct cosigner signatures per input and avoids synchronizing intentional signing accounts as missing wallets. Agent Build 9 still lacks a guided disc-restore signing UI; restore an encrypted cosigner locally before Dashboard routes a signing request to its matching account. No private recovery package or passphrase goes to Dashboard. Existing RPC remains a positive public/read-only allowlist; Dashboard cannot directly create/unlock/import/delete wallets, export keys, sign, broadcast or restart Core.
+**Dashboard V1 Build 11 already supports wallet setup, completion proofs and restored-cosigner transaction routing.** Disc-loaded accounts are advertised through the existing public node RPC interface; private wallets remain inside the Agent's temporary RAM Core. Dashboard needs the small new [sync-preference protocol](DASHBOARD_BUILD10_UPDATE.md) to retain exclusions and stop its missing-wallet alerts. Until then local exclusions last for the current workspace only. No Dashboard source is changed here. Remote RPC remains a positive public/read-only allowlist; wallet changes, signing and broadcast require fixed locally approved operations.
 
 ## Install and start
 
@@ -37,13 +37,31 @@ Supported policies are native SegWit `wpkh` for plain single-signature, `wsh(sor
 
 Signed completion proofs are required from every producing Agent and every assigned physical role. A server label alone cannot declare a wallet ready. The local Core monitor records the public ready/pending state. Later signing independently identifies the restricted policy and its actual local private accounts from Core, including after Agent RAM metadata is lost. Transaction reviews show the complete final transaction; signatures return through the existing PSBT workflow and broadcast requires a separate local approval.
 
-## Burn Disc
+## Disc Operations
 
-Each physical cosigner has a separate disc, even when one Agent produces several roles. Choose an optical drive, insert blank write-once DVD-R or BD-R M-Disc media, check it, and confirm media/drive compatibility. Software cannot authenticate an M-Disc's branding. Used or rewritable media are rejected; the Agent never erases or silently appends to them.
+This page is available whenever the node interface is connected. Read an existing archival disc or prepare a locally authorised physical-role backup. Each physical cosigner has its own disc. A duplicate copy of one key never becomes another cosigner.
 
-A separate local backup passphrase encrypts the entire recovery package with AES-256-GCM and scrypt (N=131072,r=8,p=1). It contains the Core-encrypted signing wallet, full receiving/change descriptors, threshold/network/height, all authenticated public contributions and recovery instructions. Keep the package and Core wallet passphrases separately from the disc. Neither passphrase is placed on the disc or sent to Dashboard.
+For writing, choose blank write-once DVD-R or BD-R M-Disc media. Used/rewritable media are rejected. A separate passphrase encrypts the complete package with AES-256-GCM and scrypt (N=131072,r=8,p=1), including its Core-encrypted role wallet, full public policy, network/height, authenticated contributions and recovery instructions. Keep both package and Core passphrases separately from the disc.
 
-The ISO and package are prepared in protected RAM. xorriso writes the optical medium, then direct aligned reads check every image byte against SHA256. Only verified equality produces Success and a signed completion acknowledgement. Failed or uncertain writes remain incomplete. After the final assigned disc is verified, temporary Core/key files are removed; Success remains visible for five seconds before Burn Disc becomes unavailable. A generic inspectable recovery utility on the disc requires a protected, locked-memory, non-swapping, sleep-inhibited environment before decryption.
+The small recovery filesystem is followed by as many independently checksummed copies of that encrypted package as fit the detected writable capacity. Copies stream from one RAM package: a 100 GB disc does not require a 100 GB RAM image or millions of filesystem entries. Every recorded byte is read back directly before a signed success acknowledgement is issued. The drive is asked for 1×; its supported speeds govern the actual write. A nominal 25 GB Blu-ray at 1× takes roughly 93 minutes to write, with finalisation and full read-back taking additional time. See [disc format and recovery limits](DISC_FORMAT.md).
+
+For reading, enter the backup passphrase in the native dialogue. The Agent skips unreadable or checksum-invalid copies until it finds an intact authenticated package. Review its complete policy code, cosigner role, threshold, network, height and sample addresses against a trusted record. Explicitly confirm before loading. Archived creation-request expiry does not invalidate a historical backup.
+
+The encrypted role wallet is loaded into a separate temporary Core in protected RAM, never restored into the persistent node. Its public account is visible to Dashboard for normal transaction routing. Select the request on Authorise and sign locally; the resulting public PSBT follows the existing Dashboard protocol. Core wallet passphrases are requested locally and wallets are relocked. The chainless temporary archive accounts are excluded from persistent-node rescan/download requirements. Unload the archive when finished. Multiple distinct physical roles can remain loaded while you swap discs, so two archived keys can sign one message or transaction without two drives.
+
+## Sign Message
+
+Choose one or more private signing accounts from the node or loaded optical archives, enter the exact message and its Bitcoin address, then review and sign. The Agent builds only BIP-322 synthetic transactions: it never selects real funds or broadcasts a message proof. Native SegWit, wrapped SegWit, Taproot key-path and the supported M-of-N/height policies are checked locally.
+
+Multisig contributors can sign together or continue an exact matching partial message-proof PSBT. Fewer than the required distinct keys produces a clearly labelled partial PSBT, not a completed signature. A repeated signature from the same account does not increase the count. The final proof requires a compatible BIP-322 verifier; height-constrained proofs retain their height condition. This replaces the standalone Wallaby Signer interface.
+
+## Authorise queue and notifications
+
+All pending requests are listed together. Select an item to review its locally reconstructed details; signing and wallet-creation reviews have different layouts. Completed requests close their details. Cancel only an unattempted request; uncertain attempted operations require local reconciliation. Authorise remains available while the node interface is connected, including when the queue is empty.
+
+For an incoming wallet synchronisation request, **Disable synchronisation** excludes that exact public descriptor policy on this Agent. It never applies to signing or outgoing transfers. Re-enable it from the exclusions list. An intentionally disabled policy is not unfinished work and does not light either sidebar dot, including when Dashboard repeats the request. Cancelling a row alone may allow a later Dashboard revision to offer it again. Dashboard Build 11 requires the handoff update to persist and honour these signed preferences across workspace restarts.
+
+Authorise and Synchronisation have red sidebar dots while unresolved work exists and the user is on another page. A node history download also counts as unresolved synchronisation. Opening the relevant page hides its dot; leaving with unfinished work restores it. Requests never automatically open a browser or switch pages.
 
 A native Core executable is needed for temporary wallet generation. The Agent checks normal native installation paths and direct native ELF executables inside an existing bitcoin-core Snap; it never silently invokes a Snap launcher with uncontrolled temporary storage. If that binary cannot run inside the protected service, install an appropriate native Core executable. Unknown startup/storage failures stop the workflow; there is no laptop-drive fallback.
 
@@ -57,7 +75,7 @@ Approval imports public `addr()` records into a private-key-disabled historical 
 
 ## Synchronisation and This Node
 
-The multi-wallet request list, independently signed funded-address/label/vault previews, watch-only mode and alphabetical selected batches remain. Watch-only sources force watch-only receipt. Exact receiving/change labels and fixed-address Extinct groups, including zero-balance labels, are preserved. Dashboard controls authoritative row membership/withdrawal; Agent cannot clear the list. Agent SSH pipes are handed into the protected worker, and encrypted private wallet files travel directly between peers, never through Dashboard. Matching names never establish wallet identity.
+The multi-wallet request list, independently signed funded-address/label/vault previews, watch-only mode and alphabetical selected batches remain. Watch-only sources force watch-only receipt. Exact receiving/change labels and fixed-address Extinct groups, including zero-balance labels, are preserved. Dashboard controls authoritative row membership/withdrawal; Locally cancelled unattempted rows may return in a later queue revision; incoming policy exclusions suppress them on this Agent. Agent SSH pipes are handed into the protected worker, and encrypted private wallet files travel directly between peers, never through Dashboard. Matching names never establish wallet identity.
 
 Missing history is **recovery required**, not successful completion. This Node shows Synchronised / Requires Rescan / Requires Blockchain Download from local evidence. The user reviews and authorises recovery locally. If old blocks are missing, Core can be cleanly restarted/reindexed with **the same pruning mode and limit throughout**. Wallets, original descriptor timestamps and vault monitors are loaded before historical download resumes, so Core records their history before pruning. No archival chain allocation, pruning override, automatic safety backups or remote restart authority is introduced. Synchronisation/history requests never open a window or switch the user's page automatically.
 
@@ -75,6 +93,7 @@ Bitcoin Agent inbox/outbox/reviews and temporary jobs are volatile. Keep the wor
 
 The source and compiled Ubuntu 26.04 amd64 DEB are on **Development**. The GitHub default is Stable; open [Development explicitly](https://github.com/bluesilent9/wallaby-agent/tree/Development). Stable is unchanged.
 
+- [Build 9 installer](dist/wallaby-agent_2.0.0~dev9_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/0be3e95c236ebc8ffd57e4bf7f675d82cdfb0916)
 - [Build 8 installer](dist/wallaby-agent_2.0.0~dev8_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/4f6c168f8faa646452bbbba14b3f4f5619e2e785)
 - [Build 7 installer](dist/wallaby-agent_2.0.0~dev7_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/8731a90f4adc24f0ac0345b1ab7f70aed5ffdee0)
 - [Build 6 installer](dist/wallaby-agent_2.0.0~dev6_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/b2b44e7983940e7a758969e4244df5d2e6f4c6dc)

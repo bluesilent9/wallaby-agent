@@ -25,7 +25,10 @@ def apply_snapshot(store,revision,requests):
                 if key==s.get('active_transfer') or row['state']!='pending':
                     row['withdrawn']=True # Audit an operation already attempted; never erase its outcome.
                 else:s['pending'].pop(key);s.get('transfer_previews',{}).pop(key,None);s.get('sync_choices',{}).pop(key,None)
+        s['sync_snapshot_requests']=requests
+        from sync_preferences import policy_id
         for key,p in rows.items():
+            if p['direction']=='receive' and policy_id(p) in s.get('sync_exclusions',{}):continue
             if key not in s['pending'] and key not in s['completed']:
                 if len(s['pending'])>=MAX_ITEMS:raise ValueError('Authorisation queue is full.')
                 s['pending'][key]={'proposal':p,'received':time.time(),'state':'pending'}

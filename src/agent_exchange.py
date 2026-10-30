@@ -48,6 +48,9 @@ class Exchange:
             if p['kind']=='wallet_transfer_preview':
                 from wallet_preview import receive
                 receive(self.store,{k:p[k] for k in ('preview','public_key','signature')})
+            elif p['kind']=='wallet_sync_preferences':
+                from sync_preferences import exchange
+                exchange(self.store,p)
             elif p['kind']=='wallet_setup_complete':
                 from setup_completion import apply
                 from configuration import Config,discover_cookie

@@ -8,7 +8,7 @@ from protected_memory import enforce,root
 
 def main():
     enforce();settings=json.loads(sys.stdin.buffer.readline(8192));origin=settings['origin'];token=settings['token']
-    if not origin.startswith('http://127.0.0.1:') or settings['page'] not in ('authorise','synchronisation','burn'):raise SystemExit('Invalid local view.')
+    if not origin.startswith('http://127.0.0.1:') or settings['page'] not in ('authorise','synchronisation','burn','message'):raise SystemExit('Invalid local view.')
     # Keep Chromium's sandbox enabled. Disable only caching, persistence and dumps.
     os.environ['QTWEBENGINE_CHROMIUM_FLAGS']='--disable-gpu --disable-breakpad --disable-crash-reporter --disable-logging --noerrdialogs'
     os.environ['XDG_CACHE_HOME']=str(root()/'viewer-cache');os.environ['XDG_DATA_HOME']=str(root()/'viewer-data');os.environ['XDG_CONFIG_HOME']=str(root()/'viewer-config')

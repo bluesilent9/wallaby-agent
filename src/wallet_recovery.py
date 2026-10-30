@@ -11,6 +11,18 @@ from wallet_ops import rpc,sats
 TERMINAL={'complete','error','interrupted'}
 
 
+def persistent_wallets(core):
+    # Restored optical accounts run in a deliberately chainless RAM Core. They
+    # are public signing routes, never wallets requiring the persistent node's
+    # historical replay or restart plan.
+    names=rpc(core,'listwallets')
+    import node_client
+    archive=node_client.LOCAL_ROUTER
+    if archive is not None and core.config==archive.core.config:
+        with archive.lock:virtual={name for record in archive.loaded.values() for name in record['routes']}
+        names=[name for name in names if name not in virtual]
+    return names
+
 def history_missing(core,timestamp):
     chain=rpc(core,'getblockchaininfo')
     if not chain.get('pruned') or not chain.get('pruneheight'):return False
@@ -129,7 +141,7 @@ class Recovery:
         if self.cached and time.monotonic()-self.cache_at<5:return self.cached
         saved=self.store.read();job=saved.get('recovery',{});requirements=saved.get('history_jobs',{})
         try:
-            chain=rpc(self.core,'getblockchaininfo');loaded=rpc(self.core,'listwallets');info={n:rpc(self.core,'getwalletinfo',[],n) for n in loaded}
+            chain=rpc(self.core,'getblockchaininfo');loaded=persistent_wallets(self.core);info={n:rpc(self.core,'getwalletinfo',[],n) for n in loaded}
             scanning=any(v.get('scanning') for v in info.values())
             missing=any(not r.get('registered_for_replay') and history_missing(self.core,r['timestamp']) for r in requirements.values()) or any(v.get('lastprocessedblock',{}).get('height',chain['blocks'])<chain.get('pruneheight',0) for v in info.values())
             ibd=bool(chain.get('initialblockdownload') or chain.get('headers',chain['blocks'])>chain['blocks'])
@@ -148,14 +160,14 @@ class Recovery:
         chain=rpc(self.core,'getblockchaininfo');jobs=self.store.read().get('history_jobs',{})
         missing=any(not r.get('registered_for_replay') and history_missing(self.core,r['timestamp']) for r in jobs.values())
         if chain.get('pruned'):
-            missing=missing or any(rpc(self.core,'getwalletinfo',[],name).get('lastprocessedblock',{}).get('height',chain['blocks'])<chain.get('pruneheight',0) for name in rpc(self.core,'listwallets'))
+            missing=missing or any(rpc(self.core,'getwalletinfo',[],name).get('lastprocessedblock',{}).get('height',chain['blocks'])<chain.get('pruneheight',0) for name in persistent_wallets(self.core))
         previous=self.store.read().get('recovery',{})
         mode='download' if missing else 'monitor' if chain.get('initialblockdownload') or chain.get('headers',chain['blocks'])>chain['blocks'] else 'rescan'
         paused=False
         if previous.get('plan',{}).get('replay') and not previous.get('replay_ready'):
             paused=not rpc(self.core,'getnetworkinfo').get('networkactive',True)
             if paused:mode='resume'
-        plan={'mode':mode,'requirements':digest(jobs),'chain':chain['chain'],'wallets':sorted(set(rpc(self.core,'listwallets'))|{r['wallet'] for r in jobs.values()}),'created':time.time(),'core_binding':{'cookie':str(Path(self.core.config['cookie']).expanduser().resolve()),'rpc_port':self.core.config['rpc_port']},'pruning':pruning_identity(chain)}
+        plan={'mode':mode,'requirements':digest(jobs),'chain':chain['chain'],'wallets':sorted(set(persistent_wallets(self.core))|{r['wallet'] for r in jobs.values()}),'created':time.time(),'core_binding':{'cookie':str(Path(self.core.config['cookie']).expanduser().resolve()),'rpc_port':self.core.config['rpc_port']},'pruning':pruning_identity(chain)}
         target=max(chain['blocks'],chain.get('headers',chain['blocks']),previous.get('plan',{}).get('target_height',0) if previous.get('plan',{}).get('replay') else 0)
         plan.update(target_height=target,replay=mode in ('download','resume'))
         if previous.get('plan',{}).get('replay') or 'restore_network_after' in previous.get('plan',{}):
@@ -238,7 +250,7 @@ class Recovery:
             raise ValueError('Recovered wallet failed private-key capability or encryption checks. Inspect Core before proceeding.')
     def restore_once(self,key,job):
         name=job['wallet']
-        if name in rpc(self.core,'listwallets'):return
+        if name in persistent_wallets(self.core):return
         if not job.get('staged'):raise ValueError('The received public wallet is not loaded. Inspect Core before continuing recovery.')
         with self.store.edit() as saved:
             if saved['history_jobs'][key]['state']!='pending':raise ValueError('A previous restoration was attempted. Inspect/load that wallet in Core; restoration will not be repeated automatically.')
@@ -272,7 +284,7 @@ class Recovery:
         self.update('rescanning','Loading all approved wallets and vault descriptors before blockchain replay. Pruning stays unchanged.')
         jobs=self.store.read().get('history_jobs',{})
         for name in plan['wallets']:
-            if name in rpc(self.core,'listwallets') or any(job['wallet']==name for job in jobs.values()):continue
+            if name in persistent_wallets(self.core) or any(job['wallet']==name for job in jobs.values()):continue
             rpc(self.core,'loadwallet',{'filename':name},timeout=86400)
         for key,job in jobs.items():
             if history_missing(self.core,job['timestamp']):raise ValueError('Required blocks were already pruned before this wallet could be registered. Keep pruning unchanged and review a fresh reindex plan.')

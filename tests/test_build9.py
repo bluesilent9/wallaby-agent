@@ -48,7 +48,7 @@ class PublicAndDisc(unittest.TestCase):
     with self.assertRaises(ValueError):proposal(p)
  def test_no_browser_secret_fields_or_local_vault_builder(self):
     root=Path(__file__).resolve().parents[1];html=(root/'web/index.html').read_text();js=(root/'web/workspace.js').read_text()
-    self.assertNotIn('Vault Builder',html);self.assertNotIn('type="password"',html);self.assertIn('Burn Disc',html);self.assertIn('authorise/sign',js);self.assertNotIn('wallet-password',js)
+    self.assertNotIn('Vault Builder',html);self.assertNotIn('type="password"',html);self.assertIn('Disc Operations',html);self.assertIn('authorise/sign',js);self.assertNotIn('wallet-password',js)
 
 class RealCoreBuild9(unittest.TestCase):
  def setUp(self):

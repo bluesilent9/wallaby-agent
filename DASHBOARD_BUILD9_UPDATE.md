@@ -1,6 +1,6 @@
 # Dashboard handoff — Agent V2 Development Build 9
 
-Dashboard V1 Build 11 now implements and tests this protocol: Wallet Builder, authenticated contributions/policy/physical-backup completion, per-input signature thresholds, intentional cosigner grouping and retirement inventory refresh. The Agent remains V2 Development Build 9. Its guided encrypted-disc restore/signing screen is not yet implemented; Dashboard routes normal partial-signature requests after a matching account is restored locally. See the [Dashboard guide](https://github.com/bluesilent9/wallaby-dashboard/blob/Development/docs/WALLET_BUILDER.md).
+Dashboard V1 Build 11 now implements and tests this protocol: Wallet Builder, authenticated contributions/policy/physical-backup completion, per-input signature thresholds, intentional cosigner grouping and retirement inventory refresh. The Agent remains V2 Development Build 9. Build 10 adds the guided Disc Operations restore/signing screen; Dashboard routes normal partial-signature requests after a matching account is restored locally. See the [Dashboard guide](https://github.com/bluesilent9/wallaby-dashboard/blob/Development/docs/WALLET_BUILDER.md).
 
 ## Existing exchange and retirement
 

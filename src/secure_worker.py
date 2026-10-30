@@ -23,17 +23,23 @@ class Workspace:
         if not self.store.path.exists() and old.exists():
             data=json.loads(old.read_text())
             with self.store.edit() as s:s.update(data);s.pop('active_transfer',None);s.pop('sync_batch',None)
-        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.environment={}
+        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.archives=None;self.messages=None;self.environment={}
     def configure(self,environment):
         for key,value in environment.items():
             if key not in ENV or not isinstance(value,str) or len(value)>4096 or any(ord(c)<32 for c in value):raise ValueError('Invalid local display environment.')
         self.environment=dict(environment)
         c=Config().values;c['cookie']=c['cookie'] or discover_cookie()
         if self.ops is None or any(self.ops.core.config.get(k)!=c[k] for k in ('cookie','rpc_port')):
-            if self.ops and self.busy():raise ValueError('Finish protected wallet work before changing the Core connection.')
+            if self.ops and (self.busy() or self.archives and (self.archives.loaded or self.archives.staged)):raise ValueError('Finish protected wallet work before changing the Core connection.')
             if self.node_stop:self.node_stop.set()
             if self.transfer:self.transfer.close()
             self.ops=WalletOps(Core(c),self.store);self.transfer=BatchTransfer(self.ops.core,self.store);self.retirement=Retirement(self.ops.core,self.store);self.setup=WalletSetup(self.ops.core,self.store,self.environment,enforce,self.binary())
+            from disc_restore import Archives
+            from message_signing import Messages
+            self.archives=Archives(self.ops.core,self.store,self.binary(),enforce)
+            import node_client
+            node_client.LOCAL_ROUTER=self.archives
+            self.messages=Messages(self.ops.core,self.store,lambda prompt:secret_dialog(prompt,self.environment))
         self.setup.environment=self.environment
     def binary(self):
         for path in ('/usr/bin/bitcoind','/usr/local/bin/bitcoind','/opt/bitcoin/bin/bitcoind','/snap/bitcoin-core/current/bin/bitcoind','/snap/bitcoin-core/current/usr/bin/bitcoind'):
@@ -42,20 +48,20 @@ class Workspace:
                     if f.read(4)==b'\x7fELF':return path
         return '/usr/bin/bitcoind'
     def busy(self):
-        s=self.store.read();return bool(s.get('history_jobs') or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
+        s=self.store.read();return bool(self.archives and (self.archives.reading) or s.get('history_jobs') or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
     def state(self):
         saved=self.store.read()
-        try:self.ops.core.ready();connected=True
+        try:self.ops.core.ready();connected=self.node_status['color']=='green'
         except Exception:connected=False
-        return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state']} for k,v in saved['pending'].items() if v['proposal']['kind']!='wallet_transfer'],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind'],**({'vault':v['proposal']['vault']} if v['proposal']['kind']=='vault_sync' else {})}} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
+        return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind'],**({'vault':v['proposal']['vault']} if v['proposal']['kind']=='vault_sync' else {})}} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
     def service_status(self):
-        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if row['proposal']['kind']!='wallet_transfer');return {'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or saved['denied'] or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':self.busy(),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
+        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));return {'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
     def open_view(self,page):
-        if page not in ('authorise','synchronisation','burn'):raise ValueError('Invalid protected page.')
+        if page not in ('authorise','synchronisation','burn','message'):raise ValueError('Invalid protected page.')
         import secrets,importlib.util
         try:available=importlib.util.find_spec('PyQt6.QtWebEngineWidgets')
         except ModuleNotFoundError:available=None
-        if available is None:raise ValueError('The protected HTML5 viewer is unavailable. Install the complete Build 9 DEB with its PyQt6 WebEngine dependencies; wallet data will not be opened in an ordinary browser.')
+        if available is None:raise ValueError('The protected HTML5 viewer is unavailable. Install the complete Build 10 DEB with its PyQt6 WebEngine dependencies; wallet data will not be opened in an ordinary browser.')
         if self.view_server is None:
             from app import Server,Handler
             owner=self
@@ -75,6 +81,7 @@ class Workspace:
             saved=self.store.read()
             changing=method in ('wallet.sign','authorise.approve','setup.participate','authorise.history','setup.cancel')
             if changing and (saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning')):raise ValueError('Finish the active transfer or history recovery first.')
+            if method in ('wallet.sign','setup.participate','authorise.approve','message.sign') and self.archives and self.archives.reading:raise ValueError('Wait for optical restoration to finish before signing or changing wallets.')
             if saved.get('setup_active') and method in ('wallet.sign','authorise.approve','authorise.history','authorise.review'):
                 candidate=saved['pending'].get(args[0],{}).get('proposal',{}) if args else {}
                 if candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']:raise ValueError('Finish the current wallet setup and its physical backups first.')
@@ -130,6 +137,35 @@ class Workspace:
                 return self.ops.approve_sync(args[0])
             if method=='setup.cancel':return self.setup.cancel(*args)
             if method=='setup.participate':return self.setup.approve_proposal(*args)
+            if method in ('disc.read','disc.load','disc.unload','message.wallets','message.prepare','message.sign'):
+                if self.node_status['color']!='green':raise ValueError('Connect the Bitcoin Core Node Dashboard Interface before using Disc Operations or Sign Message.')
+                if saved.get('setup_active') or saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):raise ValueError('Finish the current wallet setup, transfer or history operation first.')
+            if method=='disc.read':
+                if self.archives.reading:raise ValueError('An optical read is already active.')
+                password=secret_dialog('Decrypt the selected disc recovery package',self.environment)
+                self.archives.reading=True;self.archives.error='';self.archives.message='Reading encrypted optical recovery copies.'
+                def read_disc():
+                    nonlocal password
+                    try:self.archives.inspect(args[0],password);self.archives.message='Read complete. Review the policy below before loading its signing key.'
+                    except Exception as error:self.archives.error=str(error) if isinstance(error,ValueError) else 'Optical restoration stopped. No archive was loaded; try another disc or drive.'
+                    finally:password=None;self.archives.reading=False
+                threading.Thread(target=read_disc,daemon=True).start();return {'message':'Disc reading started. Damaged copies will be skipped automatically.'}
+            if method=='disc.load':return self.archives.load(*args)
+            if method=='disc.unload':
+                if self.archives.reading:raise ValueError('Wait for the current optical read to finish.')
+                self.ops.prepared.clear();self.messages.prepared.clear();return self.archives.unload(*args)
+            if method=='message.wallets':return self.messages.wallets()
+            if method=='message.prepare':return self.messages.prepare(*args)
+            if method=='message.sign':return self.messages.sign(*args)
+            if method=='sync.disable':
+                from sync_preferences import change
+                return change(self.store,args[0],True)
+            if method=='sync.enable':
+                from sync_preferences import enable
+                return enable(self.store,*args)
+            if method=='sync.cancel':
+                from sync_preferences import cancel
+                return cancel(self.store,*args)
             if method=='disc.burn':return self.setup.burn(*args)
             if method=='disc.probe':
                 from disc_backup import media

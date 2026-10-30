@@ -9,7 +9,7 @@ def put(path,text,mode=0o644):
  p=stage/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);p.chmod(mode)
 arch=subprocess.check_output(['dpkg','--print-architecture'],text=True).strip()
 put('DEBIAN/control',f'''Package: wallaby-agent
-Version: 2.0.0~dev9
+Version: 2.0.0~dev10
 Section: utils
 Priority: optional
 Architecture: {arch}
@@ -156,7 +156,7 @@ NoDisplay=true
 X-KDE-autostart-phase=2
 ''')
 put('usr/share/icons/hicolor/scalable/apps/wallaby-agent.svg',(root/'web/wallaby-agent.svg').read_text())
-for document in ('README.md','AGENT_PROTOCOL.md','APPROVAL_PROTOCOL.md','DASHBOARD_PREVIEW_UPDATE.md','DASHBOARD_BUILD8_UPDATE.md','DASHBOARD_BUILD9_UPDATE.md','VALIDATION.md'):
+for document in ('README.md','AGENT_PROTOCOL.md','APPROVAL_PROTOCOL.md','DASHBOARD_PREVIEW_UPDATE.md','DASHBOARD_BUILD8_UPDATE.md','DASHBOARD_BUILD9_UPDATE.md','DASHBOARD_BUILD10_UPDATE.md','DISC_FORMAT.md','VALIDATION.md'):
  put('usr/share/doc/wallaby-agent/'+document,(root/document).read_text())
 put('DEBIAN/postinst','''#!/bin/sh
 set -e
@@ -165,6 +165,6 @@ if [ -d /sys/kernel/security/apparmor ] && command -v apparmor_parser >/dev/null
 if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q || true; fi
 exit 0
 ''',0o755)
-out=root/'dist'/f'wallaby-agent_2.0.0~dev9_{arch}.deb';out.parent.mkdir(exist_ok=True)
+out=root/'dist'/f'wallaby-agent_2.0.0~dev10_{arch}.deb';out.parent.mkdir(exist_ok=True)
 subprocess.run(['dpkg-deb','--root-owner-group','--build',str(stage),str(out)],check=True)
 print(out)

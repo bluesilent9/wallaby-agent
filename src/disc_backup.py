@@ -27,13 +27,15 @@ def decrypt_file(source,target,password):
             with open(target,'wb') as out:
                 os.chmod(target,0o600)
                 while remain:
-                    chunk=inp.read(min(remain,1024*1024));remain-=len(chunk);out.write(dec.update(chunk))
+                    chunk=inp.read(min(remain,1024*1024))
+                    if not chunk:raise ValueError('Truncated recovery package.')
+                    remain-=len(chunk);out.write(dec.update(chunk))
                 out.write(dec.finalize())
         except Exception:Path(target).unlink(missing_ok=True);raise ValueError('Backup passphrase or authentication check failed.') from None
     key=None;password=None
 
 def pack(root,wallets,recovery,password):
-    root=Path(root);disc=root/'disc';disc.mkdir(mode=0o700,exist_ok=True);plain=root/'recovery.zip'
+    root=Path(root);disc=root/'disc';disc.mkdir(mode=0o700,parents=True,exist_ok=True);plain=root/'recovery.zip'
     with zipfile.ZipFile(plain,'w',zipfile.ZIP_STORED) as z:
         z.writestr('policy.json',json.dumps(recovery,sort_keys=True,indent=2))
         for ident,path in wallets.items():
@@ -42,8 +44,10 @@ def pack(root,wallets,recovery,password):
     try:encrypt_file(plain,disc/'recovery.wallaby',password)
     finally:plain.unlink(missing_ok=True)
     (disc/'README.txt').write_text('Wallaby encrypted recovery package v1\nAES-256-GCM; scrypt N=131072,r=8,p=1.\nContains encrypted Core signing wallets plus the complete public receive/change policy and authenticated cosigner contributions.\nKeep your backup and Core wallet passphrases separately.\nUse the accompanying recovery.py only in a protected volatile environment.\n')
+    (disc/'REDUNDANCY.txt').write_text('Build 10 repeats this exact encrypted recovery package in independently checksummed, sector-aligned raw-track slots after this small ISO filesystem. Disc Operations scans copies and skips unreadable/damaged ones. No giant RAM image or directory listing is needed. The filesystem copy also remains readable by standard tools.\n')
     # Independent, inspectable decryption utility; it refuses an ordinary disk output.
     (disc/'recovery.py').write_text(RECOVERY_TOOL)
+    (disc/'redundancy.py').write_text(Path(__file__).with_name('disc_archive.py').read_text())
     return disc
 
 RECOVERY_TOOL='''#!/usr/bin/python3
@@ -93,14 +97,16 @@ def media(device):
     r=subprocess.run(['/usr/bin/xorriso','-abort_on','FAILURE','-indev',device,'-toc','-end'],capture_output=True,timeout=30)
     output=(r.stdout+r.stderr).decode(errors='replace')
     if r.returncode or not re.search(r'Media current\s*:\s*(?:BD-R\b|DVD-R\b)',output) or re.search(r'Media current\s*:.*(?:RW|RE\b)',output) or not re.search(r'Media status\s*:\s*is blank',output):raise ValueError('Insert a blank, write-once DVD-R or BD-R M-Disc in a compatible burner. Used, rewritable and unknown media are refused.')
-    return {'device':device,'write_once':True,'blank':True,'message':'Blank write-once media detected. Confirm that the disc and drive support M-Disc; software cannot authenticate the physical media branding.'}
+    blocks=re.search(r'Media blocks\s*:.*?([0-9]+) writable',output)
+    capacity=max(0,int(blocks[1])*2048-2*1024*1024) if blocks else None
+    return {'device':device,'capacity_bytes':capacity,'estimated_1x_seconds':round(capacity/(4500000 if 'BD-R' in output else 1385000)) if capacity else None,'write_once':True,'blank':True,'message':'Blank write-once media detected. Confirm that the disc and drive support M-Disc; software cannot authenticate the physical media branding.'}
 
 def image(disc,path):
     r=subprocess.run(['/usr/bin/xorriso','-abort_on','FAILURE','-as','mkisofs','-V','WALLABY_RECOVERY','-o',str(path),str(disc)],capture_output=True,timeout=300)
     if r.returncode:raise ValueError('Could not prepare the disc image in protected RAM.')
     with open(path,'rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 
-def readback(device,size,expected):
+def readback(device,size,expected,progress=None):
     # Aligned direct reads bypass the host page cache. No extracted file on disk.
     fd=os.open(device,os.O_RDONLY|os.O_DIRECT);result=hashlib.sha256();remaining=size
     try:
@@ -111,8 +117,34 @@ def readback(device,size,expected):
                 finally:view.release()
                 if n!=count:raise ValueError('Disc read-back ended early.')
                 remaining-=n
+                if progress:progress(size-remaining)
     finally:os.close(fd)
     if result.hexdigest()!=expected:raise ValueError('Disc read-back differs from the protected RAM image. Keep the RAM session open and use a fresh disc.')
+
+def write_stream(device,source,total,progress):
+    import selectors
+    process=subprocess.Popen(['/usr/bin/xorriso','-abort_on','FAILURE','-as','cdrecord','-sao','speed=1','fs=16m','dev='+device,'tsize='+str(total//2048)+'s','-data','-'],stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    digest=hashlib.sha256();written=0;deadline=time.monotonic()+48*3600
+    try:
+        os.set_blocking(process.stdin.fileno(),False)
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdin,selectors.EVENT_WRITE)
+            for chunk in source:
+                view=memoryview(chunk)
+                try:
+                    while view:
+                        if time.monotonic()>deadline or not selector.select(120):raise ValueError('The optical writer stopped accepting data. The disc is incomplete; use a fresh blank disc after checking the drive.')
+                        try:count=os.write(process.stdin.fileno(),view)
+                        except BlockingIOError:continue
+                        if count<=0:raise ValueError('The optical writer stopped.')
+                        digest.update(view[:count]);written+=count;progress(written);view=view[count:]
+                finally:view.release()
+        process.stdin.close()
+        if written!=total or process.wait(timeout=1800)!=0:raise ValueError('Optical writing failed or is uncertain. Keep the RAM session open and use a fresh blank disc.')
+        return digest.hexdigest()
+    except Exception:
+        if process.poll() is None:process.terminate();process.wait(timeout=30)
+        raise
 
 class Burner:
     def __init__(self,root,on_complete):self.root=Path(root);self.root.mkdir(mode=0o700,parents=True,exist_ok=True);self.on_complete=on_complete;self.job=None;self.lock=threading.Lock();self.pending=[]
@@ -135,15 +167,18 @@ class Burner:
                 nonlocal password
                 try:
                     directory=self.root/self.job['id'];directory.mkdir(mode=0o700,exist_ok=True)
-                    disc=pack(directory,self.job['wallets'],self.job['recovery'],password);password=None;iso=directory/'disc.iso';sha=image(disc,iso);media(device)
-                    self.job.update(phase='burning',message='Writing the M-Disc. Keep this protected session open.')
-                    result=subprocess.run(['/usr/bin/xorriso','-abort_on','FAILURE','-as','cdrecord','-v','dev='+device,'-data',str(iso)],capture_output=True,timeout=7200)
-                    if result.returncode:raise ValueError('Optical writing failed or is uncertain. No success was reported. Keep the session open and use a fresh blank disc.')
-                    self.job.update(phase='verifying',message='Reading the optical disc directly and checking every image byte.')
-                    readback(device,iso.stat().st_size,sha);self.on_complete(self.job['id'],sha)
+                    disc=pack(directory,self.job['wallets'],self.job['recovery'],password);password=None;iso=directory/'disc.iso';image(disc,iso)
+                    capacity=media(device)['capacity_bytes']
+                    if capacity is None:raise ValueError('The drive did not report writable capacity. No write was started.')
+                    from disc_archive import plan,chunks
+                    layout=plan(iso,disc/'recovery.wallaby',capacity)
+                    self.job.update(phase='burning',copies=layout['copies'],total_bytes=layout['total_bytes'],written_bytes=0,message='Writing '+str(layout['copies'])+' redundant encrypted copies. Requesting 1×; the drive may use its lowest supported speed. Read-back follows writing.')
+                    sha=write_stream(device,chunks(iso,disc/'recovery.wallaby',layout),layout['total_bytes'],lambda count:self.job.update(written_bytes=count))
+                    self.job.update(phase='verifying',message='Reading the complete recorded track directly and checking every byte. This can take as long as writing.')
+                    readback(device,layout['total_bytes'],sha,lambda count:self.job.update(verified_bytes=count));self.on_complete(self.job['id'],sha)
                     import shutil
                     shutil.rmtree(directory)
-                    self.job.update(phase='complete',message='Success! The encrypted disc matches the protected RAM image.',finished=time.time())
+                    self.job.update(phase='complete',message='Success! Every recorded byte, including every redundant copy, passed direct read-back verification.',finished=time.time())
                 except Exception as error:self.job.update(phase='error',message=str(error) if isinstance(error,ValueError) else 'Disc work stopped. Keep the RAM session open and inspect the drive before a fresh attempt.')
                 finally:password=None
             threading.Thread(target=work,daemon=True).start();return {'message':'Disc preparation started.'}

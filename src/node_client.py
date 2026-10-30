@@ -21,7 +21,7 @@ class HTTPFailure(Exception):
     def __init__(self,status):self.status=status;super().__init__('HTTP request failed (%d).'%status)
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1'):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev9'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev10'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -46,6 +46,8 @@ def adapter_mac():
     if not candidates:raise ValueError('No stable network adapter MAC found.')
     return sorted(candidates)[0][2]
 
+LOCAL_ROUTER=None
+
 class Core:
     def __init__(self,config):self.config=config
     def call(self,ident,method,params,wallet=None,timeout=30):
@@ -53,6 +55,9 @@ class Core:
         if required() and not inside():
             from secure_bridge import call
             return call('core.public',ident,method,params,wallet,timeout,timeout=max(timeout+5,40))
+        if LOCAL_ROUTER is not None:
+            routed=LOCAL_ROUTER.route(self,ident,method,params,wallet,timeout)
+            if routed is not None:return routed
         # Read the cookie again on every request: Core rotates it on restart.
         if not self.config['cookie']:raise ConnectionFailure('rpc','cookie_missing','Bitcoin Core RPC cookie was not found. Choose the local .cookie file in Connection settings and save.')
         try:cookie=Path(self.config['cookie']).expanduser().read_text().strip()

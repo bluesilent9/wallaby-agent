@@ -40,6 +40,9 @@ def public_vault(v):
     return v
 
 def validate_proposal(p):
+    if isinstance(p,dict) and p.get('kind')=='wallet_sync_preferences':
+        if set(p)!={'kind','version','challenge','previous'} or p['version']!=1 or not re.fullmatch('[0-9a-f]{64}',str(p['challenge'])) or p['previous'] is not None and not isinstance(p['previous'],dict):raise ValueError('Invalid preference snapshot request.')
+        return p
     if not isinstance(p,dict):raise ValueError('Invalid approval proposal.')
     if p.get('kind') in ('wallet_retire','wallet_setup','wallet_setup_policy','wallet_setup_identity','wallet_setup_complete'):
         from setup_policy import proposal
