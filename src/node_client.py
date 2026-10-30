@@ -1,4 +1,4 @@
-"""Dashboard V155 protocol: separate heartbeat, poll and RPC execution loops."""
+"""Dashboard Agent v1 protocol: separate heartbeat, poll and RPC execution loops."""
 import base64, concurrent.futures, http.client, json, os, re, socket, threading, time, uuid
 from decimal import Decimal
 from pathlib import Path
@@ -21,7 +21,7 @@ class HTTPFailure(Exception):
     def __init__(self,status):self.status=status;super().__init__('HTTP request failed (%d).'%status)
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1'):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev13'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev14'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -33,6 +33,9 @@ def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1'):
         if response.status!=200:raise HTTPFailure(response.status)
         return decode(data)
     finally:conn.close()
+
+def protocol_failure(code,message):
+    return ConnectionFailure('dashboard',code,'Wallaby Dashboard protocol error: '+message+' Check that the Dashboard and Agent Development builds are compatible.')
 
 def adapter_mac():
     candidates=[]
@@ -96,6 +99,7 @@ class NodeClient:
         except Exception as error:raise describe('rpc',error) from None
     def post(self,path,body,timeout=30):
         try:return http_json(self.port,'/agent/v1/'+path,body,self.token,timeout)
+        except ValueError:raise protocol_failure('json_'+path,'The '+path+' endpoint did not return valid, bounded JSON.') from None
         except Exception as error:raise describe('dashboard',error) from None
     def fail(self,error):
         with self.lock:
@@ -103,28 +107,29 @@ class NodeClient:
             self.error=describe('dashboard',error);self.failed.set()
         self.status('red',str(self.error))
     def consume(self,response):
-        if not isinstance(response,dict):raise ValueError('Invalid Dashboard response.')
+        if not isinstance(response,dict):raise protocol_failure('response_object','Expected a JSON object.')
         commands=response.get('commands',[])
-        if not isinstance(commands,list) or len(commands)>1:raise ValueError('Invalid command envelope.')
+        if not isinstance(commands,list) or len(commands)>1:raise protocol_failure('command_list','Expected at most one RPC command in this response.')
         for c in commands:
-            if not isinstance(c,dict) or set(c)!={'id','kind','method','params','wallet','expires_in_seconds'}:raise ValueError('Invalid RPC envelope.')
+            if not isinstance(c,dict) or set(c)!={'id','kind','method','params','wallet','expires_in_seconds'}:raise protocol_failure('rpc_fields','An RPC command has missing or unexpected fields.')
             ident=c['id']
-            if not isinstance(ident,str) or not 1<=len(ident)<=100:raise ValueError('Invalid request ID.')
+            if not isinstance(ident,str) or not 1<=len(ident)<=100:raise protocol_failure('rpc_id','An RPC command has an invalid request identifier.')
             with self.lock:
                 if ident in self.seen:continue
-                if len(self.seen)>=10000:raise ValueError('Session request limit reached; reconnect required.')
+                if len(self.seen)>=10000:raise protocol_failure('session_limit','The session request limit was reached; reconnecting.')
                 self.seen.add(ident)
             received=time.monotonic()
             while not self.pending.acquire(timeout=.1):
                 if self.stop.is_set() or self.failed.is_set():return
-                if time.monotonic()-received>=float(c['expires_in_seconds']):raise ValueError('RPC deadline expired while waiting for a Core worker.')
+                if time.monotonic()-received>=float(c['expires_in_seconds']):raise ConnectionFailure('dashboard','rpc_queue_timeout','A Dashboard RPC request expired while waiting for a local Core worker. Check whether Bitcoin Core is busy or responding slowly.')
             if self.stop.is_set() or self.failed.is_set():self.pending.release();return
             self.pool.submit(self.execute,c,received)
     def execute(self,c,received):
         try:
             ident=c['id'];expiry=c['expires_in_seconds']
-            if not isinstance(expiry,(int,Decimal)) or expiry<=0 or expiry>3600:raise ValueError('Invalid or expired RPC deadline.')
-            params,_=request(c['method'],c['params'],c['wallet'])
+            if not isinstance(expiry,(int,Decimal)) or expiry<=0 or expiry>3600:raise protocol_failure('rpc_deadline','An RPC command has an invalid or expired deadline.')
+            try:params,_=request(c['method'],c['params'],c['wallet'])
+            except ValueError:raise protocol_failure('rpc_scope','The requested RPC method, wallet scope or public parameters were refused by the local read-only policy.') from None
             if c['kind']!='rpc' or self.stop.is_set() or self.failed.is_set() or time.monotonic()-received>=expiry:return
             ack=self.post('ack',{'id':ident})
             if ack.get('execute') is not True:return

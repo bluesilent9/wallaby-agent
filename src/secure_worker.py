@@ -95,7 +95,8 @@ class Workspace:
                 def status(color,message):self.node_status={'color':color,'message':message}
                 def work():
                     try:NodeClient(self.ops.core.config,port,self.node_stop,status).run()
-                    except Exception as error:self.node_status={'color':'red','message':str(describe('rpc',error)),'failed':True}
+                    except Exception as error:
+                        failure=describe('rpc',error);self.node_status={'color':'red','message':str(failure),'failure':failure.detail(),'failed':True}
                 self.node=threading.Thread(target=work,daemon=True);self.node.start();return {'session':self.node_generation}
             if method=='node.status':
                 if args[0]!=self.node_generation:return {'color':'red','message':'Node session changed. Reconnecting.','failed':True}

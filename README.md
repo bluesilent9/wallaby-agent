@@ -2,11 +2,15 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 13
+# Wallaby Agent V2 — Development Build 14
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 13 DEB](dist/wallaby-agent_2.0.0~dev13_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 14 DEB](dist/wallaby-agent_2.0.0~dev14_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 14 separates missing-component instructions from the install command, which appears in a selectable code box with a **Copy command** button and copy confirmation. Command generation uses only the fixed optional-package list; it never includes cookie contents or passwords. Protected-worker failures now preserve their original local Core/Dashboard stage, category and safe explanation instead of being mislabelled as incompatible Dashboard data. Node protocol failures also distinguish invalid JSON endpoints, command fields, identifiers, deadlines and refused read-only RPC scope without displaying raw server data. Tunnel-only installation remains supported.
+
+An Agent diagnostic bug has been confirmed and fixed: its protected-node proxy converted every worker failure into ValueError and the runtime then labelled that as invalid Dashboard data. The underlying cause of the reported node disconnect has **not been reproduced** in isolated registration/poll/ack/result tests against Dashboard Build 13. The supplied Dashboard log records a server-side `NoneType` error; the Dashboard chat is correcting an absent-version exception separately. That exception alone does not establish the cause of the Agent disconnect. See [connection investigation](DASHBOARD_BUILD14_DIAGNOSTICS.md). No Dashboard source is modified here.
 
 Build 13 fixes tunnel-only installation on Ubuntu 26.04. The unavailable legacy `policykit-1` dependency is removed. Bitcoin Core, PyQt6 WebEngine, optical writing tools and administrator-authorisation tools are **optional** and are not automatically installed with the Agent. DDNS-GO and Dashboard browser-access tunnels work without Bitcoin Core. A missing Bitcoin prerequisite leaves the node switch off and greyed; clicking it explains what is missing without enabling its service or changing other tunnels. Existing node services report prerequisite problems before creating their tunnel; login does not launch an unavailable Bitcoin workspace.
 

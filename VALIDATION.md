@@ -1,8 +1,13 @@
-# Agent V2 Development Build 13 validation
+# Agent V2 Development Build 14 validation
 
 Target: Ubuntu 26.04 LTS amd64, Bitcoin Core 31. Development only.
 
 ## Verified
+
+- Build 14 final full regression suite: **170 tests passed in 256.051 seconds**, with isolated Bitcoin Core 31 regtest nodes. Final RPC-focused checks additionally pass 17 tests after refining the queued-RPC timeout explanation. Twenty-five diagnostic/protected-runtime checks pass. The shipped command-copy UI passes its JavaScript VM test and a real browser Copy command interaction. Ubuntu 26.04 apt simulation accepts an upgrade with zero newly required packages; the DEB matches all 82 shipped source/web files.
+
+- Build 14 adds eight focused tests (including three protected-worker boundary regressions) for structured fixed install commands, endpoint-specific safe JSON errors, malformed command envelopes, refusal of mutating RPC without forwarding credentials, and fractional wire deadlines. The existing service-control JavaScript test now checks code-box contents, clipboard invocation and Copied feedback. Browser verification also confirms the real Copy command button reports Copied.
+- The separate current-Dashboard Build 13 integration probe passed registration, polling, acknowledgement, decimal wallet RPC results and disconnect, including a Dashboard snapshot/health refresh. The reported live disconnect is not reproduced; see DASHBOARD_BUILD14_DIAGNOSTICS.md. These checks do not prove a fix for that live fault.
 
 - Build 13 adds ten targeted tests for optional Bitcoin dependencies, installation metadata, a Snap/manual Core cookie without an apt bitcoind requirement, clear missing-disc-tool advice, refusal before OS authorisation, usable DDNS-GO/Dashboard HTTP controls with Bitcoin unavailable, rejected node enable without saving it or changing other tunnels, unconditional ability to switch an old node setting off, login without unavailable Bitcoin-workspace startup, and worker prerequisite checks before creating a node tunnel.
 - Shipped service-control JavaScript passes a Node VM test: missing prerequisites grey only the node switch, its click reports the reason without sending an enable request, existing node enablement can be switched off, and Services/DDNS-GO/Dashboard controls remain available. This supplements the real HTTP API tests.

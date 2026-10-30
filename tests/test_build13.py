@@ -10,7 +10,7 @@ from app import Server,Handler
 class OptionalDependencies(unittest.TestCase):
  def test_missing_bitcoin_desktop_components_are_actionable_without_probing_rpc(self):
     with patch('capabilities.importlib.util.find_spec',side_effect=ModuleNotFoundError),patch('capabilities.shutil.which',return_value=None),patch('capabilities.discover_cookie',return_value=''):
-     status=node_support({'cookie':''});self.assertFalse(status['available']);self.assertIn('python3-pyqt6.qtwebengine',status['message']);self.assertIn('pkexec polkitd',status['message']);self.assertIn('kdialog',status['message']);self.assertIn('RPC',status['message']);self.assertIn('tunnels remain available',status['message'])
+     status=node_support({'cookie':''});self.assertFalse(status['available']);self.assertIn('python3-pyqt6.qtwebengine',status['commands'][0]);self.assertIn('pkexec polkitd',status['commands'][0]);self.assertIn('kdialog',status['commands'][0]);self.assertIn('RPC',status['message']);self.assertIn('tunnels remain available',status['message'])
      with self.assertRaises(NodeUnavailable):require_node({'cookie':''})
  def test_existing_snap_or_manual_core_cookie_does_not_require_apt_bitcoind_binary(self):
     with tempfile.TemporaryDirectory() as tmp,patch('capabilities.importlib.util.find_spec',return_value=object()),patch('capabilities.shutil.which',return_value='/fixture/tool'):
