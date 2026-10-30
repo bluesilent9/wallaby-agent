@@ -1,3 +1,5 @@
+> Superseded by [Build 11](DASHBOARD_BUILD11_UPDATE.md): the Agent now persists the wallet-sync Denial list locally. Dashboard must only query its status and must not restore server-held preferences.
+
 # Agent V2 Build 10: Dashboard integration
 
 Dashboard V1 Build 11 already supports wallet setup, public cosigner accounts and partial-sign-result routing. Disc Operations restores its physical role into a separate protected RAM Core; ordinary public listwallets/listwalletdir, wallet descriptors and wallet information expose that local signing account. Existing Build 11 policy matching can target it. No encrypted/private archive is uploaded. Message signing is local and requires no Dashboard change.

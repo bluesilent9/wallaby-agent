@@ -13,19 +13,31 @@ def digest(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
 
 class Store:
-    def __init__(self,root=None):
+    def __init__(self,root=None,persistence=None):
         from protected_memory import required,root as secure_root
         self.root=Path(root or (secure_root()/'state' if required() else Config().root));self.root.mkdir(parents=True,exist_ok=True,mode=0o700)
         from protected_memory import inside
         if inside():self.identity_root=Config().root
         self.path=self.root/'approvals.json'
+        if persistence is None and required():
+            from denial_storage import Client
+            persistence=Client()
+        self.persistence=persistence
     @contextlib.contextmanager
     def edit(self):
         with (self.root/'approvals.lock').open('a') as lock:
             os.chmod(lock.name,0o600);fcntl.flock(lock,fcntl.LOCK_EX)
             state={'pending':{},'denied':{},'completed':{},'vaults':{},'outbox':{},'sync':'Waiting for Dashboard extension support.'}
             if self.path.exists():state.update(json.loads(self.path.read_text()))
+            record=None
+            if self.persistence is not None:
+                from denial_storage import overlay,project
+                record=self.persistence.read();overlay(state,record)
             yield state
+            if record is not None:
+                updated=project(state,record['revision'])
+                if updated!=record:
+                    updated['revision']+=1;committed=self.persistence.commit(record['revision'],updated);overlay(state,committed)
             raw=json.dumps(state,allow_nan=False)
             if len(raw.encode())>16*1024*1024:raise ValueError('Local approval storage is full. Remove completed records before continuing.')
             fd,name=tempfile.mkstemp(dir=self.root)
@@ -56,8 +68,9 @@ class Store:
         with self.edit() as s:
             if s.get('active_transfer')==key:raise ValueError('Cancel the active transfer on Synchronisation first.')
             if s['pending'][key]['proposal']['kind']=='wallet_transfer':raise ValueError('Only Dashboard can remove synchronisation requests. Uncheck a wallet to leave it pending.')
-            row=s['pending'].pop(key);s['denied'][key]=row
-            kind=row['proposal']['kind']
+            row=s['pending'].pop(key)
+            from denial_storage import display
+            kind=row['proposal']['kind'];s['denied'][key]={'proposal':{'kind':kind},'wallet_name':display(row['proposal'])}
             result_kind={'sign_psbt_partial':'partial_sign_result','broadcast_transaction':'broadcast_result','wallet_transfer':'wallet_transfer_result','wallet_retire':'wallet_retirement_result'}.get(kind)
             if result_kind:
                 item={'kind':result_kind,'payload':{'request_hash':key,'status':'denied','message':'Denied locally.'}};s['outbox'][digest(item)]=item

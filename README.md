@@ -2,19 +2,23 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 10
+# Wallaby Agent V2 — Development Build 11
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 10 DEB](dist/wallaby-agent_2.0.0~dev10_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Dashboard integration handoff](DASHBOARD_BUILD10_UPDATE.md)
+[Build 11 DEB](dist/wallaby-agent_2.0.0~dev11_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Dashboard integration handoff](DASHBOARD_BUILD11_UPDATE.md)
 
-Build 10 adds **Disc Operations**, restoration of archived signing accounts into protected RAM, redundant full-medium optical backups, **Sign Message** with BIP-322 multisignature proofs, an Authorise queue, sidebar notification dots and per-node incoming wallet-sync exclusions. Vault Builder remains removed: wallet construction originates in Dashboard Wallet Builder and is independently approved on Authorise.
+Build 11 makes the **wallet synchronisation Denial list persistent on the Agent**. Disable an incoming wallet policy once; it remains disabled after closing the protected workspace or rebooting. Enable it on Authorise to remove its entry and allow the current or next sync offer. Disabled entries never count as unfinished work or light notification dots. One-off declined signing/setup requests remain session-only; there is no persistent request history.
 
-**Dashboard V1 Build 11 already supports wallet setup, completion proofs and restored-cosigner transaction routing.** Disc-loaded accounts are advertised through the existing public node RPC interface; private wallets remain inside the Agent's temporary RAM Core. Dashboard needs the small new [sync-preference protocol](DASHBOARD_BUILD10_UPDATE.md) to retain exclusions and stop its missing-wallet alerts. Until then local exclusions last for the current workspace only. No Dashboard source is changed here. Remote RPC remains a positive public/read-only allowlist; wallet changes, signing and broadcast require fixed locally approved operations.
+The Agent owns this list. Dashboard cannot restore, clear or override it. Dashboard code does not need changing for local enforcement or reboot persistence. A small optional [permission-status query](DASHBOARD_BUILD11_UPDATE.md) lets Dashboard display “disabled on this Agent” and suppress its own missing-wallet alerts; it creates no second control list. This supersedes Build 10's proposal for server-retained preference snapshots.
+
+Disc Operations, archived-key signing, redundant optical backups, BIP-322 messages and the multi-request Authorise queue remain. Dashboard V1 Build 11 already supports wallet setup, completion proofs and restored-cosigner transaction routing. Remote RPC remains public/read-only; local wallet/signing/broadcast approval boundaries are unchanged. No Dashboard code is changed in this build.
 
 ## Install and start
 
 Install the DEB with your normal package manager so its dependencies are installed: Python/cryptography, PyQt6 WebEngine, OpenSSH client, systemd, policykit, xorriso and a native password dialogue (kdialog or zenity). All connection services remain off on a fresh install. Existing saved service choices are retained on upgrade.
+
+On upgrade, finish sensitive work, switch off the node interface and close the existing protected workspace before restarting it with this build. The installer does not forcibly terminate a running RAM signing/setup session. A reboot after finishing that work also starts the new installed code.
 
 Open **Utilities → Wallaby Agent Configuration**. **Services** uses the ordinary HTML5 configuration page. Hostname, SSH username/port/key and enabled services save live. A hostname/domain is required; literal IP addresses are refused. Connect authenticates an IPv6-only shared SSH master, never pings. Green means authenticated connection, amber means connecting and red means failed/disconnected. DDNS-GO, Dashboard browser access and the node interface share its forwarding connection. Tunnels remain user services and start at login when enabled.
 
@@ -59,7 +63,7 @@ Multisig contributors can sign together or continue an exact matching partial me
 
 All pending requests are listed together. Select an item to review its locally reconstructed details; signing and wallet-creation reviews have different layouts. Completed requests close their details. Cancel only an unattempted request; uncertain attempted operations require local reconciliation. Authorise remains available while the node interface is connected, including when the queue is empty.
 
-For an incoming wallet synchronisation request, **Disable synchronisation** excludes that exact public descriptor policy on this Agent. It never applies to signing or outgoing transfers. Re-enable it from the exclusions list. An intentionally disabled policy is not unfinished work and does not light either sidebar dot, including when Dashboard repeats the request. Cancelling a row alone may allow a later Dashboard revision to offer it again. Dashboard Build 11 requires the handoff update to persist and honour these signed preferences across workspace restarts.
+For an incoming wallet synchronisation request, **Disable synchronisation** excludes that exact public descriptor policy on this Agent. It never applies to signing or outgoing transfers. Re-enable it from the exclusions list. An intentionally disabled policy is not unfinished work and does not light either sidebar dot, including when Dashboard repeats the request. Cancelling a row alone may allow a later Dashboard revision to offer it again. The list is persisted locally and needs no Dashboard support. Dashboard may continue its own missing-wallet alerts until it implements the read-only status query; it must never keep another user-controlled exclusion setting.
 
 Authorise and Synchronisation have red sidebar dots while unresolved work exists and the user is on another page. A node history download also counts as unresolved synchronisation. Opening the relevant page hides its dot; leaving with unfinished work restores it. Requests never automatically open a browser or switch pages.
 
@@ -79,6 +83,14 @@ The multi-wallet request list, independently signed funded-address/label/vault p
 
 Missing history is **recovery required**, not successful completion. This Node shows Synchronised / Requires Rescan / Requires Blockchain Download from local evidence. The user reviews and authorises recovery locally. If old blocks are missing, Core can be cleanly restarted/reindexed with **the same pruning mode and limit throughout**. Wallets, original descriptor timestamps and vault monitors are loaded before historical download resumes, so Core records their history before pruning. No archival chain allocation, pruning override, automatic safety backups or remote restart authority is introduced. Synchronisation/history requests never open a window or switch the user's page automatically.
 
+## Persistent Denial list
+
+The only new persistent Agent Bitcoin preference is a list of disabled incoming wallet-policy hashes and their display names, plus a format version and update counter. It lives in `/var/lib/wallaby-agent-denials/<UID>/denials.json`, private to that desktop user (directory 0700, file 0600). No request bodies/hashes for individual declined operations, PSBTs, descriptors, addresses, balances, wallet files, private keys, passphrases, history jobs or approval/outbox payloads enter this file.
+
+A separate fixed unprivileged service, `wallaby-agent-denials@<UID>.service`, owns this schema-limited atomic store. It is started as a dependency of the protected workspace. The Bitcoin worker retains read-only ordinary filesystems; it has no writable persistent mount. Its local socket can read the list or commit a validated list revision only. It cannot request arbitrary file paths, RPC operations or commands. Failed/corrupt/unavailable storage blocks Bitcoin work until it can read the list, rather than silently forgetting exclusions. Services remain independent.
+
+Services configuration and its machine/SSH identity retain their existing persistent locations. Other Agent Bitcoin working data stays in the protected volatile workspace and is cleared on shutdown. Existing Bitcoin Core wallets/blockchain and deliberately produced optical backups/signed Dashboard outputs retain their selected destinations; this does not retroactively erase files created by older versions. Build 11 no longer reloads legacy on-disk `approvals.json` into a new workspace.
+
 ## Protection boundary
 
 The dedicated worker and HTML5 viewer use a non-swapping RAM filesystem and process cgroup, zero core limits/non-dumpable children, checked read-only ordinary filesystems, RAM-only temporary/shared-memory paths, restricted raw devices and verified sleep/hibernation inhibition. Enabled kernel crash dumping causes refusal. The supervisor keeps inhibition through temporary-child shutdown and RAM cleanup, including worker failure. The protected process checks its actual controls before sensitive work; merely setting a temporary-folder path or environment flag is insufficient.
@@ -93,6 +105,7 @@ Bitcoin Agent inbox/outbox/reviews and temporary jobs are volatile. Keep the wor
 
 The source and compiled Ubuntu 26.04 amd64 DEB are on **Development**. The GitHub default is Stable; open [Development explicitly](https://github.com/bluesilent9/wallaby-agent/tree/Development). Stable is unchanged.
 
+- [Build 10 installer](dist/wallaby-agent_2.0.0~dev10_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/51e483e8559dec9a6f5855c5fa7d68736201354f)
 - [Build 9 installer](dist/wallaby-agent_2.0.0~dev9_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/0be3e95c236ebc8ffd57e4bf7f675d82cdfb0916)
 - [Build 8 installer](dist/wallaby-agent_2.0.0~dev8_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/4f6c168f8faa646452bbbba14b3f4f5619e2e785)
 - [Build 7 installer](dist/wallaby-agent_2.0.0~dev7_amd64.deb) · [matching source](https://github.com/bluesilent9/wallaby-agent/tree/8731a90f4adc24f0ac0345b1ab7f70aed5ffdee0)

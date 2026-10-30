@@ -77,7 +77,7 @@ def workspace(server):
         wallet_ops(server).core.ready();connected=True
     except Exception:connected=False
     return {'connected':connected,'pending':[{"id":k,'kind':v['proposal']['kind'],'state':v['state']} for k,v in saved['pending'].items() if v['proposal']['kind']!='wallet_transfer'],
-            'denied':[{"id":k,'proposal':{'kind':v['proposal']['kind'],**({'vault':v['proposal']['vault']} if v['proposal']['kind']=='vault_sync' else {})}} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':transfer(server).state()}
+            'denied':[{"id":k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':transfer(server).state()}
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version='HTTP/1.0'
@@ -101,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.allowed() or self.headers.get('Sec-Fetch-Site')!='same-origin' or self.headers.get('X-Wallaby-UI')!='1':return self.reply(403,{'error':'Local page session access denied.'})
             return self.reply(200,{'token':self.server.token})
         if not self.allowed(self.path.startswith('/api/')):return self.reply(403,{'error':'The local Agent session needs to reconnect.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev10'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev11'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
@@ -250,7 +250,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev10'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev11'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -268,7 +268,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev10':
+    if installed!='2.0.0~dev11':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -278,7 +278,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev10') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev11') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

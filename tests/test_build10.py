@@ -56,7 +56,7 @@ class Preferences(unittest.TestCase):
         change(store,key,True);sign(store,{'identity':'initialise'})
         exchange(store,{'challenge':'a'*64,'previous':None});snapshot=next(x['payload']['snapshot'] for x in store.read()['outbox'].values() if x['kind']=='wallet_sync_preferences')
         with store.edit() as s:s.pop('sync_exclusions');s.pop('sync_preferences_changed',None)
-        exchange(store,{'challenge':'b'*64,'previous':snapshot});self.assertIn(policy_id(p),store.read()['sync_exclusions'])
+        exchange(store,{'challenge':'b'*64,'previous':snapshot});self.assertNotIn(policy_id(p),store.read().get('sync_exclusions',{}))
         forged=copy.deepcopy(snapshot);forged['message']['policies']=[]
         with self.assertRaises(ValueError):exchange(store,{'challenge':'b'*64,'previous':forged})
         bad={'kind':'sign_psbt_partial','request_id':'c'*64,'chain':'main','wallet':'x','psbt':'bad'}

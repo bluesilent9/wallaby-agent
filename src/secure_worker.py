@@ -17,12 +17,8 @@ from batch_transfer import BatchTransfer
 class Workspace:
     def __init__(self):
         self.store=Store(root()/ 'state');self.store.identity_root=Config().root
-        # Public history/audit migration only. Old files are not falsely claimed
-        # to have never existed; no private wallet is copied to ordinary storage.
-        old=Config().root/'approvals.json'
-        if not self.store.path.exists() and old.exists():
-            data=json.loads(old.read_text())
-            with self.store.edit() as s:s.update(data);s.pop('active_transfer',None);s.pop('sync_batch',None)
+        # Never replay the legacy non-volatile approvals.json into a new workspace.
+        # Only the schema-limited denial store survives workspace shutdown.
         self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.archives=None;self.messages=None;self.environment={}
     def configure(self,environment):
         for key,value in environment.items():
@@ -53,7 +49,7 @@ class Workspace:
         saved=self.store.read()
         try:self.ops.core.ready();connected=self.node_status['color']=='green'
         except Exception:connected=False
-        return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind'],**({'vault':v['proposal']['vault']} if v['proposal']['kind']=='vault_sync' else {})}} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
+        return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
     def service_status(self):
         saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));return {'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
     def open_view(self,page):
@@ -61,7 +57,7 @@ class Workspace:
         import secrets,importlib.util
         try:available=importlib.util.find_spec('PyQt6.QtWebEngineWidgets')
         except ModuleNotFoundError:available=None
-        if available is None:raise ValueError('The protected HTML5 viewer is unavailable. Install the complete Build 10 DEB with its PyQt6 WebEngine dependencies; wallet data will not be opened in an ordinary browser.')
+        if available is None:raise ValueError('The protected HTML5 viewer is unavailable. Install the complete Build 11 DEB with its PyQt6 WebEngine dependencies; wallet data will not be opened in an ordinary browser.')
         if self.view_server is None:
             from app import Server,Handler
             owner=self

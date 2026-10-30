@@ -16,7 +16,7 @@ def change(store,key,disable):
                 if row['state']!='pending':raise ValueError('Inspect the previously attempted wallet transfer before disabling it.')
                 s['pending'].pop(item)
         s['sync_preferences_changed']=True
-    return {'message':'Incoming synchronisation disabled for that exact public wallet policy on this Agent. Dashboard Build 11 needs the Build 10 preference protocol to suppress its missing-wallet notification. This local list is volatile until that protocol is implemented.'}
+    return {'message':'Incoming synchronisation disabled for that exact public wallet policy on this Agent. The local denial list is saved across reboots. Dashboard may still show a missing-wallet notification until it reads the Agent’s permission status.'}
 
 def enable(store,ident):
     with store.edit() as s:
@@ -40,7 +40,7 @@ def exchange(store,p):
     """Only a future Dashboard explicitly requesting this kind gets a new outbox.
 
     Build 11 rejects unknown outbox kinds; never break its ordinary connection.
-    A returned previous snapshot requires this Agent's own signature.
+    Previous snapshots are checked for compatibility but never restore preferences.
     """
     from setup_messages import sign,verify
     from pathlib import Path
@@ -50,15 +50,14 @@ def exchange(store,p):
         record=verify(store,previous,own,namespace=NAMESPACE)
         if not isinstance(record,dict) or set(record)!={'version','purpose','agent_key','revision','policies'} or record['version']!=1 or record['purpose']!='wallet_sync_preferences' or record['agent_key']!=own or type(record['revision']) is not int or record['revision']<0 or not isinstance(record['policies'],list) or len(record['policies'])>128 or len(set(record['policies']))!=len(record['policies']) or any(not __import__('re').fullmatch('[0-9a-f]{64}',str(k)) for k in record['policies']):raise ValueError('Invalid signed synchronisation preferences.')
     with store.edit() as s:
-        if record and 'sync_exclusions' not in s and not s.get('sync_preferences_changed'):
-            s['sync_exclusions']={k:{'policy_id':k,'wallet_name':'Public policy '+k[:16]} for k in record['policies']}
-            s['sync_preferences_revision']=record['revision']
-        revision=max(s.get('sync_preferences_revision',0),record['revision'] if record else 0)+(1 if s.get('sync_preferences_changed') else 0)
+        # The local denial file is the only authority. Even this Agent's valid
+        # old signed snapshot cannot restore a block the user has since removed.
+        revision=s.get('sync_preferences_revision',0)+(1 if store.persistence is None and s.get('sync_preferences_changed') else 0)
         payload={'version':1,'purpose':'wallet_sync_preferences','agent_key':own,'revision':revision,'policies':sorted(s.get('sync_exclusions',{}))}
         s['sync_preferences_revision']=revision;s['sync_preferences_changed']=False
     envelope=sign(store,payload,namespace=NAMESPACE)
     store.queue('wallet_sync_preferences',{'version':1,'challenge':p['challenge'],'snapshot':envelope})
-    # Remove pending receive rows only after the signed preferences have loaded.
+    # Suppress disabled incoming rows using the current local list only.
     with store.edit() as s:
         for key,row in list(s['pending'].items()):
             q=row['proposal']

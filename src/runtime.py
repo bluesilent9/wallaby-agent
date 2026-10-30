@@ -131,7 +131,7 @@ def worker(kind):
 
 def monitor():
     retire_jellyfin()
-    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev10','pid':os.getpid()}))
+    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev11','pid':os.getpid()}))
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     master=None;current=None;attempt_started=0;due=0;delay=15;notice=None;reconciled=None;last_rpc=None;status=('red','Enter your server hostname or domain.');extra={}
     try:

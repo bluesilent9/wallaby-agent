@@ -1,3 +1,5 @@
+> Build 11: persistent Agent-owned wallet-sync Denial list and read-only status query: [DASHBOARD_BUILD11_UPDATE.md](DASHBOARD_BUILD11_UPDATE.md). Other Bitcoin working state remains volatile.
+
 > Build 9: see [DASHBOARD_BUILD9_UPDATE.md](DASHBOARD_BUILD9_UPDATE.md) for current wallet setup, retirement, protected UI and completion-proof additions. Local Vault Builder is removed. Earlier contracts below remain relevant only where not superseded.
 
 > Build 8 note: this document describes the earlier transport/approval contract. Multi-wallet lists, watch-only/address-label previews and recovery additions are specified in [DASHBOARD_BUILD8_UPDATE.md](DASHBOARD_BUILD8_UPDATE.md). Dashboard code is unchanged by Agent Build 8.
