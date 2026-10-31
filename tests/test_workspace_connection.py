@@ -25,7 +25,7 @@ class LocalWorkspace(unittest.TestCase):
  def test_explicit_protection_refusal_is_not_hidden_by_readiness_retry(self):
   original=WorkspaceFailure('worker_rejected','Persistent filesystem write restrictions could not be verified.')
   with patch('secure_bridge.subprocess.run',return_value=Mock(returncode=0)),patch('secure_bridge.call',side_effect=original) as rpc,patch('secure_bridge.time.sleep') as sleep,self.assertRaises(WorkspaceFailure) as caught:ensure_running()
-  self.assertIs(caught.exception,original);rpc.assert_called_once_with('service_status');sleep.assert_not_called()
+  self.assertIs(caught.exception,original);self.assertEqual(rpc.call_count,1);self.assertEqual(rpc.call_args.args,('service_status',));self.assertLessEqual(rpc.call_args.kwargs['timeout'],8);sleep.assert_not_called()
  def test_bad_node_session_and_status_are_local_protocol_errors(self):
   for replies in [[None],[{'session':'fixture'},None,{'ok':True}]]:
    with self.subTest(replies=replies),patch('secure_bridge.ensure_running'),patch('protected_node.call',side_effect=replies),self.assertRaises(ConnectionFailure) as caught:self.node().run()

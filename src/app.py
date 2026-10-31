@@ -102,15 +102,15 @@ class Handler(BaseHTTPRequestHandler):
             if not self.allowed() or self.headers.get('Sec-Fetch-Site')!='same-origin' or self.headers.get('X-Wallaby-UI')!='1':return self.reply(403,{'error':'Local page session access denied.'})
             return self.reply(200,{'token':self.server.token})
         if not self.allowed(self.path.startswith('/api/')):return self.reply(403,{'error':'The local Agent session needs to reconnect.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev15'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev16'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
                 if not v['cookie']:
                     cookie=discover_cookie()
                     if cookie:v['cookie']=cookie;c.save(v)
-                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development Build 15','node_support':node_support(v),'workspace':workspace(self.server)})
-        paths={'/':'index.html','/app.js':'app.js','/workspace.js':'workspace.js','/synchronisation.js':'synchronisation.js','/wallet_setup.js':'wallet_setup.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
+                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development Build 16','node_support':node_support(v),'workspace':workspace(self.server)})
+        paths={'/':'index.html','/app.js':'app.js','/workspace.js':'workspace.js','/message.js':'message.js','/disc_operations.js':'disc_operations.js','/synchronisation.js':'synchronisation.js','/wallet_setup.js':'wallet_setup.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
         asset_path=urlsplit(self.path).path
         if asset_path not in paths:return self.reply(404,{'error':'Not found.'})
         f=ASSETS/paths[asset_path];mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.json':'application/json; charset=utf-8'}[f.suffix]
@@ -130,6 +130,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200,call('ui.open',body['page']))
             from protected_memory import required,inside
             if required() and not inside() and self.path.startswith(('/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/vault/')):raise ValueError('Open the protected Bitcoin workspace from Services. Wallet information never passes through the ordinary browser service.')
+            if self.path=='/api/protected/close-view' and not body:
+                from secure_bridge import call
+                return self.reply(200,call('ui.close'))
             if self.path=='/api/protected/stop' and not body:
                 from secure_bridge import stop
                 return self.reply(200,stop())
@@ -239,9 +242,12 @@ class Handler(BaseHTTPRequestHandler):
                         if not self.server.preview and required() and not inside():
                             from secure_bridge import start
                             try:start()
-                            except ValueError as error:raise NodeUnavailable(str(error)) from None
+                            except ValueError as error:
+                                write_status('node','red',str(error),stage='workspace',preparation_failed=True)
+                                raise NodeUnavailable(str(error)) from None
                             except subprocess.TimeoutExpired:raise NodeUnavailable('Preparing the local protected Bitcoin workspace timed out. Check its status on Services before trying again; the node service was not enabled.') from None
                             except OSError:raise NodeUnavailable('The local protected Bitcoin workspace could not be prepared. Check its system-service status; the node service was not enabled.') from None
+                    if body['service']=='node' and not body['enabled']:write_status('node','red','Off',tunnel=False)
                     v['enabled'][body['service']]=body['enabled']
                 else:return self.reply(404,{'error':'Not found.'})
                 if self.server.preview:c.save(v)
@@ -260,7 +266,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev15'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev16'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -278,7 +284,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev15':
+    if installed!='2.0.0~dev16':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -288,7 +294,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev15') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev16') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

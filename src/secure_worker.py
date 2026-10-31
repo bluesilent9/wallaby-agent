@@ -51,7 +51,18 @@ class Workspace:
         except Exception:connected=False
         return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
     def service_status(self):
-        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));return {'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
+        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
+        self._service_snapshot=dict(result);return result
+    def close_views(self):
+        # Only tracked child viewers: leave the protected worker/node running.
+        viewers=[p for p in self.viewers if p.poll() is None]
+        for process in viewers:process.terminate()
+        for process in viewers:
+            try:process.wait(timeout=5)
+            except __import__('subprocess').TimeoutExpired:
+                process.kill();process.wait(timeout=5)
+        self.viewers=[]
+        return {'message':'Protected window closed. The protected workspace and node connection remain active.'}
     def open_view(self,page):
         if page not in ('authorise','synchronisation','burn','message'):raise ValueError('Invalid protected page.')
         import secrets,importlib.util
@@ -72,6 +83,17 @@ class Workspace:
         process.stdin.write(json.dumps(config).encode()+b'\n');process.stdin.close();self.viewers=[p for p in self.viewers if p.poll() is None]+[process]
         return {'message':'Opened the protected Bitcoin workspace.'}
     def dispatch(self,method,args,environment):
+        if method=='service_status':
+            # Do not queue ordinary-window liveness behind a native passphrase
+            # dialogue/signing operation. This reply contains public flags only.
+            if not self.lock.acquire(blocking=False):
+                enforce()
+                result=dict(getattr(self,'_service_snapshot',{'pending':[],'denied':[],'transfer':{},'burn':{},'outbox_count':0}))
+                result.update(connected=self.node_status['color']=='green',protected={'running':True,'viewer':False},busy=True,viewer_open=any(p.poll() is None for p in self.viewers),sync='A protected operation is in progress. Continue in the protected window.')
+                return result
+            try:
+                enforce();self.configure(environment);return self.service_status()
+            finally:self.lock.release()
         with self.lock:
             enforce();self.configure(environment)
             saved=self.store.read()
@@ -83,6 +105,7 @@ class Workspace:
                 if candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']:raise ValueError('Finish the current wallet setup and its physical backups first.')
             if method=='service_status':return self.service_status()
             if method=='ui.open':return self.open_view(*args)
+            if method=='ui.close':return self.close_views()
             if method=='node.start':
                 port=args[0]
                 if type(port) is not int or not 1<=port<=65535:raise ValueError('Invalid node tunnel port.')

@@ -3,14 +3,25 @@
 import os,pwd,subprocess,sys
 from pathlib import Path
 
+def runtime_parent(path):
+    """Set root-owned traversal permissions despite inherited UMask=0077.
+
+    The mounted RAM directory itself stays private (0700) to its user.
+    """
+    path.mkdir(mode=0o755,exist_ok=True)
+    fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        info=os.fstat(fd)
+        if info.st_uid!=0 or info.st_mode&0o022:raise SystemExit('Unsafe runtime parent.')
+        os.fchmod(fd,0o755)
+    finally:os.close(fd)
+
 def main():
     if os.geteuid()!=0 or len(sys.argv)!=2 or not sys.argv[1].isdecimal():raise SystemExit('Local administrator authorisation required.')
     uid=int(sys.argv[1]);caller=os.environ.get('PKEXEC_UID')
     if uid<1000 or caller is None or caller!=str(uid):raise SystemExit('Only the requesting desktop user may start its protected workspace.')
-    account=pwd.getpwuid(uid);base=Path('/run/wallaby-agent-secure');base.mkdir(mode=0o755,exist_ok=True)
-    if base.is_symlink() or base.stat().st_uid!=0:raise SystemExit('Unsafe runtime parent.')
-    home=base/str(uid);home.mkdir(mode=0o755,exist_ok=True)
-    if home.is_symlink() or home.stat().st_uid!=0:raise SystemExit('Unsafe workspace parent.')
+    account=pwd.getpwuid(uid);base=Path('/run/wallaby-agent-secure');runtime_parent(base)
+    home=base/str(uid);runtime_parent(home)
     ram=home/'ram';ram.mkdir(mode=0o700,exist_ok=True)
     if ram.is_symlink():raise SystemExit('Unsafe RAM mount point.')
     if not os.path.ismount(ram):

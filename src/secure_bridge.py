@@ -30,7 +30,7 @@ def call(method,*args,timeout=40):
             raise WorkspaceFailure('worker_rejected',message)
         if set(reply)!={'result'}:raise WorkspaceFailure('worker_protocol','The local protected worker returned an invalid response.')
         return reply['result']
-    except (OSError,TimeoutError):raise WorkspaceFailure('worker_unreachable','Protected Bitcoin workspace is not running or did not respond. Use Start protected workspace on Services; no secret operation was replayed.') from None
+    except (OSError,TimeoutError):raise WorkspaceFailure('worker_unreachable','Protected Bitcoin workspace is not running or did not respond. Use the node interface toggle on Services to retry; no secret operation was replayed.') from None
     finally:sock.close()
 
 def receive(sock,count):
@@ -42,21 +42,32 @@ def receive(sock,count):
     return b''.join(parts)
 
 def ensure_running():
-    try:result=subprocess.run(['/usr/bin/systemctl','start','wallaby-agent-secure@'+str(os.getuid())+'.service'],capture_output=True,timeout=20)
+    try:result=subprocess.run(['/usr/bin/systemctl','--no-ask-password','start','wallaby-agent-secure@'+str(os.getuid())+'.service'],capture_output=True,timeout=20)
     except subprocess.TimeoutExpired:raise WorkspaceFailure('start_timeout','Starting the local protected Bitcoin workspace timed out. Check its system-service status before retrying.') from None
     except OSError:raise WorkspaceFailure('service_manager','The local system service manager could not be reached to start the protected Bitcoin workspace.') from None
-    if result.returncode:raise WorkspaceFailure('start_failed','The local protected Bitcoin workspace could not start. Set it up using Start protected workspace on Services, or inspect its system-service status if it was already set up.')
-    last=None
-    for _ in range(40):
-        try:return call('service_status')
+    if result.returncode:raise WorkspaceFailure('start_failed','The local protected Bitcoin workspace could not start. Retry the node interface toggle on Services, or inspect its system-service status if it was already set up.')
+    return wait_ready()
+
+def wait_ready():
+    deadline=time.monotonic()+15;last=None
+    while True:
+        remaining=deadline-time.monotonic()
+        if remaining<=0:break
+        try:return call('service_status',timeout=min(8,remaining))
         except WorkspaceFailure as error:
-            # A responding worker's explicit refusal (for example failed protection
-            # verification) is definitive. Waiting cannot turn it into readiness.
-            if error.code=='worker_rejected':raise
-            last=error;time.sleep(.25)
-        except ValueError:time.sleep(.25)
+            if error.code in ('worker_rejected','worker_protocol'):raise
+            last=error
+        except ValueError:pass
+        remaining=deadline-time.monotonic()
+        if remaining<=0:break
+        time.sleep(min(.25,remaining))
     if last is not None:raise last
     raise WorkspaceFailure('not_ready','The local protected Bitcoin workspace did not become ready. Check its system-service status.')
+
+def ram_prepared():
+    from protected_memory import noswap_path
+    try:return root().is_dir() and root().stat().st_uid==os.getuid() and os.path.ismount(root()) and noswap_path(root())
+    except OSError:return False
 
 def start():
     from capabilities import require_node
@@ -69,25 +80,25 @@ def start():
         result=subprocess.run(['/usr/bin/ssh-keygen','-q','-t','ed25519','-N','','-C','','-f',str(key)],capture_output=True,timeout=10)
         if result.returncode:raise ValueError('Could not initialise the local Agent identity.')
     key.chmod(0o600)
-    try:return ensure_running()
-    except ValueError:pass
+    try:return call('service_status',timeout=8)
+    except WorkspaceFailure as error:
+        # A responding worker's protection refusal is not a request for another
+        # administrator password. Neither is a malformed local protocol reply.
+        if error.code in ('worker_rejected','worker_protocol'):raise
+    if ram_prepared():
+        # Only first-time RAM preparation needs the fixed privileged helper.
+        # An existing protected mount does not justify re-authorising setup
+        # whenever the unprivileged worker fails to start.
+        return ensure_running()
     result=subprocess.run(['/usr/bin/pkexec','/usr/lib/wallaby-agent/secure-start',str(os.getuid())],capture_output=True,timeout=180)
-    if result.returncode:raise ValueError('The protected workspace could not start. Administrator authorisation, tmpfs noswap and system memory controls are required; SSH services remain available.')
-    last=None
-    for _ in range(40):
-        try:return call('service_status')
-        except WorkspaceFailure as error:
-            if error.code=='worker_rejected':raise
-            last=error;time.sleep(.25)
-        except ValueError:time.sleep(.25)
-    if last is not None:raise last
-    raise WorkspaceFailure('not_ready','The protected service did not become ready. Inspect its system-service status before retrying.')
+    if result.returncode:raise WorkspaceFailure('setup_failed','Protected workspace setup was cancelled, denied or failed. No automatic authorisation retry was made; SSH services remain available.')
+    return wait_ready()
 
 def stop():
     from configuration import Config
     if Config().values['enabled']['node']:raise ValueError('Switch off Bitcoin Core Node Dashboard Interface before closing its protected workspace.')
     if call('service_status')['busy']:raise ValueError('Finish the wallet setup, physical discs, transfer or history recovery before closing the protected workspace.')
-    result=subprocess.run(['/usr/bin/systemctl','stop','wallaby-agent-secure@'+str(os.getuid())+'.service'],capture_output=True,timeout=100)
+    result=subprocess.run(['/usr/bin/systemctl','--no-ask-password','stop','wallaby-agent-secure@'+str(os.getuid())+'.service'],capture_output=True,timeout=100)
     if result.returncode:raise ValueError('Protected cleanup did not confirm completion. Keep the computer awake and inspect the protected service before hibernating.')
     return {'message':'Protected workspace closed after its temporary processes and RAM data were cleared.'}
 

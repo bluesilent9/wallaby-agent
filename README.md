@@ -2,11 +2,19 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 15
+# Wallaby Agent V2 — Development Build 16
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 15 DEB](dist/wallaby-agent_2.0.0~dev15_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 16 DEB](dist/wallaby-agent_2.0.0~dev16_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 16 fixes protected-workspace startup on fresh installations and after reboot. The Agent's restrictive `UMask=0077` was inherited by the privileged RAM setup helper: root-owned parent directories became `0700`, blocking the user-owned RAM mount. Setup now validates these parents through no-follow directory descriptors and explicitly sets them to `0755`; the RAM mount itself stays user-owned `0700`. Existing inaccessible parents are repaired by the same fixed local setup action. Non-swapping RAM, read-only persistent storage, crash-dump and sleep protection remain mandatory.
+
+Use the **Bitcoin Core Node Dashboard Interface toggle** to start the protected workspace and connect. Workspace preparation, missing components, local Core and Dashboard failures appear beside that toggle. Preparation failures leave it off, retain a local diagnostic and do not trigger a second password prompt. Routine starts use non-interactive systemd authorisation; the privileged setup helper is invoked only for RAM preparation.
+
+While a protected window is open, the entire ordinary configuration page is greyed and inert. **Close protected window** returns to Services without stopping the node or clearing RAM. **Close workspace**, under the node service, stops protected processes and clears RAM after the node is switched off and protected work is finished; the page explains why it is unavailable otherwise. In the protected window, **Services** is disabled in the sidebar and its contents are hidden.
+
+Sign Message and Disc Operations scripts are now served correctly. **Refresh Signing Accounts** shows progress, explains an empty list and displays errors at the account list; it preserves selected accounts that remain available and invalidates any earlier message review. No Dashboard protocol or source changes are required for these fixes. See [Build 16 startup and UI notes](AGENT_BUILD16_STARTUP.md).
 
 Build 15 prepares the protected Bitcoin workspace **before enabling the node service**. The existing fixed local administrator dialogue is used if first-time RAM setup is required. A failed/cancelled preparation leaves the node off and shows its local error. DDNS-GO and Dashboard tunnels never start or require this workspace.
 
@@ -46,7 +54,7 @@ On upgrade, finish sensitive work, switch off the node interface and close the e
 
 Open **Utilities → Wallaby Agent Configuration**. **Services** uses the ordinary HTML5 configuration page. Hostname, SSH username/port/key and enabled services save live. A hostname/domain is required; literal IP addresses are refused. Connect authenticates an IPv6-only shared SSH master, never pings. Green means authenticated connection, amber means connecting and red means failed/disconnected. DDNS-GO, Dashboard browser access and the node interface share its forwarding connection. Tunnels remain user services and start at login when enabled.
 
-Enabling the Bitcoin node interface prepares its protected workspace automatically before the toggle is saved on. You can also click **Start protected workspace** on Services. A one-time native administrator authorisation establishes the non-swapping RAM mount. Later logins can start only that user's fixed unprivileged protected worker without repeating the administrator prompt. If the node interface is enabled, login bootstrap starts that worker automatically. This does not grant root to wallet operations or enable other users' services.
+Enabling the Bitcoin node interface prepares its protected workspace automatically before the toggle is saved on. Workspace readiness and any preparation failure are shown under the node toggle. A one-time native administrator authorisation establishes the non-swapping RAM mount. Later logins can start only that user's fixed unprivileged protected worker without repeating the administrator prompt. If the node interface is enabled, login bootstrap starts that worker automatically. This does not grant root to wallet operations or enable other users' services.
 
 Bitcoin pages open in a dedicated protected HTML5 window. The ordinary browser/service process receives only service-level status and public machine identity, not wallet/PSBT payloads. Read-only service settings are visible in the protected window; use the Utilities shortcut to edit them. Wallet/backup passphrases are requested through protected native dialogues, never ordinary browser forms, URLs, command arguments, logs or Dashboard.
 

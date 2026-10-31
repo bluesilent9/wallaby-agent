@@ -15,3 +15,7 @@ fieldset#page-services{border:0;margin:0;padding:0;min-width:0}#save-status{font
 .prerequisite-commands{margin-top:12px}.install-command{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:8px 0;padding:12px;border:1px solid #cbd5ce;border-radius:10px;background:#f2f5f2}.install-command pre{flex:1 1 240px;max-width:100%;overflow:auto;margin:0;padding:10px;background:#17251f;color:#f4f8f5;border-radius:6px;user-select:text}.install-command button{flex:none;padding:9px 13px}.install-command [role=status]{font-size:.85rem}
 
 button.is-busy:disabled{cursor:wait}
+
+.workspace-details{margin-top:1rem;border-top:1px solid #dce3dc;padding-top:1rem}.workspace-details h4{margin:.3rem 0}.regular-locked{opacity:.35;pointer-events:none;filter:grayscale(1)}.protected-window-lock{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;background:#0005;padding:2rem}.protected-window-lock[hidden]{display:none}.protected-window-lock>.server-card{max-width:38rem}.protected-window-lock button{margin-top:1rem}.service .status-text{white-space:pre-line}
+
+.service[data-service="node"]>.switch,.service[data-service="node"]>.service-icon{align-self:flex-start;margin-top:.5rem}

@@ -10,11 +10,14 @@ const fixture=()=>({connected:false,pending:[],denied:[],sync:'',outbox_count:0,
 const context={$:get,document:{querySelector:get,querySelectorAll:()=>[]},window:{},state:{node_support:{available:true}},initialPage:'services',busy:false,console,notify:e=>message=e?.message||'',api:()=>new Promise((resolve,reject)=>{release=resolve;fail=reject;}),refresh:async()=>context.window.updateWorkspace(fixture())};
 vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/workspace.js'),'utf8'),context);
 (async()=>{
- available=false;context.window.updateWorkspace(fixture());assert.equal(get('#workspace-dot').className,'dot red');assert.equal(get('#start-protected').disabled,false);assert.equal(get('#stop-protected').disabled,true);
- let pending=get('#start-protected').events.click();assert.equal(get('#workspace-dot').className,'dot amber');assert.equal(get('#start-protected').disabled,true);assert.equal(get('#stop-protected').disabled,true);
- available=true;release({});await pending;assert.equal(get('#workspace-dot').className,'dot green');assert.equal(get('#workspace-state').textContent,'Ready · protections verified');assert.equal(get('#start-protected').disabled,true);assert.equal(get('#stop-protected').disabled,false);
- pending=get('#stop-protected').events.click();assert.equal(get('#workspace-dot').className,'dot amber');available=false;release({message:'Closed.'});await pending;assert.equal(get('#workspace-dot').className,'dot red');assert.equal(get('#start-protected').disabled,false);
- pending=get('#start-protected').events.click();fail(Error('Local setup refused.'));await pending;assert.equal(get('#workspace-dot').className,'dot red');assert.equal(message,'Local setup refused.');assert.equal(get('#start-protected').disabled,false);assert.equal(get('#stop-protected').disabled,true);
- context.state.node_support.available=false;context.window.updateWorkspace(fixture());assert.equal(get('#start-protected').disabled,true);
- console.log('Workspace red/amber/green status, pending controls, cleanup and visible failure: passed.');
+ available=false;context.window.updateWorkspace(fixture());assert.equal(get('#workspace-dot').className,'dot red');assert.equal(get('#stop-protected').disabled,true);
+ context.window.setWorkspaceAction('starting');assert.equal(get('#workspace-dot').className,'dot amber');
+ available=true;context.window.updateWorkspace(fixture());context.window.setWorkspaceAction(null);assert.equal(get('#workspace-dot').className,'dot green');assert.equal(get('#stop-protected').disabled,false);
+ context.state.config={enabled:{node:true}};context.window.updateWorkspace(fixture());assert.equal(get('#stop-protected').disabled,true);assert.match(get('#workspace-close-help').textContent,/Switch the node/);
+ context.state.config.enabled.node=false;context.window.updateWorkspace(fixture());
+ let pending=get('#stop-protected').events.click();assert.equal(get('#workspace-dot').className,'dot amber');available=false;release({message:'Closed.'});await pending;assert.equal(get('#workspace-dot').className,'dot red');
+ available=true;context.window.updateWorkspace({...fixture(),viewer_open:true});assert.equal(get('main').inert,true);assert.equal(get('aside').inert,true);assert.equal(get('#protected-window-lock').hidden,false);
+ pending=get('#close-protected-view').events.click();release({message:'Closed view.'});await pending;assert.equal(get('main').inert,false);assert.equal(get('#protected-window-lock').hidden,true);
+ vm.runInContext("page='message'",context);context.window.updateWorkspace({...fixture(),protected:{running:true,viewer:true}});assert.equal(get('[data-page="services"]').disabled,true);assert.equal(get('#page-services').hidden,true);assert.equal(get('main').inert,false);
+ console.log('Workspace status, node lifecycle help, inert regular window and protected-view closure: passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
