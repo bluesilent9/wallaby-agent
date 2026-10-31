@@ -16,6 +16,10 @@ class ConnectionFailure(ConnectionError):
 def describe(stage, error):
     if isinstance(error, ConnectionFailure):
         return error
+    from agent_rpc import PublicDataFailure
+    if isinstance(error,PublicDataFailure):
+        advice={'response_limit':'Bitcoin Core/public RPC response exceeds the 16 MiB transport limit. For getrawmempool this can be a large verbose mempool. A bounded/paged Dashboard request is needed; no incomplete mempool was substituted.','private_material':'Public RPC output was blocked because it contained private-key material. No private result was sent.','response_json':'Local Core/public HTTP response was not valid JSON. Check the configured RPC service.'}
+        return ConnectionFailure(stage,error.code,advice.get(error.code,'Public RPC data was refused.'))
     label = {'rpc': 'Local Bitcoin Core RPC', 'dashboard': 'Wallaby Dashboard',
              'workspace': 'Protected Bitcoin workspace', 'ssh': 'SSH', 'configuration': 'Agent configuration'}.get(stage, 'Node interface')
     status = getattr(error, 'status', None)

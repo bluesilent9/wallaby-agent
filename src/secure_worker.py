@@ -37,7 +37,7 @@ class Workspace:
         self.store=Store(root()/ 'state');self.store.identity_root=Config().root
         # Never replay the legacy non-volatile approvals.json into a new workspace.
         # Only the schema-limited denial store survives workspace shutdown.
-        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.window_required=False;self.closing=False;self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.archives=None;self.messages=None;self.environment={}
+        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.window_required=False;self.closing=False;self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.cancellations=None;self.archives=None;self.messages=None;self.environment={}
     def configure(self,environment):
         for key,value in environment.items():
             if key not in ENV or not isinstance(value,str) or len(value)>4096 or any(ord(c)<32 for c in value):raise ValueError('Invalid local display environment.')
@@ -54,7 +54,13 @@ class Workspace:
             import node_client
             node_client.LOCAL_ROUTER=self.archives
             self.messages=Messages(self.ops.core,self.store,lambda prompt:secret_dialog(prompt,self.environment))
+            from cancellation import Cancellations
+            self.cancellations=Cancellations(self.ops.core,self.store,self.setup,self.ops,self.environment)
+            import agent_exchange
+            agent_exchange.LOCAL_CANCELLATIONS=self.cancellations
+            agent_exchange.LOCAL_RETIREMENT=self.retirement
         self.setup.environment=self.environment
+        if self.cancellations:self.cancellations.environment=self.environment
     def binary(self):
         for path in ('/usr/bin/bitcoind','/usr/local/bin/bitcoind','/opt/bitcoin/bin/bitcoind','/snap/bitcoin-core/current/bin/bitcoind','/snap/bitcoin-core/current/usr/bin/bitcoind'):
             if Path(path).is_file():
@@ -62,12 +68,12 @@ class Workspace:
                     if f.read(4)==b'\x7fELF':return path
         return '/usr/bin/bitcoind'
     def busy(self):
-        s=self.store.read();return bool(self.archives and (self.archives.reading) or s.get('history_jobs') or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
+        s=self.store.read();return bool(self.archives and (self.archives.reading) or s.get('history_jobs') or any(v.get('proposal',{}).get('kind')=='builder_cancel' for v in s['pending'].values()) or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
     def state(self):
         saved=self.store.read()
         try:self.ops.core.ready();connected=self.node_status['color']=='green'
         except Exception:connected=False
-        return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
+        return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn') and not v.get('cancel_requested')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
     def service_status(self):
         saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'worker_version':VERSION,'worker_protocol':PROTOCOL,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
         self._service_snapshot=dict(result);return result
@@ -109,6 +115,11 @@ class Workspace:
         process.stdin.write(json.dumps(config).encode()+b'\n');process.stdin.close();self.viewers=[p for p in self.viewers if p.poll() is None]+[process];self.window_required=True
         return {'message':'Opened the protected Bitcoin workspace.'}
     def dispatch(self,method,args,environment):
+        if method=='diagnostics.export':
+            if args:raise ValueError('Invalid diagnostic export.')
+            enforce()
+            from activity_log import DiagnosticLog
+            return DiagnosticLog().records()
         if method=='ui.prepare_close':
             if len(args)!=1 or type(args[0]) not in (int,float) or not time.monotonic()<args[0]<time.monotonic()+8:raise ValueError('Close request expired; no workspace state was changed.')
             if not self.lock.acquire(blocking=False):raise ValueError('Finish the active protected operation before closing.')
@@ -137,12 +148,16 @@ class Workspace:
             enforce();self.configure(environment)
             if getattr(self,'closing',False) and method not in ('ui.arm','ui.close'):raise ValueError('The protected workspace is closing. Reconnect the node before starting another operation.')
             saved=self.store.read()
-            changing=method in ('wallet.sign','authorise.approve','setup.participate','authorise.history','setup.cancel')
+            changing=method in ('wallet.sign','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm')
+            if changing and args:
+                from cancellation import blocked
+                candidate=saved['pending'].get(args[0],{}).get('proposal') or getattr(self.ops,'prepared',{}).get(args[0])
+                if candidate and blocked(saved,candidate):raise ValueError('This build is cancelled. Review its local cancellation on Authorise; no signing or wallet action was started.')
             if changing and (saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning')):raise ValueError('Finish the active transfer or history recovery first.')
-            if method in ('wallet.sign','setup.participate','authorise.approve','message.sign') and self.archives and self.archives.reading:raise ValueError('Wait for optical restoration to finish before signing or changing wallets.')
+            if method in ('wallet.sign','setup.participate','authorise.approve','message.sign','cancel.confirm') and self.archives and self.archives.reading:raise ValueError('Wait for optical restoration to finish before signing or changing wallets.')
             if saved.get('setup_active') and method in ('wallet.sign','authorise.approve','authorise.history','authorise.review'):
                 candidate=saved['pending'].get(args[0],{}).get('proposal',{}) if args else {}
-                if candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']:raise ValueError('Finish the current wallet setup and its physical backups first.')
+                if candidate.get('kind')!='builder_cancel' and (candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']):raise ValueError('Finish the current wallet setup and its physical backups first.')
             if method=='service_status':return self.service_status()
             if method=='ui.arm':
                 self.closing=False
@@ -159,11 +174,17 @@ class Workspace:
                 self.node_generation=__import__('secrets').token_hex(16);self.node_stop=threading.Event();self.node_port=port;self.node_status={'color':'amber','message':'Connecting the protected node interface.'}
                 from node_client import NodeClient
                 from diagnostics import describe
-                def status(color,message):self.node_status={'color':color,'message':message}
+                def status(color,message):
+                    from activity_log import event
+                    if self.node_status.get('color')!=color or self.node_status.get('message')!=message:event('node.connection',color+' · '+message)
+                    self.node_status={'color':color,'message':message}
                 def work():
                     try:NodeClient(self.ops.core.config,port,self.node_stop,status).run()
                     except Exception as error:
-                        failure=describe('rpc',error);self.node_status={'color':'red','message':str(failure),'failure':failure.detail(),'failed':True}
+                        failure=describe('rpc',error)
+                        from activity_log import event
+                        event('node.connection','Failed · '+failure.stage+' · '+failure.code)
+                        self.node_status={'color':'red','message':str(failure),'failure':failure.detail(),'failed':True}
                 self.node=threading.Thread(target=work,daemon=True);self.node.start();return {'session':self.node_generation}
             if method=='status':return self.state()
             if method=='core.health':self.ops.core.ready();return {'ok':True}
@@ -179,11 +200,13 @@ class Workspace:
             if method=='authorise.review':
                 kind=self.store.read()['pending'][args[0]]['proposal']['kind']
                 if kind=='wallet_retire':return self.retirement.review(args[0])
+                if kind=='builder_cancel':return self.cancellations.review(args[0])
                 if kind.startswith('wallet_setup'):return self.setup.review(args[0])
                 return self.ops.prepare_request(args[0])
             if method=='authorise.history':return self.retirement.prepare_history(*args)
             if method=='authorise.deny':
                 p=self.store.read()['pending'][args[0]]['proposal']
+                if p['kind']=='builder_cancel':raise ValueError('Choose Delete and Cancel or Backup and Cancel after reviewing this cancellation.')
                 if p['kind'].startswith('wallet_setup'):self.setup.decline(args[0])
                 else:self.store.deny(*args)
                 return {'ok':True}
@@ -193,6 +216,7 @@ class Workspace:
                 if kind=='wallet_retire':return self.retirement.approve(args[0])
                 if kind=='wallet_setup_policy':return self.setup.approve_policy(args[0])
                 return self.ops.approve_sync(args[0])
+            if method=='cancel.confirm':return self.cancellations.confirm(*args)
             if method=='setup.cancel':return self.setup.cancel(*args)
             if method=='setup.participate':return self.setup.approve_proposal(*args)
             if method in ('disc.read','disc.load','disc.unload','message.wallets','message.prepare','message.sign'):
@@ -276,7 +300,14 @@ class Handler(socketserver.BaseRequestHandler):
             p=decode(receive(self.request,n))
             if not isinstance(p,dict) or set(p)!={'method','args','environment'} or not isinstance(p['method'],str) or not isinstance(p['args'],list) or len(p['args'])>8 or not isinstance(p['environment'],dict):raise ValueError('Invalid protected action.')
             result=self.server.workspace.dispatch(p['method'],p['args'],p['environment']);reply={'result':result}
-        except Exception as e:reply={'error':str(e) if isinstance(e,ValueError) else 'Protected operation stopped or is uncertain. Inspect local state; it was not automatically repeated.'}
+            if p['method'] not in ('status','service_status','node.status','diagnostics.export','ui.arm'):
+                from activity_log import event
+                method=p['method'] if __import__('re').fullmatch('[a-z_.]{1,64}',p['method']) else 'invalid-action'
+                event(method,'Local action completed.')
+        except Exception as e:
+            from activity_log import event
+            event('protected.action','Local action refused or uncertain · '+type(e).__name__)
+            reply={'error':str(e) if isinstance(e,ValueError) else 'Protected operation stopped or is uncertain. Inspect local state; it was not automatically repeated.'}
         raw=json.dumps(reply,allow_nan=False).encode();self.request.sendall(struct.pack('!I',len(raw))+raw)
 
 class Server(socketserver.ThreadingUnixStreamServer):daemon_threads=True

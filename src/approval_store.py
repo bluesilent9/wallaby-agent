@@ -56,6 +56,8 @@ class Store:
             apply_snapshot(self,p['revision'],p['requests']);return True
         key=digest(p)
         with self.edit() as s:
+            from cancellation import blocked
+            if blocked(s,p):return False
             if p['kind']=='wallet_transfer' and p['direction']=='receive':
                 from sync_preferences import policy_id
                 if policy_id(p) in s.get('sync_exclusions',{}):return False
@@ -66,6 +68,7 @@ class Store:
         return True
     def deny(self,key):
         with self.edit() as s:
+            if s['pending'][key]['proposal']['kind']=='builder_cancel':raise ValueError('Choose Delete and Cancel or Backup and Cancel locally.')
             if s.get('active_transfer')==key:raise ValueError('Cancel the active transfer on Synchronisation first.')
             if s['pending'][key]['proposal']['kind']=='wallet_transfer':raise ValueError('Only Dashboard can remove synchronisation requests. Uncheck a wallet to leave it pending.')
             row=s['pending'].pop(key)

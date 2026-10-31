@@ -187,7 +187,7 @@ class WalletOps:
                 if not rpc(self.core,'testmempoolaccept',[[final['hex']]])[0].get('allowed'):raise ValueError('Core rejected the transaction; nothing was broadcast.')
                 txid=rpc(self.core,'sendrawtransaction',[final['hex']]);result={'request_hash':key,'status':'broadcast','txid':txid}
                 self.store.queue('broadcast_result',result)
-                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time()};state['pending'].pop(key,None)
+                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time(),'proposal':{k:v for k,v in p.items() if k not in ('review','created')},'artifact_psbt':p['psbt'],'artifact_txid':txid};state['pending'].pop(key,None)
                 return {'txid':txid,'message':'Locally authorised transaction broadcast.'}
             if p['kind']=='sign_psbt_partial':
                 with self.store.edit() as state:
@@ -223,5 +223,5 @@ class WalletOps:
             if after['tx_hash']!=current['tx_hash']:raise ValueError('Core changed the approved transaction; it was not broadcast.')
             if p['kind']=='sign_psbt_partial':
                 self.store.queue('partial_sign_result',{'request_hash':key,'status':'signed','psbt':signed_psbt})
-                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time()};state['pending'].pop(key,None)
+                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time(),'proposal':{k:v for k,v in p.items() if k not in ('review','created')},'artifact_psbt':signed_psbt};state['pending'].pop(key,None)
                 return {'queued':True,'message':'Approved signatures returned to Dashboard. No transaction was broadcast.'}

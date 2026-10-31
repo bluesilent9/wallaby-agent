@@ -87,7 +87,18 @@ class Handler(socketserver.BaseRequestHandler):
             if uid!=os.getuid() or not any(line.startswith('0::/system.slice/') and line.endswith(expected) for line in group):return
             size=int.from_bytes(receive(self.request,4),'big')
             if not 0<size<=4096:return
-            reply=remove(json.loads(receive(self.request,size)))
+            request=json.loads(receive(self.request,size))
+            if isinstance(request,dict) and set(request)=={'export_directory','export_name'}:
+                from cancel_backup import create_export
+                import array
+                fd=create_export(request)
+                try:
+                    raw=b'{"export":true}';packet=struct.pack('!I',len(raw))+raw
+                    sent=self.request.sendmsg([packet],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[fd]))])
+                    if sent<len(packet):self.request.sendall(packet[sent:])
+                finally:os.close(fd)
+                return
+            reply=remove(request)
         except Exception:reply={'deleted':False}
         try:
             raw=json.dumps(reply).encode();self.request.sendall(struct.pack('!I',len(raw))+raw)

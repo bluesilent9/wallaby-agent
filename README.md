@@ -2,11 +2,17 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 18
+# Wallaby Agent V2 — Development Build 19
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 18 DEB](dist/wallaby-agent_2.0.0~dev18_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 19 DEB](dist/wallaby-agent_2.0.0~dev19_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 19 adds locally authorised builder cancellation for **Dashboard V1 Build 20**, including multi-wallet/multi-PSBT review, local broadcast checks, a delivery-only receipt, and **Delete and Cancel / Backup and Cancel**. Encrypted local backup is an explicit user-selected exception to RAM-only Bitcoin processing; plaintext never leaves protected RAM. Retirement withdrawals preserve actual or uncertain deletion outcomes. [Integration contract](DASHBOARD_BUILD20_CANCELLATION.md).
+
+**Logs** at the bottom of Services exports `Wallaby_Agent.log`. Seven UTC days are retained, up to 1 MiB/day. Each event identifies its protected or unprotected origin; key/address/descriptor data is replaced with typed redactions. Protected events stay in RAM until safe closure hands them to the ordinary Agent log before clearing the workspace. A failed handoff retains RAM. Forced power loss can lose events not yet handed over. [Logging and privacy details](AGENT_BUILD19_LOGS.md).
+
+Read-only RPC failures now include safe local error categories, including the unchanged 16 MiB response limit. This improves diagnostics for the reported mempool failure; it does not claim its cause is confirmed or return partial data.
 
 Build 18 fixes upgrades that reused an older protected worker and then failed with “Unsupported protected action”. Node startup now checks the running worker version, safely replaces verified idle older workers, and opens the protected window automatically when Core/Dashboard connects. Unfinished private work stays protected. [Lifecycle details](AGENT_BUILD18_LIFECYCLE.md).
 
@@ -135,7 +141,7 @@ The only new persistent Agent Bitcoin preference is a list of disabled incoming 
 
 A separate fixed unprivileged service, `wallaby-agent-denials@<UID>.service`, owns this schema-limited atomic store. It is started as a dependency of the protected workspace. The Bitcoin worker retains read-only ordinary filesystems; it has no writable persistent mount. Its local socket can read the list or commit a validated list revision only. It cannot request arbitrary file paths, RPC operations or commands. Failed/corrupt/unavailable storage blocks Bitcoin work until it can read the list, rather than silently forgetting exclusions. Services remain independent.
 
-Services configuration and its machine/SSH identity retain their existing persistent locations. Other Agent Bitcoin working data stays in the protected volatile workspace and is cleared on shutdown. Existing Bitcoin Core wallets/blockchain and deliberately produced optical backups/signed Dashboard outputs retain their selected destinations; this does not retroactively erase files created by older versions. Build 11 no longer reloads legacy on-disk `approvals.json` into a new workspace.
+Services configuration and its machine/SSH identity retain their existing persistent locations. Except for sanitized diagnostics and explicitly approved encrypted cancellation backups in Build 19, other Agent Bitcoin working data stays in the protected volatile workspace and is cleared on shutdown. Existing Bitcoin Core wallets/blockchain and deliberately produced optical backups/signed Dashboard outputs retain their selected destinations; this does not retroactively erase files created by older versions. Build 11 no longer reloads legacy on-disk `approvals.json` into a new workspace.
 
 ## Protection boundary
 

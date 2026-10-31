@@ -85,6 +85,8 @@ class WalletSetup:
                 samples.append({'branch':'Receive' if branch==0 else 'Change','index':index,'address':local})
         facts={'proposal_hash':digest(p['proposal']),'policy_hash':digest({'proposal':p['proposal'],'receive_descriptor':descs[0],'change_descriptor':descs[1],'contributions':p['contributions']}),'receive_descriptor':descs[0],'change_descriptor':descs[1],'samples':samples,'threshold':p['proposal']['threshold'],'total':len(roles),'height':p['proposal']['height'],'roles':[{**r,'fingerprint':fingerprint(r['agent_key']),'local':r['agent_key']==self.own_identity()['public_key']} for r in roles.values()],'name':p['proposal']['name'],'chain':p['proposal']['chain'],'requires_disc':any(r['agent_key']==self.own_identity()['public_key'] and r['storage']=='disc' for r in roles.values())}
         self.reviews[key]=(facts,time.time());return {'kind':'wallet_setup_policy','id':key,'setup':facts}
+    def check_cancel(self,binding):
+        if binding in self.store.read().get('cancelled_setups',{}):raise ValueError('Dashboard requested cancellation. Review Delete and Cancel or Backup and Cancel on Authorise before continuing.')
     def approve_proposal(self,key,pins):
         self.enforce();row=self.store.read()['pending'][key];p=proposal(row['proposal']);own=self.own_identity()
         if rpc(self.core,'getblockchaininfo')['chain']!=p['chain']:raise ValueError('The proposed network differs from this local node.')
@@ -99,19 +101,21 @@ class WalletSetup:
             if any(pins[r['id']]!=fingerprint(r['agent_key']) for r in p['cosigners']):raise ValueError('An independently entered Agent fingerprint does not match.')
         else:raise ValueError('Verify each distinct producing Agent in this exact wallet setup.')
         if any(session['phase']!='complete' for session in self.sessions.values()):raise ValueError('Finish the current wallet setup and its physical backups before starting another wallet.')
-        binding=digest(p)
+        binding=digest(p);self.check_cancel(binding)
         if binding in self.sessions:raise ValueError('This setup already generated keys. No secret generation was repeated.')
         # Before generating anything, reserve this immutable session and mark attempted.
         with self.store.edit() as s:s['pending'][key]['state']='attempted';s['setup_active']=binding
-        session={'proposal':p,'contributions':[],'wallets':{},'core':None,'phase':'generating','pins':dict(pins)};self.sessions[binding]=session
+        session={'proposal':p,'installed_wallets':{},'contributions':[],'wallets':{},'core':None,'phase':'generating','pins':dict(pins)};self.sessions[binding]=session
         try:
             local=[r for r in p['cosigners'] if r['agent_key']==own['public_key']]
             if local:session['core']=MemoryCore(self.store.root/'setup-cores'/binding,p['chain'],self.binary)
             for role in local:
+                self.check_cancel(binding)
                 name='key_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20]
                 password=secret_dialog('Create encrypted Bitcoin Core signing wallet '+name+' · role '+role['id']+'\nThis creates keys only; it does not fund the wallet.',self.environment,confirm=True)
                 if len(password)<12:raise ValueError('Use at least 12 characters for the encrypted signing wallet.')
                 name='key_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20];c=session['core'].core
+                self.check_cancel(binding)
                 try:rpc(c,'createwallet',{'wallet_name':name,'passphrase':password,'descriptors':True,'load_on_startup':False})
                 finally:password=None
                 if rpc(c,'getwalletinfo',[],name).get('unlocked_until')!=0:raise ValueError('New signing wallet must be encrypted and locked.')
@@ -133,25 +137,32 @@ class WalletSetup:
         if not old or time.time()-old[1]>600:raise ValueError('Review the complete public policy again.')
         fresh=self.review(key)['setup']
         if fresh!=old[0]:raise ValueError('Complete policy changed. Review again.')
-        p=self.store.read()['pending'][key]['proposal'];session=self.sessions[fresh['proposal_hash']]
+        p=self.store.read()['pending'][key]['proposal'];session=self.sessions[fresh['proposal_hash']];self.check_cancel(fresh['proposal_hash'])
         if session['phase']!='contributed':raise ValueError('Setup already attempted. Inspect local outcome; nothing was replayed.')
         with self.store.edit() as s:s['pending'][key]['state']='attempted'
         session.update(phase='installing',policy=p,review=fresh)
         local={};disc={}
         for ident,row in session['wallets'].items():
+            self.check_cancel(fresh['proposal_hash'])
             path=self.store.root/'setup-cores'/fresh['proposal_hash']/(hashlib.sha256(ident.encode()).hexdigest()+'.dat');rpc(session['core'].core,'backupwallet',[str(path)],row['name'])
             if row['storage']=='disc':disc[hashlib.sha256(ident.encode()).hexdigest()]=str(path)
             else:
                 target='Wallaby key '+fresh['proposal_hash'][:12]+' '+hashlib.sha256(ident.encode()).hexdigest()[:8]
+                if any(w['name']==target for w in rpc(self.core,'listwalletdir')['wallets']):raise ValueError('The setup signing-wallet name already exists; no existing wallet was claimed or overwritten.')
+                session.setdefault('installed_wallets',{})[target]=rpc(session['core'].core,'listdescriptors',[False],row['name'])
                 rpc(self.core,'restorewallet',{'wallet_name':target,'backup_file':__import__('core_ram_path').for_core(self.core,path),'load_on_startup':True},timeout=86400)
                 info=rpc(self.core,'getwalletinfo',[],target)
                 if not info.get('private_keys_enabled') or info.get('unlocked_until')!=0:raise ValueError('Persistent signer failed encrypted/locked verification.')
                 local[ident]=target;path.unlink()
         monitor='Wallaby policy '+fresh['policy_hash'][:20]
+        self.check_cancel(fresh['proposal_hash'])
+        if any(w['name']==monitor for w in rpc(self.core,'listwalletdir')['wallets']):raise ValueError('The setup monitor already exists; no existing wallet was claimed.')
+        session.setdefault('installed_wallets',{})[monitor]=None
         rpc(self.core,'createwallet',{'wallet_name':monitor,'disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':True})
         requests=[{'desc':fresh[field],'timestamp':'now','active':True,'internal':bool(i),'range':[0,999]} for i,field in enumerate(('receive_descriptor','change_descriptor'))]
         result=rpc(self.core,'importdescriptors',{'requests':requests},monitor,timeout=86400)
         if not all(r.get('success') for r in result):raise ValueError('Core could not install the approved public policy.')
+        session['installed_wallets'][monitor]=rpc(self.core,'listdescriptors',[False],monitor)
         recovery={'version':1,'proposal':p['proposal'],'policy_hash':fresh['policy_hash'],'receive_descriptor':fresh['receive_descriptor'],'change_descriptor':fresh['change_descriptor'],'contributions':p['contributions'],'local_cosigners':list(session['wallets'])}
         with self.store.edit() as s:
             s.setdefault('approved_wallets',{})[fresh['policy_hash']]={**recovery,'monitor_wallet':monitor,'signing_wallets':local,'height':fresh['height'],'created':time.time()}
@@ -178,13 +189,14 @@ class WalletSetup:
         session['phase']='complete'
         with self.store.edit() as saved:saved.pop('setup_active',None)
     def decline(self,key):
-        p=self.store.read()['pending'][key]['proposal'];binding=digest(p if p['kind']=='wallet_setup' else p['proposal']);session=self.sessions.get(binding)
+        p=self.store.read()['pending'][key]['proposal'];binding=digest(p if p['kind']=='wallet_setup' else p['proposal']);self.check_cancel(binding);session=self.sessions.get(binding)
         if session:
             if session['phase']!='contributed':raise ValueError('Wallet installation was attempted. Reconcile the local outcome before discarding anything.')
             self.finish_session(session)
         self.store.deny(key)
         self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'proposal_hash':binding,'status':'denied'}))
     def cancel(self,binding):
+        self.check_cancel(binding)
         session=self.sessions.get(binding)
         if not session or session['phase'] not in ('contributed','error'):raise ValueError('Only an unfinished setup before policy installation can be discarded. Reconcile any attempted installation locally.')
         env={**os.environ,**self.environment}

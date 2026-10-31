@@ -121,7 +121,7 @@ def compatible(state):
             prepare_stop(peer)
             _stop_service()
             fresh=_ensure_running()
-            if not current(fresh):raise WorkspaceFailure('upgrade_version','The restarted worker is still an older build. Reinstall Build 18 before reconnecting.')
+            if not current(fresh):raise WorkspaceFailure('upgrade_version','The restarted worker is still an older build. Reinstall Build 19 before reconnecting.')
             return fresh
         finally:flag.unlink(missing_ok=True)
 
@@ -149,10 +149,13 @@ def prepare_stop(peer):
         inspect_legacy(peer)
 
 def _stop_service():
+    from activity_log import handoff,event
+    handoff()
     result=subprocess.run(['/usr/bin/systemctl','--no-ask-password','stop','wallaby-agent-secure@'+str(os.getuid())+'.service'],capture_output=True,timeout=100)
     if result.returncode:raise ValueError('Protected cleanup did not confirm completion. Keep the computer awake and inspect the protected service before hibernating.')
     from protected_memory import noswap_path
     if not noswap_path(root()) or any(root().iterdir()):raise ValueError('Protected service stopped, but empty protected RAM could not be verified. Keep the computer awake and inspect the workspace; cleanup was not confirmed.')
+    event('workspace','Protected diagnostics handed over; workspace cleared.')
     return {'message':'Protected workspace closed after its temporary processes and RAM data were cleared.'}
 
 class Proxy:

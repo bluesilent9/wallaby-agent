@@ -4,6 +4,9 @@ The transport stores proposals and public results. It never imports or signs.
 No retry ever repeats a wallet operation; only content-addressed data is retried.
 """
 import time
+
+LOCAL_CANCELLATIONS=None
+LOCAL_RETIREMENT=None
 from peer_wallet import local_ipv6,active
 from approval_store import Store
 from node_client import http_json,HTTPFailure
@@ -25,8 +28,10 @@ class Exchange:
                     try:old=has_signatures(item['payload']['psbt'])
                     except (ValueError,KeyError):old=True
                 if old:saved.setdefault('legacy_exports',{})[key]=saved['outbox'].pop(key)
-        state=self.store.read();items=[{'id':key,**row} for key,row in list(state['outbox'].items())[:8]]
-        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement','wallet_retirement_v2']}
+        state=self.store.read()
+        from cancellation import held_item,blocked
+        items=[{'id':key,**row} for key,row in state['outbox'].items() if not held_item(state,row)][:8]
+        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement','wallet_retirement_v2','wallet_retirement_cancel_v1','builder_cancellation_v1']}
         address=local_ipv6()
         if address:body['node_info']={'ipv6':address}
         try:r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)
@@ -43,8 +48,16 @@ class Exchange:
         from vault_policy import validate_proposal
         proposals=[validate_proposal(p) for p in r['proposals']]
         for p in proposals:
+            if p['kind']=='builder_cancel':
+                if LOCAL_CANCELLATIONS is None:raise ValueError('Protected cancellation handler is unavailable.')
+                LOCAL_CANCELLATIONS.receive(p)
+            elif p['kind']=='wallet_retire_cancel':
+                if LOCAL_RETIREMENT is None:raise ValueError('Protected retirement handler is unavailable.')
+                LOCAL_RETIREMENT.cancel_remote(p['request_hash'])
+        for p in proposals:
             if p['kind']=='wallet_sync_queue':self.store.receive(p)
         for p in proposals:
+            if p['kind'] in ('builder_cancel','wallet_retire_cancel') or blocked(self.store.read(),p):continue
             if p['kind']=='wallet_transfer_preview':
                 from wallet_preview import receive
                 receive(self.store,{k:p[k] for k in ('preview','public_key','signature')})
@@ -79,12 +92,17 @@ class Exchange:
                 except Exception as error:
                     with self.store.edit() as state:state.setdefault('preview_errors',{})[key]=str(error) if isinstance(error,ValueError) else 'Sender node verification failed. Check the local node and wallet.'
         with self.store.edit() as s:
-            for key in r['accepted']:s['outbox'].pop(key,None)
+            for key in r['accepted']:
+                item=s['outbox'].pop(key,None)
+                if item and item['kind']=='transaction_builder_psbt':s.setdefault('delivered_artifacts',{})[key]=item
             s['sync']='Dashboard exchange connected. Pending changes require local authorisation.';s['last_exchange']=time.time()
     def run(self,stop):
         while not stop.is_set() and not self.unsupported:
             try:self.once()
-            except Exception:
+            except Exception as error:
+                from activity_log import event
+                from diagnostics import describe
+                failure=describe('dashboard',error);event('dashboard.exchange','Exchange failed · '+failure.stage+' · '+failure.code)
                 if self.store is None:
                     stop.wait(30);continue
                 with self.store.edit() as s:s['sync']='Dashboard exchange failed validation or is unavailable. Queued data retained; retry in 30 seconds.'

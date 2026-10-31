@@ -19,3 +19,6 @@ button.is-busy:disabled{cursor:wait}
 .workspace-details{margin-top:1rem;border-top:1px solid #dce3dc;padding-top:1rem}.workspace-details h4{margin:.3rem 0}.regular-locked{opacity:.35;pointer-events:none;filter:grayscale(1)}.protected-window-lock{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;background:#0005;padding:2rem}.protected-window-lock[hidden]{display:none}.protected-window-lock>.server-card{max-width:38rem}.protected-window-lock button{margin-top:1rem}.service .status-text{white-space:pre-line}
 
 .service[data-service="node"]>.switch,.service[data-service="node"]>.service-icon{align-self:flex-start;margin-top:.5rem}
+.cancel-delete{background:#a83135;border-color:#a83135;color:#fff}.cancel-backup{background:#276641;border-color:#276641;color:#fff}.cancel-delete:hover{background:#8e2529}.cancel-backup:hover{background:#205535}
+
+.broadcast-detected{border-color:#a83135;background:#fff0f0;color:#a83135;font-weight:700}

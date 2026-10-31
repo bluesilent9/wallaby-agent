@@ -3,7 +3,7 @@ import base64, concurrent.futures, http.client, json, os, re, socket, threading,
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import quote
-from agent_rpc import METHODS,clean_json,request,MAX_RESULT_BYTES
+from agent_rpc import METHODS,clean_json,request,MAX_RESULT_BYTES,PublicDataFailure
 from diagnostics import ConnectionFailure,describe
 
 LIMIT=16*1024*1024+4096
@@ -21,7 +21,7 @@ class HTTPFailure(Exception):
     def __init__(self,status):self.status=status;super().__init__('HTTP request failed (%d).'%status)
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1'):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev18'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev19'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -29,9 +29,10 @@ def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1'):
     try:
         conn.request('GET' if raw is None else 'POST',path,raw,headers)
         response=conn.getresponse();data=response.read(LIMIT+1)
-        if len(data)>LIMIT:raise ValueError('Response exceeds size limit.')
+        if len(data)>LIMIT:raise PublicDataFailure('response_limit','The local/public HTTP response exceeds the configured transport size limit.')
         if response.status!=200:raise HTTPFailure(response.status)
-        return decode(data)
+        try:return decode(data)
+        except (ValueError,UnicodeError):raise PublicDataFailure('response_json','The service returned invalid JSON data.') from None
     finally:conn.close()
 
 def protocol_failure(code,message):
@@ -138,7 +139,11 @@ class NodeClient:
                 from approval_store import Store
                 if Store().read().get('setup_active') or Store().read().get('active_transfer') or Store().read().get('sync_batch') or Store().read().get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):result={'error':{'code':'synchronisation_busy','message':'Local wallet synchronisation is active. Dashboard requests are temporarily refused.'}}
                 else:result=self.core.call(ident,c['method'],params,c['wallet'],timeout=max(1,float(expiry)-(time.monotonic()-received)))
-            except Exception:result={'error':{'code':'local_rpc_failed','message':'Local Core request failed; execution outcome may be unknown. It was not replayed.'}}
+            except Exception as error:
+                failure=describe('rpc',error)
+                from activity_log import event
+                event('rpc.'+c['method'],'Local public RPC failed · '+failure.code)
+                result={'error':{'code':'local_rpc_'+failure.code,'message':str(failure)+' The acknowledged request was not replayed.','data':{'stage':failure.stage,'category':failure.code,'method':c['method']}}}
             self.post('result',{'id':ident,**result})
         except Exception as error:self.fail(error)
         finally:self.pending.release()

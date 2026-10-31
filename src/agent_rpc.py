@@ -34,14 +34,17 @@ PRIVATE=PrivateMaterial()
 
 def stamp():return datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00','Z')
 
+class PublicDataFailure(ValueError):
+    def __init__(self,code,message):self.code=code;super().__init__(message)
+
 def clean_json(value,limit):
     """Retain fractional JSON numbers as exact decimal strings, never binary floats."""
     def decimal_text(v):
         if not isinstance(v,Decimal) or not v.is_finite() or abs(v.adjusted())>100 or len(v.as_tuple().digits)>1000:raise ValueError('Unsupported or oversized decimal value.')
         return format(v,'f')
     raw=json.dumps(value,ensure_ascii=True,allow_nan=False,default=decimal_text)
-    if len(raw.encode())>limit:raise ValueError('RPC message exceeds its size limit.')
-    if PRIVATE.search(raw):raise ValueError('Private key material is not accepted by the agent transport.')
+    if len(raw.encode())>limit:raise PublicDataFailure('response_limit','RPC result exceeds the configured public transport size limit.')
+    if PRIVATE.search(raw):raise PublicDataFailure('private_material','Private key material was refused by the public RPC transport.')
     return json.loads(raw),len(raw.encode())
 
 def capabilities(value):

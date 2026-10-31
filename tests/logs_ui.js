@@ -1,0 +1,6 @@
+// Exercise the shipped download control, authenticated fetch and fixed filename.
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const button={addEventListener(_,fn){this.click=fn;}},status={},links=[],downloads=[];let requests=0;
+const sandbox={token:'fixture',session:async()=>{},setTimeout:fn=>fn(),Blob,URL:{createObjectURL:()=> 'blob:fixture',revokeObjectURL:url=>assert.equal(url,'blob:fixture')},document:{querySelector:id=>id==='#save-logs'?button:status,body:{append:link=>links.push(link)},createElement:()=>({click(){downloads.push(this.download);},remove(){}})},fetch:async(path,options)=>{requests++;assert.equal(path,'/api/logs');assert.equal(options.headers.Authorization,'Bearer fixture');return {ok:true,status:200,text:async()=> 'protected · test\n'};}};
+vm.createContext(sandbox);vm.runInContext(fs.readFileSync(require('path').join(__dirname,'../web/logs.js'),'utf8'),sandbox);
+(async()=>{await button.click();assert.equal(requests,1);assert.deepEqual(downloads,['Wallaby_Agent.log']);assert.equal(button.disabled,false);assert.match(status.textContent,/closure/);console.log('Authenticated diagnostic log download: passed.');})().catch(e=>{console.error(e);process.exitCode=1;});

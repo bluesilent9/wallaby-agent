@@ -40,6 +40,12 @@ def public_vault(v):
     return v
 
 def validate_proposal(p):
+    if isinstance(p,dict) and p.get('kind')=='builder_cancel':
+        from cancellation import validate
+        return validate(p)
+    if isinstance(p,dict) and p.get('kind')=='wallet_retire_cancel':
+        if set(p)!={'kind','version','request_hash'} or type(p['version']) is not int or p['version']!=1 or not re.fullmatch('[0-9a-f]{64}',str(p['request_hash'])):raise ValueError('Invalid retirement cancellation.')
+        return p
     if isinstance(p,dict) and p.get('kind')=='wallet_sync_preferences':
         if set(p)!={'kind','version','challenge','previous'} or p['version']!=1 or not re.fullmatch('[0-9a-f]{64}',str(p['challenge'])) or p['previous'] is not None and not isinstance(p['previous'],dict):raise ValueError('Invalid preference snapshot request.')
         return p
