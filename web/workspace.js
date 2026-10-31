@@ -11,25 +11,14 @@ function renderProtection(w){
  $('#workspace-dot').className='dot '+(changing?'amber':active?'green':'red');
  $('#workspace-state').textContent=workspaceAction==='starting'?'Starting protected workspace…':workspaceAction==='closing'?'Closing protected workspace safely…':active?'Ready · protections verified':'Off / unavailable';
  $('#protection-status').textContent=changing?(workspaceAction==='starting'?'Preparing non-swapping RAM and verifying the local worker. Approve the administrator dialogue if requested.':'Waiting for temporary processes and protected RAM cleanup to finish.'):active?'Protected workspace active · non-swapping RAM · process swap blocked · crash dumps blocked · sleep inhibited'+(w.protected.viewer?' · Service settings are read-only here. Use Utilities → Wallaby Agent Configuration to edit them.':''):w?.protected?.message||'Turn on the node interface to start the protected workspace automatically.';
- const start=$('#start-protected');if(start)start.disabled=changing||active||state?.node_support?.available===false;
- const nodeOn=!!state?.config?.enabled?.node;
- $('#stop-protected').disabled=changing||!active||!!w?.busy||nodeOn;
- $('#workspace-close-help').textContent=nodeOn?'Switch the node interface off before closing its workspace.':w?.busy?'Finish the active wallet operation and unload archival wallets before closing.':'Closing clears the protected RAM workspace and closes its windows.';
- if(start)start.classList.toggle('is-busy',workspaceAction==='starting');
- $('#stop-protected').classList.toggle('is-busy',workspaceAction==='closing');
+
+
+
 }
 window.setWorkspaceAction=function(action){workspaceAction=action;window.workspaceChanging=!!action;renderProtection(workspace);};
-async function workspaceControl(path){
- if(working||busy)return;
- window.setWorkspaceAction(path==='start'?'starting':'closing');
- try{await run(async()=>{const result=await api('protected/'+path,{});notify({message:result.message||(path==='start'?'Protected Bitcoin workspace started.':'Protected workspace closed.')});});}
- finally{window.setWorkspaceAction(null);}
-}
-$('#start-protected')?.addEventListener('click',()=>workspaceControl('start'));
-$('#stop-protected').addEventListener('click',()=>workspaceControl('stop'));
 let closingView=false;
 async function closeProtectedView(){
- if(closingView)return;closingView=true;$('#close-protected-view').disabled=true;$('#protected-lock-status').textContent='Closing protected window…';
+ if(closingView)return;closingView=true;$('#close-protected-view').disabled=true;$('#protected-lock-status').textContent='Closing protected window and disconnecting node…';
  try{await api('protected/close-view',{});$('#protected-lock-status').textContent='';}
  catch(error){$('#protected-lock-status').textContent=error.message;}
  finally{closingView=false;$('#close-protected-view').disabled=false;await refresh(true);}

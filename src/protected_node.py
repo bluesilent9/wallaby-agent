@@ -7,7 +7,7 @@ class ProtectedNode:
     def __init__(self,config,port,stop,status):self.port=port;self.stop=stop;self.status=status
     def run(self):
         from secure_bridge import ensure_running
-        generation=None
+        generation=None;opened=False
         try:
             ensure_running();reply=call('node.start',self.port)
             if not isinstance(reply,dict) or not isinstance(reply.get('session'),str) or not 0<len(reply['session'])<=128 or any(ord(c)<32 for c in reply['session']):
@@ -27,6 +27,8 @@ class ProtectedNode:
                     message=result.get('message')
                     if not isinstance(message,str) or not 0<len(message)<=2048 or any(ord(c)<32 for c in message):message='Protected node session failed. Close and restart the protected workspace to load the updated diagnostics.'
                     raise ConnectionFailure('node','protected_session',message)
+                if result['color']=='green' and not opened:
+                    call('ui.open','authorise');opened=True
                 self.stop.wait(2)
         except WorkspaceFailure as error:
             raise ConnectionFailure('workspace',error.code,str(error)) from None

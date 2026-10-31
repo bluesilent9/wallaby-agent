@@ -102,21 +102,24 @@ class Handler(BaseHTTPRequestHandler):
             if not self.allowed() or self.headers.get('Sec-Fetch-Site')!='same-origin' or self.headers.get('X-Wallaby-UI')!='1':return self.reply(403,{'error':'Local page session access denied.'})
             return self.reply(200,{'token':self.server.token})
         if not self.allowed(self.path.startswith('/api/')):return self.reply(403,{'error':'The local Agent session needs to reconnect.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev16'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev17'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
                 if not v['cookie']:
                     cookie=discover_cookie()
                     if cookie:v['cookie']=cookie;c.save(v)
-                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development Build 16','node_support':node_support(v),'workspace':workspace(self.server)})
+                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development Build 17','node_support':node_support(v),'workspace':workspace(self.server)})
         paths={'/':'index.html','/app.js':'app.js','/workspace.js':'workspace.js','/message.js':'message.js','/disc_operations.js':'disc_operations.js','/synchronisation.js':'synchronisation.js','/wallet_setup.js':'wallet_setup.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
         asset_path=urlsplit(self.path).path
         if asset_path not in paths:return self.reply(404,{'error':'Not found.'})
         f=ASSETS/paths[asset_path];mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.json':'application/json; charset=utf-8'}[f.suffix]
         self.reply(200,f.read_bytes(),mime)
     def do_POST(self):
-        with LOCAL_ACTION_LOCK:self.post()
+        from node_lifecycle import control_lock
+        from protected_memory import inside
+        import contextlib
+        with LOCAL_ACTION_LOCK, (contextlib.nullcontext() if inside() else control_lock()):self.post()
     def post(self):
         if not self.allowed(True):return self.reply(403,{'error':'Configuration access denied.'})
         if self.headers.get('Content-Type')!='application/json':return self.reply(415,{'error':'JSON required.'})
@@ -238,15 +241,25 @@ class Handler(BaseHTTPRequestHandler):
                     if set(body)!={'service','enabled'} or body['service'] not in SERVICES or type(body['enabled']) is not bool:raise ValueError('Invalid service toggle.')
                     if body['enabled'] and not v['hostname']:raise ValueError('Accept a server name first.')
                     if body['service']=='node' and body['enabled']:
+                        from node_lifecycle import closing
+                        if closing():raise NodeUnavailable('The previous protected workspace is still closing. Wait for cleanup before reconnecting the node.')
                         require_node(v)
                         if not self.server.preview and required() and not inside():
                             from secure_bridge import start
-                            try:start()
+                            try:
+                                start()
+                                from secure_bridge import call
+                                call('ui.arm')
                             except ValueError as error:
                                 write_status('node','red',str(error),stage='workspace',preparation_failed=True)
                                 raise NodeUnavailable(str(error)) from None
                             except subprocess.TimeoutExpired:raise NodeUnavailable('Preparing the local protected Bitcoin workspace timed out. Check its status on Services before trying again; the node service was not enabled.') from None
                             except OSError:raise NodeUnavailable('The local protected Bitcoin workspace could not be prepared. Check its system-service status; the node service was not enabled.') from None
+                    if body['service']=='node' and not body['enabled'] and not self.server.preview and required() and not inside():
+                        from secure_bridge import call
+                        try:protected=call('service_status',timeout=3)
+                        except ValueError:protected={}
+                        if protected.get('busy'):raise NodeUnavailable('Finish active wallet work, wait for queued Dashboard deliveries and unload archival wallets before disconnecting the node. Its protected window remains open.')
                     if body['service']=='node' and not body['enabled']:write_status('node','red','Off',tunnel=False)
                     v['enabled'][body['service']]=body['enabled']
                 else:return self.reply(404,{'error':'Not found.'})
@@ -266,7 +279,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev16'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev17'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -284,7 +297,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev16':
+    if installed!='2.0.0~dev17':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -294,7 +307,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev16') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev17') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

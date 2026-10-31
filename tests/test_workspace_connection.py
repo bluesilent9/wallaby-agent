@@ -64,9 +64,9 @@ class NodeEnablePreparation(unittest.TestCase):
   from configuration import Config
   observations=[]
   def start():observations.append(Config().values['enabled']['node']);return {'protected':{'running':True}}
-  with patch('app.require_node'),patch('protected_memory.required',return_value=True),patch('protected_memory.inside',return_value=False),patch('secure_bridge.start',side_effect=start),patch('runtime.ctl'):
+  with patch('app.require_node'),patch('protected_memory.required',return_value=True),patch('protected_memory.inside',return_value=False),patch('secure_bridge.start',side_effect=start),patch('secure_bridge.call',return_value={'ok':True}) as arm,patch('runtime.ctl'):
    status,body=self.fixture.call('/api/toggle',{'service':'node','enabled':True})
-  self.assertEqual(status,200,body);self.assertEqual(observations,[False]);self.assertTrue(Config().values['enabled']['node'])
+  self.assertEqual(status,200,body);self.assertEqual(observations,[False]);self.assertTrue(Config().values['enabled']['node']);arm.assert_called_once_with('ui.arm')
  def test_preparation_failure_is_visible_and_does_not_enable_or_start_node(self):
   from configuration import Config
   for error in [WorkspaceFailure('start_failed','Protected workspace needs initial setup.'),subprocess.TimeoutExpired('pkexec',180)]:

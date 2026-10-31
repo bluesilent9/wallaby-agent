@@ -22,7 +22,7 @@ def write_status(kind,color,message,**extra):
 def read_status(kind):
     try:
         d=json.loads((runtime_dir()/(kind+'.json')).read_text())
-        if time.time()-d['updated']<50 or time.time()<d.get('retry_at',0)+10:return d
+        if d.get('lifecycle') or d.get('preparation_failed') or time.time()-d['updated']<50 or time.time()<d.get('retry_at',0)+10:return d
     except (OSError,ValueError,KeyError):pass
     return {'color':'red','message':'Off' if kind!='server' else 'Server SSH connection is not active.'}
 
@@ -135,11 +135,15 @@ def worker(kind):
 
 def monitor():
     retire_jellyfin()
-    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev16','pid':os.getpid()}))
+    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev17','pid':os.getpid()}))
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
+    from node_lifecycle import Lifecycle
+    lifecycle=Lifecycle()
     master=None;current=None;attempt_started=0;due=0;delay=15;notice=None;reconciled=None;last_rpc=None;status=('red','Enter your server hostname or domain.');extra={}
     try:
         while not stop.is_set():
+            try:lifecycle.poll()
+            except (OSError,ValueError,RuntimeError):pass # Keep unrelated SSH tunnels alive.
             cfg=Config().values;identity=fingerprint(cfg)
             try:request=(runtime_dir()/'connect-request.json').read_text()
             except OSError:request=None

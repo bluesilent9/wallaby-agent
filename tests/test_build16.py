@@ -47,9 +47,9 @@ class AssetsAndViewer(unittest.TestCase):
   finally:fixture.tearDown()
  def test_closing_view_terminates_only_tracked_live_viewers(self):
   from secure_worker import Workspace
-  worker=Workspace.__new__(Workspace);live=Mock();live.poll.return_value=None;dead=Mock();dead.poll.return_value=0
+  worker=Workspace.__new__(Workspace);worker.busy=Mock(return_value=False);worker.archives=None;worker.store=Mock();worker.store.read.return_value={'outbox':{}};live=Mock();live.poll.return_value=None;dead=Mock();dead.poll.return_value=0
   worker.viewers=[live,dead];worker.node=Mock();worker.ops=Mock()
-  result=worker.close_views();live.terminate.assert_called_once();live.wait.assert_called_once_with(timeout=5);dead.terminate.assert_not_called();worker.node.assert_not_called();worker.ops.assert_not_called();self.assertEqual(worker.viewers,[]);self.assertIn('remain active',result['message'])
+  result=worker.close_views();live.terminate.assert_called_once();live.wait.assert_called_once_with(timeout=5);dead.terminate.assert_not_called();worker.node.assert_not_called();worker.ops.assert_not_called();self.assertEqual(worker.viewers,[]);self.assertIn('disconnect',result['message'])
  def test_public_liveness_does_not_wait_for_a_wallet_operation(self):
   from secure_worker import Workspace
   worker=Workspace.__new__(Workspace);worker.lock=threading.RLock();worker.node_status={'color':'green'};viewer=Mock();viewer.poll.return_value=None;worker.viewers=[viewer];worker.configure=Mock(side_effect=AssertionError('Must not touch Core/config'))
@@ -64,5 +64,5 @@ class AssetsAndViewer(unittest.TestCase):
  def test_slow_viewer_is_killed_and_reaped_before_unlocking(self):
   import subprocess
   from secure_worker import Workspace
-  worker=Workspace.__new__(Workspace);live=Mock();live.poll.return_value=None;live.wait.side_effect=[subprocess.TimeoutExpired('viewer',5),0];worker.viewers=[live]
+  worker=Workspace.__new__(Workspace);worker.busy=Mock(return_value=False);worker.archives=None;worker.store=Mock();worker.store.read.return_value={'outbox':{}};live=Mock();live.poll.return_value=None;live.wait.side_effect=[subprocess.TimeoutExpired('viewer',5),0];worker.viewers=[live]
   worker.close_views();live.kill.assert_called_once();self.assertEqual(live.wait.call_count,2);self.assertEqual(worker.viewers,[])

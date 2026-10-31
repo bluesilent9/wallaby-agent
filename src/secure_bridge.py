@@ -100,6 +100,8 @@ def stop():
     if call('service_status')['busy']:raise ValueError('Finish the wallet setup, physical discs, transfer or history recovery before closing the protected workspace.')
     result=subprocess.run(['/usr/bin/systemctl','--no-ask-password','stop','wallaby-agent-secure@'+str(os.getuid())+'.service'],capture_output=True,timeout=100)
     if result.returncode:raise ValueError('Protected cleanup did not confirm completion. Keep the computer awake and inspect the protected service before hibernating.')
+    from protected_memory import noswap_path
+    if not noswap_path(root()) or any(root().iterdir()):raise ValueError('Protected service stopped, but empty protected RAM could not be verified. Keep the computer awake and inspect the workspace; cleanup was not confirmed.')
     return {'message':'Protected workspace closed after its temporary processes and RAM data were cleared.'}
 
 class Proxy:

@@ -1,21 +1,20 @@
-# Agent V2 Development Build 16 validation
+# Agent V2 Development Build 17 validation
 
-## Scope
+The final shipped-source regression run passed **212 Python tests in 259.455 seconds**. The focused lifecycle/startup/denial checks also passed (46 tests in 5.246 seconds before the final full run). Four JavaScript UI/policy suites passed and all web scripts passed Node syntax checks. All Python files parse successfully.
 
-Agent-only changes. No real wallets, production node data, SSH services, firewall rules or pruning settings were changed by these checks. Bitcoin integration tests use disposable Core 31 regtest nodes. No physical optical drive was written.
+## New lifecycle coverage
 
-## Confirmed remote diagnosis
+- First green Core/Dashboard status opens one protected window, with no duplicate per status poll.
+- Monitor-driven viewer exit disables only the node, preserves DDNS-GO/Dashboard, and schedules cleanup without browser polling.
+- Unknown status never proves the viewer closed. Busy/forced viewer loss retains RAM and its protections while switching the node off.
+- Settings/monitor control locking avoids enable/cleanup races; reconnect is blocked during cleanup. Stale markers clear only on confirmed inactive/failed systemd state.
+- Native/overlay close refuses active wallet work, loaded archives and critical undelivered results. Sync exclusions and denial notices are not unfinished work.
+- Close approval gates subsequent wallet operations. Expired requests cannot arm the closing gate. Public node status/stop remain responsive while a signing dialogue holds the operation lock.
+- Successful service stop must also prove the non-swapping RAM directory empty before reporting cleared state. Failure explanations do not include raw/private exception contents; retries are delayed.
+- Actual shipped UI handlers cover ordinary-window inertness, disconnect feedback, absent manual Start/Close workspace buttons and protected-viewer Services disabling.
 
-On wallet-laptop, the wallet-free startup probe passed the OS protection checks then failed with EACCES when creating the supervisor socket. Root-owned parent directories had mode 0700 due to inherited UMask=0077. The user changed only these parents to 0755 and confirmed the protected workspace/node connected. Build 16 applies this correction in the privileged setup helper, without changing the private RAM directory mode.
+## Existing invariants
 
-## Automated verification
+Real Bitcoin Core 31 regtest nodes exercised single/multisig/vault signing, archival restoration, BIP-322 messages, local denial persistence and address/label history recovery with pruning unchanged. Remote RPC remains public/read-only. The restrictive-umask parent-directory repair, script serving and tunnel-only installation checks continue to pass.
 
-The full regression run passed **194 tests in 260.978 seconds**. After the final non-blocking liveness change, the focused startup, viewer, node-boundary and native-prompt suite passed **26 tests in 2.146 seconds**. Four JavaScript UI/policy suites passed; all shipped web scripts passed syntax checks. Results are recorded in the distribution test logs. Coverage includes Core 31 single/multisig/vault signing, archive restoration, BIP-322 messages, persistent exclusions, labels and address-only watches, full historical replay with pruning unchanged, public-only remote RPC and local authorisation boundaries.
-
-New focused regressions exercise real filesystem modes under umask 077, repair of existing parents, no-follow/ownership/mode refusal, all HTML script routes, viewer termination/reaping without stopping the worker, and non-blocking public viewer liveness while a signing operation holds the operation lock.
-
-All shipped web scripts pass Node syntax checks. Four JavaScript VM suites execute the actual UI handlers for node-toggle preparation, error retention/retry, code-box copying, protected-window locking/close, Services disabling in the protected viewer, and signing-account refresh progress/empty/error results/selection preservation/review invalidation. The shipped polkit rule is tested for its exact unit/UID/NoNewPrivileges boundary.
-
-## Deployment limits
-
-The full privileged service and Qt window lifecycle must still be verified after installing Build 16 on wallet-laptop. Automated DOM tests are not a native desktop GUI test. The existing RAM-only protection boundaries, sleep inhibitor, mandatory node workspace and optional tunnel-only installation are retained.
+No production node data, wallets, SSH/firewall rules or pruning settings were changed. No optical device was written. Unit tests substitute fixed local service/GUI process boundaries; the actual privileged Qt window lifecycle still needs verification on wallet-laptop after installation. This build does not install a virtual optical driver or save wallet disc images outside protected RAM.

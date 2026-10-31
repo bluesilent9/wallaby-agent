@@ -2,17 +2,23 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 16
+# Wallaby Agent V2 — Development Build 17
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 16 DEB](dist/wallaby-agent_2.0.0~dev16_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 17 DEB](dist/wallaby-agent_2.0.0~dev17_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 17 integrates the node interface and protected **window**. Switching the node toggle on prepares the protected service; the first successful Core/Dashboard connection opens its protected window automatically and locks the ordinary configuration page. There are no separate Start/Close workspace buttons. Services stays disabled inside the protected window.
+
+Closing the protected window (its native close control or the ordinary page's disconnect overlay) switches the node interface off, disables its login service and clears its protected workspace after safe cleanup. This is monitored independently of the ordinary browser, while DDNS-GO and Dashboard SSH tunnels remain enabled. Node-off also schedules workspace cleanup. Ordinary close is refused during active wallet work, while archives are loaded, or while Dashboard deliveries remain queued. If the viewer crashes during unfinished work, the node is disconnected but RAM and its protections are retained; re-enable the node to resume. Cleanup must finish before a new connection can start.
+
+The monitor and settings API share a control lock to prevent an enable/cleanup race. Node status and stop requests remain responsive while a signing dialogue holds the wallet-operation lock. Cleanup failures keep protection in place and back off; a stale closing marker is cleared only when systemd confirms that the fixed protected service has stopped. See [Build 17 lifecycle notes](AGENT_BUILD17_LIFECYCLE.md).
 
 Build 16 fixes protected-workspace startup on fresh installations and after reboot. The Agent's restrictive `UMask=0077` was inherited by the privileged RAM setup helper: root-owned parent directories became `0700`, blocking the user-owned RAM mount. Setup now validates these parents through no-follow directory descriptors and explicitly sets them to `0755`; the RAM mount itself stays user-owned `0700`. Existing inaccessible parents are repaired by the same fixed local setup action. Non-swapping RAM, read-only persistent storage, crash-dump and sleep protection remain mandatory.
 
 Use the **Bitcoin Core Node Dashboard Interface toggle** to start the protected workspace and connect. Workspace preparation, missing components, local Core and Dashboard failures appear beside that toggle. Preparation failures leave it off, retain a local diagnostic and do not trigger a second password prompt. Routine starts use non-interactive systemd authorisation; the privileged setup helper is invoked only for RAM preparation.
 
-While a protected window is open, the entire ordinary configuration page is greyed and inert. **Close protected window** returns to Services without stopping the node or clearing RAM. **Close workspace**, under the node service, stops protected processes and clears RAM after the node is switched off and protected work is finished; the page explains why it is unavailable otherwise. In the protected window, **Services** is disabled in the sidebar and its contents are hidden.
+While a protected window is open, the entire ordinary configuration page is greyed and inert. In Build 16, closing the window and stopping its workspace were separate actions; Build 17 replaces that workflow with the integrated lifecycle described above. In the protected window, **Services** is disabled in the sidebar and its contents are hidden.
 
 Sign Message and Disc Operations scripts are now served correctly. **Refresh Signing Accounts** shows progress, explains an empty list and displays errors at the account list; it preserves selected accounts that remain available and invalidates any earlier message review. No Dashboard protocol or source changes are required for these fixes. See [Build 16 startup and UI notes](AGENT_BUILD16_STARTUP.md).
 
@@ -50,7 +56,7 @@ Install the DEB with your normal package manager. Mandatory runtime dependencies
 
 **Optical operations:** additionally install `xorriso` when needed: `sudo apt install xorriso`. Its absence produces a specific message when media is checked and does not block node reporting or SSH tunnels.
 
-On upgrade, finish sensitive work, switch off the node interface and close the existing protected workspace before restarting it with this build. The installer does not forcibly terminate a running RAM signing/setup session. A reboot after finishing that work also starts the new installed code.
+On upgrade, finish sensitive work, switch off the node interface and close the existing protected workspace (using the old build’s controls, or reboot after finishing the work) before restarting it with this build. The installer does not forcibly terminate a running RAM signing/setup session. A reboot after finishing that work also starts the new installed code.
 
 Open **Utilities → Wallaby Agent Configuration**. **Services** uses the ordinary HTML5 configuration page. Hostname, SSH username/port/key and enabled services save live. A hostname/domain is required; literal IP addresses are refused. Connect authenticates an IPv6-only shared SSH master, never pings. Green means authenticated connection, amber means connecting and red means failed/disconnected. DDNS-GO, Dashboard browser access and the node interface share its forwarding connection. Tunnels remain user services and start at login when enabled.
 
@@ -58,7 +64,7 @@ Enabling the Bitcoin node interface prepares its protected workspace automatical
 
 Bitcoin pages open in a dedicated protected HTML5 window. The ordinary browser/service process receives only service-level status and public machine identity, not wallet/PSBT payloads. Read-only service settings are visible in the protected window; use the Utilities shortcut to edit them. Wallet/backup passphrases are requested through protected native dialogues, never ordinary browser forms, URLs, command arguments, logs or Dashboard.
 
-After switching off the node interface and finishing sensitive work, **Close workspace** shuts down temporary processes and clears its RAM state. Sleep/hibernation remains inhibited while sensitive work is active. Do not shut down an unfinished setup: temporary keys and uncompleted payloads are volatile. No setup is automatically regenerated after a loss or uncertain outcome.
+After finishing sensitive work and waiting for queued Dashboard delivery, close the protected window to disconnect the node and clear its RAM state. Sleep/hibernation remains inhibited while sensitive work is active. Do not shut down an unfinished setup: temporary keys and uncompleted payloads are volatile. No setup is automatically regenerated after a loss or uncertain outcome.
 
 ## Authorise: wallet creation
 

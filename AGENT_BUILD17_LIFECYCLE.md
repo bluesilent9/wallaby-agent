@@ -1,0 +1,17 @@
+# Agent V2 Development Build 17: node/window lifecycle
+
+Build 16 prepared the protected background service but opened its Qt window only when a Bitcoin sidebar page was selected. Build 17 opens that window on the first green Core/Dashboard connection, once per local connection session, reusing an existing viewer rather than opening duplicates. The ordinary page becomes inert; Services remains disabled inside the protected viewer.
+
+A public window-required/viewer-alive flag is monitored by the ordinary Agent monitor, independently of browser polling. Confirmed viewer exit disables only the node user service and its login setting. A separate cleanup thread stops the fixed protected service using the existing supervising inhibitor, child cleanup and RAM clearing; it does not block unrelated SSH monitoring. DDNS-GO and Dashboard settings are preserved.
+
+Node-off also triggers cleanup. There are no Start/Close workspace buttons. The ordinary overlay disconnects by closing the viewer. Native close and overlay close refuse to discard unfinished wallet operations, loaded archives or queued Dashboard messages. Forced viewer loss still disconnects the node, but retains RAM/protections while unfinished work exists. Re-enabling resumes that protected state without replaying secret operations.
+
+The API and monitor share a public runtime control lock. A closing marker blocks reconnection until cleanup completes. After a monitor restart it is cleared on unreachable-worker status only when the fixed systemd service is confirmed inactive/failed. The worker atomically gates new wallet operations before an approved close; expired close requests cannot arm that gate later. Cleanup verifies that the non-swapping RAM directory is empty before reporting success. Disabled sync policies and denial notices do not count as unfinished deliveries. Cleanup failures use fixed public explanations and retry no sooner than 30 seconds; they never prompt for another administrator password. Unknown worker status is not evidence of a closed viewer.
+
+Node status/stop are public, same-UID local operations and no longer wait behind the wallet-operation lock. Remote RPC scope is unchanged. Private keys, proposals and archives remain inside the same protected RAM service; no virtual-disc image or persistent wallet export was added.
+
+## Virtual-disc testing and ASUS hardware
+
+CDEmu upstream documents experimental Blu-ray recording emulation: https://cdemu.sourceforge.io/ . A virtual disc can test application workflow but does not validate physical M-DISC writing/readback. A complete 25 GB image does not fit this Agent's existing 2 GiB protected RAM mount. Do not redirect physical-only wallet images to persistent storage to work around that boundary. A separate throwaway regtest/VM test or a deliberately RAM-bounded simulation would be needed; this build does not install a virtual optical driver on wallet-laptop.
+
+ASUS lists M-DISC BD-R writing for SBW-06D5H-U and USB-A/USB-C connectivity, but its official OS list is Windows/macOS: https://www.asus.com/uk/motherboards-components/optical-drives/external-blu-ray-drive/sbw-06d5h-u/techspec/ . GNU xorriso supports Linux USB optical drives: https://www.gnu.org/software/xorriso/ . Linux operation of this exact drive on Kubuntu 26.04 has not been physically verified here. The Agent still chooses the slowest reported supported speed; it does not assume this drive/media combination accepts 1x.

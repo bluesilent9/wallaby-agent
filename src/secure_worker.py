@@ -14,12 +14,26 @@ from wallet_setup import WalletSetup,secret_dialog
 from wallet_retirement import Retirement
 from batch_transfer import BatchTransfer
 
+def delivery_pending(state):
+    """Keep completed operation results until delivered, not background notices.
+
+    Disabled synchronisation and one-off denial are intentional completed user
+    choices; their optional status messages must not prevent window closure.
+    """
+    for item in state['outbox'].values():
+        if item['kind'] in ('wallet_sync_preferences','wallet_setup_identity','node_identity','wallet_transfer_preview'):continue
+        payload=item['payload']
+        signed=payload.get('message',{})
+        if payload.get('status')=='denied' or isinstance(signed,dict) and signed.get('status')=='denied':continue
+        return True
+    return False
+
 class Workspace:
     def __init__(self):
         self.store=Store(root()/ 'state');self.store.identity_root=Config().root
         # Never replay the legacy non-volatile approvals.json into a new workspace.
         # Only the schema-limited denial store survives workspace shutdown.
-        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.archives=None;self.messages=None;self.environment={}
+        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.window_required=False;self.closing=False;self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.archives=None;self.messages=None;self.environment={}
     def configure(self,environment):
         for key,value in environment.items():
             if key not in ENV or not isinstance(value,str) or len(value)>4096 or any(ord(c)<32 for c in value):raise ValueError('Invalid local display environment.')
@@ -51,10 +65,15 @@ class Workspace:
         except Exception:connected=False
         return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
     def service_status(self):
-        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
+        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
         self._service_snapshot=dict(result);return result
+    def begin_close(self,deadline=None):
+        if self.busy() or self.archives and (self.archives.loaded or self.archives.staged) or delivery_pending(self.store.read()):raise ValueError('Finish active wallet work, wait for queued Dashboard deliveries and unload archival wallets before closing the protected window and disconnecting its node.')
+        if deadline is not None and time.monotonic()>=deadline:raise ValueError('Close request expired; no workspace state was changed.')
+        self.closing=True
     def close_views(self):
-        # Only tracked child viewers: leave the protected worker/node running.
+        # Only tracked viewers; the monitor disconnects and stops the worker.
+        self.begin_close()
         viewers=[p for p in self.viewers if p.poll() is None]
         for process in viewers:process.terminate()
         for process in viewers:
@@ -62,9 +81,12 @@ class Workspace:
             except __import__('subprocess').TimeoutExpired:
                 process.kill();process.wait(timeout=5)
         self.viewers=[]
-        return {'message':'Protected window closed. The protected workspace and node connection remain active.'}
+        return {'message':'Protected window closed. The node interface will disconnect and its protected workspace will close automatically.'}
     def open_view(self,page):
         if page not in ('authorise','synchronisation','burn','message'):raise ValueError('Invalid protected page.')
+        if any(p.poll() is None for p in self.viewers):
+            self.window_required=True
+            return {'message':'The protected window is already open.'}
         import secrets,importlib.util
         try:available=importlib.util.find_spec('PyQt6.QtWebEngineWidgets')
         except ModuleNotFoundError:available=None
@@ -80,22 +102,36 @@ class Workspace:
             threading.Thread(target=server.serve_forever,daemon=True).start()
         config={'origin':'http://127.0.0.1:'+str(self.view_server.server_port),'page':page,'token':self.view_token}
         env={**os.environ,**self.environment};process=__import__('subprocess').Popen(['/usr/bin/python3','-I','-B',str(Path(__file__).with_name('protected_viewer.py'))],stdin=__import__('subprocess').PIPE,stdout=__import__('subprocess').DEVNULL,stderr=__import__('subprocess').DEVNULL,env=env)
-        process.stdin.write(json.dumps(config).encode()+b'\n');process.stdin.close();self.viewers=[p for p in self.viewers if p.poll() is None]+[process]
+        process.stdin.write(json.dumps(config).encode()+b'\n');process.stdin.close();self.viewers=[p for p in self.viewers if p.poll() is None]+[process];self.window_required=True
         return {'message':'Opened the protected Bitcoin workspace.'}
     def dispatch(self,method,args,environment):
+        if method=='ui.prepare_close':
+            if len(args)!=1 or type(args[0]) not in (int,float) or not time.monotonic()<args[0]<time.monotonic()+8:raise ValueError('Close request expired; no workspace state was changed.')
+            if not self.lock.acquire(blocking=False):raise ValueError('Finish the active protected operation before closing.')
+            try:
+                enforce();self.begin_close(args[0]);return {'ok':True}
+            finally:self.lock.release()
+        if method in ('node.status','node.stop'):
+            enforce()
+            if len(args)!=1 or args[0]!=self.node_generation:return {'color':'red','message':'Node session changed. Reconnecting.','failed':True}
+            if method=='node.stop':
+                if self.node_stop:self.node_stop.set()
+                return {'ok':True}
+            return dict(self.node_status)
         if method=='service_status':
             # Do not queue ordinary-window liveness behind a native passphrase
             # dialogue/signing operation. This reply contains public flags only.
             if not self.lock.acquire(blocking=False):
                 enforce()
                 result=dict(getattr(self,'_service_snapshot',{'pending':[],'denied':[],'transfer':{},'burn':{},'outbox_count':0}))
-                result.update(connected=self.node_status['color']=='green',protected={'running':True,'viewer':False},busy=True,viewer_open=any(p.poll() is None for p in self.viewers),sync='A protected operation is in progress. Continue in the protected window.')
+                result.update(connected=self.node_status['color']=='green',protected={'running':True,'viewer':False},busy=True,window_required=getattr(self,'window_required',False),viewer_open=any(p.poll() is None for p in self.viewers),sync='A protected operation is in progress. Continue in the protected window.')
                 return result
             try:
                 enforce();self.configure(environment);return self.service_status()
             finally:self.lock.release()
         with self.lock:
             enforce();self.configure(environment)
+            if getattr(self,'closing',False) and method not in ('ui.arm','ui.close'):raise ValueError('The protected workspace is closing. Reconnect the node before starting another operation.')
             saved=self.store.read()
             changing=method in ('wallet.sign','authorise.approve','setup.participate','authorise.history','setup.cancel')
             if changing and (saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning')):raise ValueError('Finish the active transfer or history recovery first.')
@@ -104,6 +140,10 @@ class Workspace:
                 candidate=saved['pending'].get(args[0],{}).get('proposal',{}) if args else {}
                 if candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']:raise ValueError('Finish the current wallet setup and its physical backups first.')
             if method=='service_status':return self.service_status()
+            if method=='ui.arm':
+                self.closing=False
+                if not any(p.poll() is None for p in self.viewers):self.window_required=False
+                return {'ok':True}
             if method=='ui.open':return self.open_view(*args)
             if method=='ui.close':return self.close_views()
             if method=='node.start':
@@ -121,12 +161,6 @@ class Workspace:
                     except Exception as error:
                         failure=describe('rpc',error);self.node_status={'color':'red','message':str(failure),'failure':failure.detail(),'failed':True}
                 self.node=threading.Thread(target=work,daemon=True);self.node.start();return {'session':self.node_generation}
-            if method=='node.status':
-                if args[0]!=self.node_generation:return {'color':'red','message':'Node session changed. Reconnecting.','failed':True}
-                return self.node_status
-            if method=='node.stop':
-                if self.node_stop and args[0]==self.node_generation:self.node_stop.set()
-                return {'ok':True}
             if method=='status':return self.state()
             if method=='core.health':self.ops.core.ready();return {'ok':True}
             if method=='core.public':

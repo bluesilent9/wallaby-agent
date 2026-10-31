@@ -73,7 +73,7 @@ class PersistentDenials(unittest.TestCase):
  def test_disabled_wallet_is_not_unfinished_work_after_reboot(self):
     from secure_worker import Workspace
     from types import SimpleNamespace
-    self.disable();self.reboot();apply_snapshot(self.store,1,[self.p]);w=Workspace.__new__(Workspace);w.store=self.store;w.node_status={'color':'green'};w.viewers=[];w.archives=SimpleNamespace(reading=False,loaded={},staged={});w.setup=SimpleNamespace(sessions={},burner=SimpleNamespace(state=lambda:{}),own_identity=lambda:{});w.transfer=SimpleNamespace(state=lambda:{'rows':rows(self.store),'recovery':{'status':'Synchronised'}})
+    self.disable();self.reboot();apply_snapshot(self.store,1,[self.p]);w=Workspace.__new__(Workspace);w.store=self.store;w.window_required=False;w.node_status={'color':'green'};w.viewers=[];w.archives=SimpleNamespace(reading=False,loaded={},staged={});w.setup=SimpleNamespace(sessions={},burner=SimpleNamespace(state=lambda:{}),own_identity=lambda:{});w.transfer=SimpleNamespace(state=lambda:{'rows':rows(self.store),'recovery':{'status':'Synchronised'}})
     self.assertFalse(w.service_status()['has_approvals']);self.assertFalse(w.service_status()['needs_sync']);enable(self.store,self.ident);self.assertTrue(w.service_status()['has_approvals']);self.assertTrue(w.service_status()['needs_sync'])
  def test_socket_broker_only_exposes_denial_schema_and_restarts_with_same_file(self):
     path=self.root/'broker.sock';server=Server(path,self.backend);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();client=Client(path)

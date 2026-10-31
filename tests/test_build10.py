@@ -50,7 +50,7 @@ class Preferences(unittest.TestCase):
         from secure_worker import Workspace
         from types import SimpleNamespace
         from sync_queue import rows
-        worker=Workspace.__new__(Workspace);worker.store=store;worker.node_status={'color':'green'};worker.viewers=[];worker.archives=SimpleNamespace(reading=False,loaded={},staged={});worker.setup=SimpleNamespace(sessions={},burner=SimpleNamespace(state=lambda:{}),own_identity=lambda:{});worker.transfer=SimpleNamespace(state=lambda:{'rows':rows(store),'recovery':{'status':'Synchronised'}})
+        worker=Workspace.__new__(Workspace);worker.store=store;worker.window_required=False;worker.node_status={'color':'green'};worker.viewers=[];worker.archives=SimpleNamespace(reading=False,loaded={},staged={});worker.setup=SimpleNamespace(sessions={},burner=SimpleNamespace(state=lambda:{}),own_identity=lambda:{});worker.transfer=SimpleNamespace(state=lambda:{'rows':rows(store),'recovery':{'status':'Synchronised'}})
         self.assertTrue(worker.service_status()['has_approvals']);self.assertTrue(worker.service_status()['needs_sync'])
         change(store,key,True);self.assertNotIn(key,store.read()['pending']);self.assertFalse(worker.service_status()['has_approvals']);self.assertFalse(worker.service_status()['needs_sync']);self.assertFalse(store.receive(p));apply_snapshot(store,2,[p]);self.assertFalse(worker.service_status()['has_approvals']);self.assertFalse(worker.service_status()['needs_sync']);self.assertNotIn(key,store.read()['pending']);enable(store,policy_id(p));self.assertIn(key,store.read()['pending'])
         change(store,key,True);sign(store,{'identity':'initialise'})
