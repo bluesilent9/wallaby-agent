@@ -144,7 +144,7 @@ def handoff():
             version=state.get('worker_version')
             match=re.fullmatch(r'2\.0\.0~dev(\d+)',version) if isinstance(version,str) else None
             if version is None or match and int(match[1])<19:return
-        raise ValueError('Protected diagnostics could not be handed over. RAM was retained; retry safe closure.') from None
-    if not isinstance(rows,list) or any(not isinstance(r,dict) or r.get('origin')!='protected' for r in rows):raise ValueError('Invalid protected diagnostic origin. RAM was retained.')
+        raise WorkspaceFailure('log_handoff','Protected diagnostics could not be handed over. RAM was retained; retry safe closure.') from None
+    if not isinstance(rows,list) or any(not isinstance(r,dict) or r.get('origin')!='protected' for r in rows):raise WorkspaceFailure('log_origin','Invalid protected diagnostic origin. RAM was retained.')
     try:DiagnosticLog().merge(rows)
-    except (OSError,ValueError,TypeError):raise ValueError('Sanitized diagnostics could not be saved. RAM was retained; check ordinary Agent log storage before closing.') from None
+    except (OSError,ValueError,TypeError):raise WorkspaceFailure('log_storage','Sanitized diagnostics could not be saved. RAM was retained; check ordinary Agent log storage before closing.') from None

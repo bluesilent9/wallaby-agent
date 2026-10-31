@@ -2,11 +2,17 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 19
+# Wallaby Agent V2 — Development Build 20
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 19 DEB](dist/wallaby-agent_2.0.0~dev19_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 20 DEB](dist/wallaby-agent_2.0.0~dev20_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 20 fixes the protected window's native close deadline: slow mandatory checks no longer expire an already admitted request. The ordinary overlay has no normal close button; a recovery button appears only after confirmed viewer loss and failed cleanup. Active private work still prevents cleanup. [Close/recovery details](AGENT_BUILD20_CLOSE.md).
+
+The supplied Fee Estimates logs confirmed that a complete verbose mempool exceeded the 16 MiB RPC boundary. Build 20 adds **wallaby_mempool_snapshot**, a read-only, immutable public snapshot in pages of 1,000 transactions. Ordinary RPC limits and response semantics remain unchanged. **Dashboard needs the matching paging update before its estimated-block visualization will work with a large mempool.** [Dashboard change and logging suggestions](DASHBOARD_FEE_PAGING.md).
+
+Diagnostics now include action timing, cleanup stages, exact response boundaries and byte limits/counts without logging payloads or credentials. Seven UTC days / 7 MiB total retention remains.
 
 Build 19 adds locally authorised builder cancellation for **Dashboard V1 Build 20**, including multi-wallet/multi-PSBT review, local broadcast checks, a delivery-only receipt, and **Delete and Cancel / Backup and Cancel**. Encrypted local backup is an explicit user-selected exception to RAM-only Bitcoin processing; plaintext never leaves protected RAM. Retirement withdrawals preserve actual or uncertain deletion outcomes. [Integration contract](DASHBOARD_BUILD20_CANCELLATION.md).
 
@@ -74,7 +80,7 @@ Open **Utilities → Wallaby Agent Configuration**. **Services** uses the ordina
 
 Enabling the Bitcoin node interface prepares its protected workspace automatically before the toggle is saved on. Workspace readiness and any preparation failure are shown under the node toggle. A one-time native administrator authorisation establishes the non-swapping RAM mount. Later logins can start only that user's fixed unprivileged protected worker without repeating the administrator prompt. If the node interface is enabled, login bootstrap starts that worker automatically. This does not grant root to wallet operations or enable other users' services.
 
-Bitcoin pages open in a dedicated protected HTML5 window. The ordinary browser/service process receives only service-level status and public machine identity, not wallet/PSBT payloads. Read-only service settings are visible in the protected window; use the Utilities shortcut to edit them. Wallet/backup passphrases are requested through protected native dialogues, never ordinary browser forms, URLs, command arguments, logs or Dashboard.
+Bitcoin pages open in a dedicated protected HTML5 window. The ordinary browser/service process receives only service-level status and public machine identity, not wallet/PSBT payloads. Services is disabled in the protected window; after closing it, use the ordinary Utilities configuration page to edit service settings. Wallet/backup passphrases are requested through protected native dialogues, never ordinary browser forms, URLs, command arguments, logs or Dashboard.
 
 After finishing sensitive work and waiting for queued Dashboard delivery, close the protected window to disconnect the node and clear its RAM state. Sleep/hibernation remains inhibited while sensitive work is active. Do not shut down an unfinished setup: temporary keys and uncompleted payloads are volatile. No setup is automatically regenerated after a loss or uncertain outcome.
 

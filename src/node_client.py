@@ -20,20 +20,22 @@ def decode(raw):
 class HTTPFailure(Exception):
     def __init__(self,status):self.status=status;super().__init__('HTTP request failed (%d).'%status)
 
-def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1'):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev19'}
+def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1',response_limit=LIMIT):
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev20'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
-    conn=http.client.HTTPConnection(host,port,timeout=timeout)
+    conn=http.client.HTTPConnection(host,port,timeout=timeout);response=None
     try:
         conn.request('GET' if raw is None else 'POST',path,raw,headers)
-        response=conn.getresponse();data=response.read(LIMIT+1)
-        if len(data)>LIMIT:raise PublicDataFailure('response_limit','The local/public HTTP response exceeds the configured transport size limit.')
+        response=conn.getresponse();data=response.read(response_limit+1)
+        if len(data)>response_limit:raise PublicDataFailure('response_limit','The local/public HTTP response exceeds the configured transport size limit.',{'boundary':'local_core_http' if auth else 'dashboard_http','limit_bytes':response_limit,'observed_bytes_at_least':len(data)})
         if response.status!=200:raise HTTPFailure(response.status)
         try:return decode(data)
         except (ValueError,UnicodeError):raise PublicDataFailure('response_json','The service returned invalid JSON data.') from None
-    finally:conn.close()
+    finally:
+        if response is not None:response.close()
+        conn.close()
 
 def protocol_failure(code,message):
     return ConnectionFailure('dashboard',code,'Wallaby Dashboard protocol error: '+message+' Check that the Dashboard and Agent Development builds are compatible.')
@@ -53,7 +55,9 @@ def adapter_mac():
 LOCAL_ROUTER=None
 
 class Core:
-    def __init__(self,config):self.config=config
+    def __init__(self,config):
+        from mempool_snapshot import Snapshot
+        self.config=config;self.mempool=Snapshot()
     def call(self,ident,method,params,wallet=None,timeout=30):
         from protected_memory import required,inside
         if required() and not inside():
@@ -69,6 +73,17 @@ class Core:
         except (PermissionError,IsADirectoryError):raise ConnectionFailure('rpc','cookie_access','The Bitcoin Core cookie cannot be read by this desktop user. Choose the correct .cookie file and check its permissions.') from None
         except UnicodeError:raise ConnectionFailure('rpc','cookie_invalid','The selected file is not a Bitcoin Core text cookie. Choose the correct .cookie file.') from None
         if ':' not in cookie or '\n' in cookie:raise ConnectionFailure('rpc','cookie_invalid','The selected file is not a valid Bitcoin Core RPC cookie. Choose the .cookie file; do not enter its contents.')
+        if method=='wallaby_mempool_snapshot':
+            if wallet is not None:raise ValueError('Mempool snapshots do not use wallet endpoints.')
+            from mempool_snapshot import Snapshot,LOCAL_BYTES
+            def fetch():
+                response=http_json(self.config['rpc_port'],'/',{'jsonrpc':'2.0','id':ident,'method':'getrawmempool','params':[True]},timeout=timeout,auth=cookie,host='127.0.0.1',response_limit=LOCAL_BYTES)
+                if not isinstance(response,dict) or response.get('id')!=ident:raise ConnectionFailure('rpc','response_id','Core returned an unexpected mempool response ID.')
+                if response.get('error') is not None:raise PublicDataFailure('mempool_core','Core refused its public mempool snapshot. Check node readiness.')
+                return response.get('result')
+            try:
+                value=self.mempool.call(params,fetch);value,_=clean_json(value,MAX_RESULT_BYTES);return {'result':value}
+            except Exception as error:raise describe('rpc',error) from None
         path='/' if wallet is None else '/wallet/'+quote(wallet,safe='')
         try:response=http_json(self.config['rpc_port'],path,{'jsonrpc':'2.0','id':ident,'method':method,'params':params},timeout=timeout,auth=cookie,host='127.0.0.1')
         except Exception as error:raise describe('rpc',error) from None
@@ -142,8 +157,8 @@ class NodeClient:
             except Exception as error:
                 failure=describe('rpc',error)
                 from activity_log import event
-                event('rpc.'+c['method'],'Local public RPC failed · '+failure.code)
-                result={'error':{'code':'local_rpc_'+failure.code,'message':str(failure)+' The acknowledged request was not replayed.','data':{'stage':failure.stage,'category':failure.code,'method':c['method']}}}
+                event('rpc.'+c['method'],'Local public RPC failed · '+failure.code+((' · '+json.dumps(failure.measurements,sort_keys=True)) if getattr(failure,'measurements',None) else ''))
+                result={'error':{'code':'local_rpc_'+failure.code,'message':str(failure)+' The acknowledged request was not replayed.','data':{'stage':failure.stage,'category':failure.code,'method':c['method'],**getattr(failure,'measurements',{})}}}
             self.post('result',{'id':ident,**result})
         except Exception as error:self.fail(error)
         finally:self.pending.release()

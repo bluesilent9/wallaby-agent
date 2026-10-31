@@ -13,7 +13,7 @@ def close_allowed():
     close_error=''
     from secure_bridge import call
     import time
-    try:return call('ui.prepare_close',time.monotonic()+4,timeout=6).get('ok') is True
+    try:return call('ui.prepare_close',time.monotonic()+4,timeout=40).get('ok') is True
     except ValueError as error:
         from worker_upgrade import unsupported,private_idle
         if unsupported(error):

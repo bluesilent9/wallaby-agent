@@ -18,8 +18,11 @@ def describe(stage, error):
         return error
     from agent_rpc import PublicDataFailure
     if isinstance(error,PublicDataFailure):
-        advice={'response_limit':'Bitcoin Core/public RPC response exceeds the 16 MiB transport limit. For getrawmempool this can be a large verbose mempool. A bounded/paged Dashboard request is needed; no incomplete mempool was substituted.','private_material':'Public RPC output was blocked because it contained private-key material. No private result was sent.','response_json':'Local Core/public HTTP response was not valid JSON. Check the configured RPC service.'}
-        return ConnectionFailure(stage,error.code,advice.get(error.code,'Public RPC data was refused.'))
+        advice={'response_limit':'Bitcoin Core/public RPC response exceeds the 16 MiB transport limit. For getrawmempool this can be a large verbose mempool. A bounded/paged Dashboard request is needed; no incomplete mempool was substituted.','private_material':'Public RPC output was blocked because it contained private-key material. No private result was sent.','response_json':'Local Core/public HTTP response was not valid JSON. Check the configured RPC service.','mempool_busy':'Another local mempool capture is in progress. Retry this read-only capture after it finishes.','mempool_limit':'The complete local mempool exceeds the bounded snapshot capacity. No partial projection data was returned.','mempool_expired':'The mempool snapshot expired or was replaced. Discard incomplete pages and begin a new capture.','mempool_offset':'The requested mempool page is outside this snapshot.','mempool_core':'Bitcoin Core refused its public mempool snapshot. Check node readiness.'}
+        message=advice.get(error.code,'Public RPC data was refused.')
+        if error.code=='response_limit' and error.details:
+            message='RPC response exceeds its '+str(error.details.get('limit_bytes'))+' byte limit at '+str(error.details.get('boundary'))+'. For fee projection, Dashboard must use the paged wallaby_mempool_snapshot interface. No partial data was returned.'
+        failure=ConnectionFailure(stage,error.code,message);failure.measurements=error.details;return failure
     label = {'rpc': 'Local Bitcoin Core RPC', 'dashboard': 'Wallaby Dashboard',
              'workspace': 'Protected Bitcoin workspace', 'ssh': 'SSH', 'configuration': 'Agent configuration'}.get(stage, 'Node interface')
     status = getattr(error, 'status', None)
@@ -70,3 +73,14 @@ def ssh_failure(lines, port, exit_code=None):
         return ConnectionFailure('ssh', 'refused', 'The server refused the SSH connection. Check the configured SSH port and its IPv6 listener.')
     suffix = f' (exit {exit_code})' if isinstance(exit_code, int) else ''
     return ConnectionFailure('ssh', 'transport', f'SSH tunnel could not be established or was lost{suffix}. Check the user-service journal and server SSH service.')
+
+
+def action_code(error):
+    """Classify known local refusals without recording arbitrary exception text."""
+    if isinstance(error,ConnectionFailure):return error.code
+    from secure_bridge import WorkspaceFailure
+    if isinstance(error,WorkspaceFailure):return error.code
+    text=str(error)
+    for prefix,code in (('Close request expired;', 'close_admission_expired'),('Finish the active protected operation', 'local_action_busy'),('Finish active wallet work,', 'unfinished_wallet_work'),('The protected workspace is closing.', 'workspace_closing')):
+        if text.startswith(prefix):return code
+    return 'local_action_refused'

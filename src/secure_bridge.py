@@ -121,7 +121,7 @@ def compatible(state):
             prepare_stop(peer)
             _stop_service()
             fresh=_ensure_running()
-            if not current(fresh):raise WorkspaceFailure('upgrade_version','The restarted worker is still an older build. Reinstall Build 19 before reconnecting.')
+            if not current(fresh):raise WorkspaceFailure('upgrade_version','The restarted worker is still an older build. Reinstall Build 20 before reconnecting.')
             return fresh
         finally:flag.unlink(missing_ok=True)
 
@@ -141,21 +141,34 @@ def stop():
         finally:flag.unlink(missing_ok=True)
 
 def prepare_stop(peer):
+    from activity_log import event
+    started=time.monotonic()
     from worker_upgrade import unsupported,inspect_legacy
     try:
-        if call('ui.prepare_close',time.monotonic()+4,timeout=6).get('ok') is not True:raise ValueError('Protected worker did not confirm closing.')
+        if call('ui.prepare_close',time.monotonic()+4,timeout=40).get('ok') is not True:raise ValueError('Protected worker did not confirm closing.')
     except WorkspaceFailure as error:
-        if not unsupported(error):raise
+        if str(error)=='Close request expired; no workspace state was changed.':
+            # Build17–19 can expire during mandatory protection checks. The old
+            # ui.close action performs the same local busy/delivery gate again.
+            event('workspace.close','Older worker close lease expired during protection checks; retrying its guarded local close action.')
+            call('ui.close',timeout=40);return
+        if not unsupported(error):
+            event('workspace.close','Safe close refused · '+error.code+' · elapsed_ms='+str(round((time.monotonic()-started)*1000)))
+            raise
         inspect_legacy(peer)
 
 def _stop_service():
     from activity_log import handoff,event
-    handoff()
+    started=time.monotonic();event('workspace.cleanup','Starting sanitized log handoff.')
+    handoff();event('workspace.cleanup','Sanitized log handoff completed; stopping protected service.')
     result=subprocess.run(['/usr/bin/systemctl','--no-ask-password','stop','wallaby-agent-secure@'+str(os.getuid())+'.service'],capture_output=True,timeout=100)
-    if result.returncode:raise ValueError('Protected cleanup did not confirm completion. Keep the computer awake and inspect the protected service before hibernating.')
+    if result.returncode:raise WorkspaceFailure('service_stop_failed','Protected cleanup did not confirm completion. Keep the computer awake and inspect the protected service before hibernating.')
+    event('workspace.cleanup','Protected service stopped; verifying empty non-swapping RAM.')
     from protected_memory import noswap_path
-    if not noswap_path(root()) or any(root().iterdir()):raise ValueError('Protected service stopped, but empty protected RAM could not be verified. Keep the computer awake and inspect the workspace; cleanup was not confirmed.')
-    event('workspace','Protected diagnostics handed over; workspace cleared.')
+    try:empty=noswap_path(root()) and not any(root().iterdir())
+    except OSError:empty=False
+    if not empty:raise WorkspaceFailure('ram_cleanup_unconfirmed','Protected service stopped, but empty protected RAM could not be verified. Keep the computer awake and inspect the workspace; cleanup was not confirmed.')
+    event('workspace','Protected diagnostics handed over; workspace cleared · elapsed_ms='+str(round((time.monotonic()-started)*1000)))
     return {'message':'Protected workspace closed after its temporary processes and RAM data were cleared.'}
 
 class Proxy:

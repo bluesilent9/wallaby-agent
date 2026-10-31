@@ -71,7 +71,11 @@ class Lifecycle:
             stop()
             self.legacy_view_seen=False
             write_status('node','red','Off · protected window closed and workspace cleared.',lifecycle=True)
-        except Exception:
+        except Exception as error:
+            from activity_log import event
+            from secure_bridge import WorkspaceFailure
+            code=error.code if isinstance(error,WorkspaceFailure) else 'cleanup_unconfirmed'
+            event('workspace.cleanup','Cleanup did not confirm completion · '+code+' · '+type(error).__name__)
             self.retry_after=time.monotonic()+30
-            write_status('node','red','Node interface is off, but protected workspace cleanup did not confirm completion. Keep the computer awake; re-enable the node to inspect unfinished work.',lifecycle=True)
+            write_status('node','red','Node interface is off, but protected workspace cleanup did not confirm completion. Keep the computer awake; re-enable the node to inspect unfinished work.',lifecycle=True,cleanup_failed=True)
         finally:(runtime_dir()/'workspace-closing').unlink(missing_ok=True)

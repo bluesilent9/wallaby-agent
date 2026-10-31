@@ -81,6 +81,8 @@ class Workspace:
         if self.busy() or self.archives and (self.archives.loaded or self.archives.staged) or delivery_pending(self.store.read()):raise ValueError('Finish active wallet work, wait for queued Dashboard deliveries and unload archival wallets before closing the protected window and disconnecting its node.')
         if deadline is not None and time.monotonic()>=deadline:raise ValueError('Close request expired; no workspace state was changed.')
         self.closing=True
+        from activity_log import event
+        event('workspace.close','Safe close accepted; awaiting node disconnect and RAM cleanup.')
     def close_views(self):
         # Only tracked viewers; the monitor disconnects and stops the worker.
         self.begin_close()
@@ -124,7 +126,7 @@ class Workspace:
             if len(args)!=1 or type(args[0]) not in (int,float) or not time.monotonic()<args[0]<time.monotonic()+8:raise ValueError('Close request expired; no workspace state was changed.')
             if not self.lock.acquire(blocking=False):raise ValueError('Finish the active protected operation before closing.')
             try:
-                enforce();self.begin_close(args[0]);return {'ok':True}
+                enforce();self.begin_close();return {'ok':True}
             finally:self.lock.release()
         if method in ('node.status','node.stop'):
             enforce()
@@ -291,6 +293,7 @@ class Workspace:
 
 class Handler(socketserver.BaseRequestHandler):
     def handle(self):
+        started=time.monotonic();method='protected.action'
         try:
             uid=struct.unpack('3i',self.request.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))[1]
             if uid!=os.getuid():return
@@ -299,14 +302,16 @@ class Handler(socketserver.BaseRequestHandler):
             from node_client import decode
             p=decode(receive(self.request,n))
             if not isinstance(p,dict) or set(p)!={'method','args','environment'} or not isinstance(p['method'],str) or not isinstance(p['args'],list) or len(p['args'])>8 or not isinstance(p['environment'],dict):raise ValueError('Invalid protected action.')
+            method=p['method'] if __import__('re').fullmatch('[a-z_.]{1,64}',p['method']) else 'invalid-action'
             result=self.server.workspace.dispatch(p['method'],p['args'],p['environment']);reply={'result':result}
             if p['method'] not in ('status','service_status','node.status','diagnostics.export','ui.arm'):
                 from activity_log import event
                 method=p['method'] if __import__('re').fullmatch('[a-z_.]{1,64}',p['method']) else 'invalid-action'
-                event(method,'Local action completed.')
+                event(method,'Local action completed · elapsed_ms='+str(round((time.monotonic()-started)*1000)))
         except Exception as e:
             from activity_log import event
-            event('protected.action','Local action refused or uncertain · '+type(e).__name__)
+            from diagnostics import action_code
+            event(method,'Local action refused or uncertain · '+action_code(e)+' · '+type(e).__name__+' · elapsed_ms='+str(round((time.monotonic()-started)*1000)))
             reply={'error':str(e) if isinstance(e,ValueError) else 'Protected operation stopped or is uncertain. Inspect local state; it was not automatically repeated.'}
         raw=json.dumps(reply,allow_nan=False).encode();self.request.sendall(struct.pack('!I',len(raw))+raw)
 

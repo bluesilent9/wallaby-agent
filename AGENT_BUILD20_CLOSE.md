@@ -1,0 +1,13 @@
+# Build 20 protected close and recovery
+
+The native protected-window X remains the normal close control. Build 17–19 issued a four-second lease and then checked it again after mandatory protection and local-state checks. A request admitted while current could consequently fail with `Close request expired; no workspace state was changed.` Build 20 uses that lease only to admit a fresh request and never queues it behind a live action. Once admitted, all protection and unfinished-work checks must pass; elapsed checking time alone does not cancel it. Native and ordinary stop clients allow 40 seconds for those checks. Stale requests and active wallet work/deliveries/archives remain refusals.
+
+Successful native close seals the worker against new secret operations, exits the viewer, disconnects only the node interface, hands off sanitized logs, stops temporary children and verifies empty non-swapping RAM before returning to normal configuration. The ordinary page remains inert while the viewer is open or cleanup is confirmed in progress. Its normal overlay text is unchanged and **has no close button**.
+
+A **Clean up protected workspace** button appears only when a responsive protected worker confirms that its window is absent and the ordinary lifecycle reports a failed cleanup. Its authenticated local endpoint independently rechecks both facts, switches only the node off and retries the same safe stop/log handoff. It does not force termination past unfinished work or infer an absent window from an unreachable worker. Unknown worker state still requires local inspection; no unverified RAM discard is introduced. Preview mode cannot perform recovery.
+
+Installed older workers have a narrow upgrade fallback: only the exact known expired-close refusal can use their old guarded `ui.close` action. Other protection/busy refusals do not trigger a bypass or automatic replay. Their local busy/delivery gate is checked again.
+
+Logs identify cleanup/log-handoff stages, action duration and failure category. Response-limit errors identify whether the Core-local HTTP or sanitized public result exceeded its cap, plus a byte count or explicit lower bound. Protected log events remain RAM-only until safe handoff. The seven UTC day / 1 MiB-per-day log retention is unchanged.
+
+For an upgrade while a Build 19 protected viewer is already open, first close it using Build 19's existing ordinary-window button. A running old viewer retains its old native-close code until it exits. Build 20 can then replace the verified idle older worker; any busy private workspace remains retained.

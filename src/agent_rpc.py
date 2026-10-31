@@ -8,7 +8,7 @@ from datetime import datetime,timezone
 from decimal import Decimal
 import json,re,time,uuid
 
-NODE_METHODS=frozenset('getblockchaininfo getblockcount getbestblockhash getblockhash getblockheader getblock getchaintips getdifficulty getmempoolinfo getrawmempool getmempoolentry getmempoolancestors getmempooldescendants gettxout gettxoutsetinfo getrawtransaction gettxoutproof verifytxoutproof getnetworkinfo getnettotals getpeerinfo getconnectioncount getindexinfo estimatesmartfee deriveaddresses getdescriptorinfo validateaddress decoderawtransaction decodescript decodepsbt analyzepsbt listwallets listwalletdir getdescriptoractivity'.split())
+NODE_METHODS=frozenset('wallaby_mempool_snapshot getblockchaininfo getblockcount getbestblockhash getblockhash getblockheader getblock getchaintips getdifficulty getmempoolinfo getrawmempool getmempoolentry getmempoolancestors getmempooldescendants gettxout gettxoutsetinfo getrawtransaction gettxoutproof verifytxoutproof getnetworkinfo getnettotals getpeerinfo getconnectioncount getindexinfo estimatesmartfee deriveaddresses getdescriptorinfo validateaddress decoderawtransaction decodescript decodepsbt analyzepsbt listwallets listwalletdir getdescriptoractivity'.split())
 WALLET_METHODS=frozenset('getwalletinfo getbalances getbalance listunspent gettransaction listtransactions listsinceblock getaddressinfo getaddressesbylabel listlabels listaddressgroupings listreceivedbyaddress listreceivedbylabel listdescriptors'.split())
 METHODS=NODE_METHODS|WALLET_METHODS
 MAX_REQUEST_BYTES=4*1024*1024
@@ -35,7 +35,7 @@ PRIVATE=PrivateMaterial()
 def stamp():return datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00','Z')
 
 class PublicDataFailure(ValueError):
-    def __init__(self,code,message):self.code=code;super().__init__(message)
+    def __init__(self,code,message,details=None):self.code=code;self.details=details or {};super().__init__(message)
 
 def clean_json(value,limit):
     """Retain fractional JSON numbers as exact decimal strings, never binary floats."""
@@ -43,7 +43,7 @@ def clean_json(value,limit):
         if not isinstance(v,Decimal) or not v.is_finite() or abs(v.adjusted())>100 or len(v.as_tuple().digits)>1000:raise ValueError('Unsupported or oversized decimal value.')
         return format(v,'f')
     raw=json.dumps(value,ensure_ascii=True,allow_nan=False,default=decimal_text)
-    if len(raw.encode())>limit:raise PublicDataFailure('response_limit','RPC result exceeds the configured public transport size limit.')
+    if len(raw.encode())>limit:raise PublicDataFailure('response_limit','RPC result exceeds the configured public transport size limit.',{'boundary':'public_result','limit_bytes':limit,'observed_bytes':len(raw.encode())})
     if PRIVATE.search(raw):raise PublicDataFailure('private_material','Private key material was refused by the public RPC transport.')
     return json.loads(raw),len(raw.encode())
 
@@ -61,6 +61,9 @@ def request(method,params,wallet):
     if wallet is not None and (not isinstance(wallet,str) or len(wallet)>256 or any(ord(c)<32 for c in wallet)):raise ValueError('Invalid wallet name.')
     if method in WALLET_METHODS and wallet is None:raise ValueError('Specify the exact Core wallet name for a wallet RPC.')
     if method not in WALLET_METHODS and wallet is not None:raise ValueError('This node RPC does not take a wallet endpoint.')
+    if method=='wallaby_mempool_snapshot':
+        from mempool_snapshot import params as validate_snapshot
+        validate_snapshot(params)
     if method=='listdescriptors' and params not in ([],[False],{}, {'private':False}):raise ValueError('Only public listdescriptors false exports are permitted.')
     return params,size
 
