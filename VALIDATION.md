@@ -1,8 +1,14 @@
-# Agent V2 Development Build 14 validation
+# Agent V2 Development Build 15 validation
 
 Target: Ubuntu 26.04 LTS amd64, Bitcoin Core 31. Development only.
 
 ## Verified
+
+- Build 15 full regression suite: **182 tests passed in 257.442 seconds**, with isolated Bitcoin Core 31 regtest nodes. All startup/HTTP preparation changes were included. Subsequent policy and UI changes pass the exact shipped polkit-rule VM test and workspace-button state-machine test, including unrelated-action refusal, matching service/UID/NoNewPrivileges, pending startup, ready/failed states, cleanup, suppressed background polling while awaiting authorisation, correct disabled/wait cursors and copy-command regression. Real privileged service startup after applying this installer still requires verification on the affected laptop.
+
+- Build 15 focuses on Agent-only local protected-workspace readiness. Twelve new tests cover failed system-service start, timeout, unreachable worker, dropped status socket, explicit protection refusal, malformed local session/status, safe unknown failures, real Unix-socket error delivery, existing ValueError compatibility, preparation before saving node enablement, failure/cancellation without starting the node, and tunnel/off controls that never prepare Bitcoin. The focused readiness/diagnostic/protected-boundary suite passes 47 tests. The final full regression result is recorded with the distribution.
+- The direct check on the affected wallet-laptop confirmed its installed protected worker was unreachable. That isolates the attempted connection failure before Dashboard registration. This work does not change or investigate Dashboard code. The supplied service status and a wallet-free background inhibitor diagnostic subsequently confirmed interactive authorisation was blocking the required inhibitor.
+- Initial setup uses the existing fixed native administrator helper from the ordinary Services process. The node user service remains unprivileged. No RAM, swap, filesystem, signing, RPC or pruning checks are relaxed. No new protected worker stdout/stderr logging is enabled.
 
 - Build 14 final full regression suite: **170 tests passed in 256.051 seconds**, with isolated Bitcoin Core 31 regtest nodes. Final RPC-focused checks additionally pass 17 tests after refining the queued-RPC timeout explanation. Twenty-five diagnostic/protected-runtime checks pass. The shipped command-copy UI passes its JavaScript VM test and a real browser Copy command interaction. Ubuntu 26.04 apt simulation accepts an upgrade with zero newly required packages; the DEB matches all 82 shipped source/web files.
 

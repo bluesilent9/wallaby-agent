@@ -1,5 +1,7 @@
 # Build 14 connection investigation
 
+Historical notes: Build 15 subsequently confirmed the affected Agent could not start its required sleep/shutdown inhibitor as a background service. See [the confirmed Agent startup diagnosis and fix](AGENT_BUILD15_STARTUP.md). The uncertainty below records the earlier Build 14 investigation.
+
 The provided node_connect.log contains one Dashboard-side error: `expected string or bytes-like object, got NoneType` (30 October 2026 20:22:03 UTC). It has no traceback, endpoint or matching Agent exception. The Dashboard chat independently identified a missing-version exception and is fixing it in Dashboard Build 14. Its relationship to the Agent disconnect is unconfirmed.
 
 A separate **confirmed Agent bug** caused the misleading message: secure_worker converted the real failure into safe text, ProtectedNode raised that text as ValueError, and runtime.describe('dashboard', error) discarded it and substituted the incompatible-data message. Build 14 sends bounded structured ConnectionFailure detail across that boundary and reconstitutes it without relabelling its origin. Older worker safe text is also retained. Tests cover unreadable cookies, local RPC refusal, malformed Dashboard JSON and malformed detail. This fixes diagnostic attribution; the real connection failure is still unconfirmed.

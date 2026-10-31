@@ -17,7 +17,7 @@ def describe(stage, error):
     if isinstance(error, ConnectionFailure):
         return error
     label = {'rpc': 'Local Bitcoin Core RPC', 'dashboard': 'Wallaby Dashboard',
-             'ssh': 'SSH', 'configuration': 'Agent configuration'}.get(stage, 'Node interface')
+             'workspace': 'Protected Bitcoin workspace', 'ssh': 'SSH', 'configuration': 'Agent configuration'}.get(stage, 'Node interface')
     status = getattr(error, 'status', None)
     if status in (401, 403):
         advice = ('Check the cookie location and restart Core if its RPC setting changed.'

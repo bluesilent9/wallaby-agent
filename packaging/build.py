@@ -9,7 +9,7 @@ def put(path,text,mode=0o644):
  p=stage/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);p.chmod(mode)
 arch=subprocess.check_output(['dpkg','--print-architecture'],text=True).strip()
 put('DEBIAN/control',f'''Package: wallaby-agent
-Version: 2.0.0~dev14
+Version: 2.0.0~dev15
 Section: utils
 Priority: optional
 Architecture: {arch}
@@ -136,13 +136,21 @@ profile wallaby-agent-protected flags=(unconfined) {
 ''')
 put('usr/share/polkit-1/rules.d/49-wallaby-agent-workspace.rules','''// Only the caller's own fixed, unprivileged Bitcoin worker. No arbitrary units.
 polkit.addRule(function(action, subject) {
- if (action.id !== "org.freedesktop.systemd1.manage-units") return;
- var verb=action.lookup("verb");
- if (verb !== "start" && verb !== "stop") return;
+ var manage=action.id === "org.freedesktop.systemd1.manage-units";
+ var inhibit=action.id === "org.freedesktop.login1.inhibit-block-sleep" || action.id === "org.freedesktop.login1.inhibit-block-shutdown";
+ if (!manage && !inhibit) return;
+ if (manage && action.lookup("verb") !== "start" && action.lookup("verb") !== "stop") return;
  var uid;
- try { uid=polkit.spawn(["/usr/bin/id","-u",subject.user]).trim(); } catch(e) { return; }
+ try { uid=polkit.spawn(["/usr/bin/id","-u","--",subject.user]).trim(); } catch(e) { return; }
  if (!/^[0-9]+$/.test(uid) || Number(uid)<1000) return;
- if (action.lookup("unit") === "wallaby-agent-secure@"+uid+".service") return polkit.Result.YES;
+ var ownUnit="wallaby-agent-secure@"+uid+".service";
+ // system_unit is supplied by polkit from the root-owned system unit, not
+ // from the caller's command line or from a user-creatable unit name.
+ if (inhibit) {
+  if (subject.system_unit === ownUnit && subject.no_new_privileges === true) return polkit.Result.YES;
+  return;
+ }
+ if (action.lookup("unit") === ownUnit) return polkit.Result.YES;
 });
 ''')
 for kind in ('ddns','dashboard','node','monitor','ui'):
@@ -184,7 +192,7 @@ NoDisplay=true
 X-KDE-autostart-phase=2
 ''')
 put('usr/share/icons/hicolor/scalable/apps/wallaby-agent.svg',(root/'web/wallaby-agent.svg').read_text())
-for document in ('README.md','AGENT_PROTOCOL.md','APPROVAL_PROTOCOL.md','DASHBOARD_PREVIEW_UPDATE.md','DASHBOARD_BUILD8_UPDATE.md','DASHBOARD_BUILD9_UPDATE.md','DASHBOARD_BUILD10_UPDATE.md','DASHBOARD_BUILD11_UPDATE.md','DASHBOARD_BUILD12_UPDATE.md','DASHBOARD_BUILD14_DIAGNOSTICS.md','DISC_FORMAT.md','VALIDATION.md'):
+for document in ('README.md','AGENT_PROTOCOL.md','APPROVAL_PROTOCOL.md','DASHBOARD_PREVIEW_UPDATE.md','DASHBOARD_BUILD8_UPDATE.md','DASHBOARD_BUILD9_UPDATE.md','DASHBOARD_BUILD10_UPDATE.md','DASHBOARD_BUILD11_UPDATE.md','DASHBOARD_BUILD12_UPDATE.md','DASHBOARD_BUILD14_DIAGNOSTICS.md','AGENT_BUILD15_STARTUP.md','DISC_FORMAT.md','VALIDATION.md'):
  put('usr/share/doc/wallaby-agent/'+document,(root/document).read_text())
 put('DEBIAN/postinst','''#!/bin/sh
 set -e
@@ -193,6 +201,6 @@ if [ -d /sys/kernel/security/apparmor ] && command -v apparmor_parser >/dev/null
 if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q || true; fi
 exit 0
 ''',0o755)
-out=root/'dist'/f'wallaby-agent_2.0.0~dev14_{arch}.deb';out.parent.mkdir(exist_ok=True)
+out=root/'dist'/f'wallaby-agent_2.0.0~dev15_{arch}.deb';out.parent.mkdir(exist_ok=True)
 subprocess.run(['dpkg-deb','--root-owner-group','--build',str(stage),str(out)],check=True)
 print(out)
