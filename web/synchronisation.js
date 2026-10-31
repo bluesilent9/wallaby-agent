@@ -3,8 +3,8 @@ let transferSignature='',transferSuccess=false;
 window.updateTransfer=function(t){
  if(!t)return;
  const enabled=!!(workspace?.connected||t.rows?.length||t.recovery?.running);
- document.querySelector('[data-page="synchronisation"]').disabled=!enabled;
- if(!enabled&&page==='synchronisation')showPage('services');
+ document.querySelector('[data-page="synchronisation"]').disabled=!workspace?.protected?.viewer;
+
  // Requests never open a browser or change the user's page.
  if(document.activeElement?.closest('#transfer-content form, #transfer-content input'))return;
  const signature=JSON.stringify(t);if(signature===transferSignature)return;transferSignature=signature;

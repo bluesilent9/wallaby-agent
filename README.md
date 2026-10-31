@@ -2,11 +2,17 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 17
+# Wallaby Agent V2 — Development Build 18
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 17 DEB](dist/wallaby-agent_2.0.0~dev17_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 18 DEB](dist/wallaby-agent_2.0.0~dev18_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 18 fixes upgrades that reused an older protected worker and then failed with “Unsupported protected action”. Node startup now checks the running worker version, safely replaces verified idle older workers, and opens the protected window automatically when Core/Dashboard connects. Unfinished private work stays protected. [Lifecycle details](AGENT_BUILD18_LIFECYCLE.md).
+
+The ordinary window enables only **Services**; the protected window disables only **Services**. Sidebar clicks no longer launch a protected window, and protected-processing details appear inside that window. Native close shows the actual local refusal and handles older workers without mislabelling unsupported actions as busy work.
+
+New version-2 extinction requests archive and verify local history before unloading and deleting the reviewed local group of empty wallet copies, including watch-only copies and dedicated multisig accounts. Each holder needs separate local authorisation; old version-1 requests remain archive-only. Dashboard must implement per-holder deletion confirmation, cancellation tracking and physical-disc confirmation. [Dashboard integration contract](DASHBOARD_BUILD18_RETIREMENT.md).
 
 Build 17 integrates the node interface and protected **window**. Switching the node toggle on prepares the protected service; the first successful Core/Dashboard connection opens its protected window automatically and locks the ordinary configuration page. There are no separate Start/Close workspace buttons. Services stays disabled inside the protected window.
 
@@ -111,9 +117,11 @@ For an existing Snap Core's encrypted file transfers/restoration, a small privil
 
 ## Make Extinct
 
-Dashboard Build 11's request is handled locally on Authorise. The Agent verifies public descriptor identity against the exact private Core wallet or a restricted shared policy with matching local private signing accounts, complete confirmed history and zero funds, including pending/immature/watch balances, locked outputs and associated vault/shared-policy monitors. It reconstructs used receiving and change addresses for review. Existing exact address-specific `LOST` labels are preserved; retirement never invents a loss declaration.
+Authorise independently verifies the exact local public policy, complete history, zero balances (including associated multisig/vault monitors), no locked outputs and no pending movements. Used receiving/change addresses are archived into Wallaby Extinct; existing exact LOST labels remain intact. No capital-loss declaration is invented.
 
-Approval imports public `addr()` records into a private-key-disabled historical archive. The original private wallet is **never deleted or unloaded**. If history cannot be established on a pruned node, the user can prepare a local history requirement and separately authorise recovery on Synchronisation. Retirement still requires a fresh review afterwards. An uncertain import is not replayed automatically.
+Version 2 explicitly authorises archive verification followed by local wallet deletion. Watch-only copies are supported. The reviewed local wallet group is unloaded with startup disabled, then a separate unprivileged filesystem helper refuses live SQLite locks, symlinks, changed inodes, extra files or unsupported paths before unlinking only the approved wallet files. The Bitcoin worker keeps its read-only persistent-filesystem restriction. No extra backups are created. Named standard native/Snap wallet directories under /home are supported; custom/default/nested wallet paths require local review. Failed or uncertain attempts are not replayed automatically.
+
+This removes only the local wallet after local approval. Dashboard must coordinate each holding node and track confirmed deletion; physical discs/backups are not automatically erased. Legacy version-1 proposals remain archive-only. See [the Build 18 protocol](DASHBOARD_BUILD18_RETIREMENT.md).
 
 ## Synchronisation and This Node
 

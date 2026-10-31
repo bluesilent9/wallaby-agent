@@ -26,7 +26,7 @@ class Exchange:
                     except (ValueError,KeyError):old=True
                 if old:saved.setdefault('legacy_exports',{})[key]=saved['outbox'].pop(key)
         state=self.store.read();items=[{'id':key,**row} for key,row in list(state['outbox'].items())[:8]]
-        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement']}
+        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement','wallet_retirement_v2']}
         address=local_ipv6()
         if address:body['node_info']={'ipv6':address}
         try:r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)

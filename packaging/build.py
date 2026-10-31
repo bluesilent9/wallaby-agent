@@ -9,7 +9,7 @@ def put(path,text,mode=0o644):
  p=stage/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);p.chmod(mode)
 arch=subprocess.check_output(['dpkg','--print-architecture'],text=True).strip()
 put('DEBIAN/control',f'''Package: wallaby-agent
-Version: 2.0.0~dev17
+Version: 2.0.0~dev18
 Section: utils
 Priority: optional
 Architecture: {arch}
@@ -32,8 +32,8 @@ subprocess.run(['gcc','-O2','-Wall','-Wextra','-Werror','-fPIC','-shared','-Wl,-
 put('usr/lib/systemd/system/wallaby-agent-secure@.service','''[Unit]
 Description=Wallaby Agent protected Bitcoin workspace for user %i
 After=systemd-logind.service
-Requires=systemd-logind.service wallaby-agent-snap-ram@%i.service wallaby-agent-denials@%i.service
-After=wallaby-agent-snap-ram@%i.service wallaby-agent-denials@%i.service
+Requires=systemd-logind.service wallaby-agent-snap-ram@%i.service wallaby-agent-denials@%i.service wallaby-agent-retirement@%i.service
+After=wallaby-agent-snap-ram@%i.service wallaby-agent-denials@%i.service wallaby-agent-retirement@%i.service
 RequiresMountsFor=/run/wallaby-agent-secure/%i/ram
 
 [Service]
@@ -79,6 +79,39 @@ StandardError=null
 KillMode=control-group
 TimeoutStopSec=90
 Restart=no
+''')
+put('usr/lib/systemd/system/wallaby-agent-retirement@.service','''[Unit]
+Description=Wallaby Agent local approved wallet removal for user %i
+PartOf=wallaby-agent-secure@%i.service
+
+[Service]
+Type=exec
+User=%i
+ExecStart=/usr/bin/python3 -I -B /usr/lib/wallaby-agent/src/wallet_deletion.py
+RuntimeDirectory=wallaby-agent-retirement/%i
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=-/home
+PrivateTmp=yes
+PrivateDevices=yes
+MemorySwapMax=0
+MemoryZSwapMax=0
+MemoryZSwapWriteback=no
+LimitCORE=0
+Environment=LD_PRELOAD=/usr/lib/wallaby-agent/libno-dump.so
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+StandardOutput=null
+StandardError=null
+Restart=on-failure
+RestartSec=5
 ''')
 put('usr/lib/systemd/system/wallaby-agent-denials@.service','''[Unit]
 Description=Wallaby Agent persistent denial preferences for user %i
@@ -192,7 +225,7 @@ NoDisplay=true
 X-KDE-autostart-phase=2
 ''')
 put('usr/share/icons/hicolor/scalable/apps/wallaby-agent.svg',(root/'web/wallaby-agent.svg').read_text())
-for document in ('README.md','AGENT_PROTOCOL.md','APPROVAL_PROTOCOL.md','DASHBOARD_PREVIEW_UPDATE.md','DASHBOARD_BUILD8_UPDATE.md','DASHBOARD_BUILD9_UPDATE.md','DASHBOARD_BUILD10_UPDATE.md','DASHBOARD_BUILD11_UPDATE.md','DASHBOARD_BUILD12_UPDATE.md','DASHBOARD_BUILD14_DIAGNOSTICS.md','AGENT_BUILD15_STARTUP.md','AGENT_BUILD16_STARTUP.md','AGENT_BUILD17_LIFECYCLE.md','DISC_FORMAT.md','VALIDATION.md'):
+for document in ('README.md','AGENT_PROTOCOL.md','APPROVAL_PROTOCOL.md','DASHBOARD_PREVIEW_UPDATE.md','DASHBOARD_BUILD8_UPDATE.md','DASHBOARD_BUILD9_UPDATE.md','DASHBOARD_BUILD10_UPDATE.md','DASHBOARD_BUILD11_UPDATE.md','DASHBOARD_BUILD12_UPDATE.md','DASHBOARD_BUILD14_DIAGNOSTICS.md','AGENT_BUILD15_STARTUP.md','AGENT_BUILD16_STARTUP.md','AGENT_BUILD17_LIFECYCLE.md','AGENT_BUILD18_LIFECYCLE.md','DASHBOARD_BUILD18_RETIREMENT.md','DISC_FORMAT.md','VALIDATION.md'):
  put('usr/share/doc/wallaby-agent/'+document,(root/document).read_text())
 put('DEBIAN/postinst','''#!/bin/sh
 set -e
@@ -201,6 +234,6 @@ if [ -d /sys/kernel/security/apparmor ] && command -v apparmor_parser >/dev/null
 if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q || true; fi
 exit 0
 ''',0o755)
-out=root/'dist'/f'wallaby-agent_2.0.0~dev17_{arch}.deb';out.parent.mkdir(exist_ok=True)
+out=root/'dist'/f'wallaby-agent_2.0.0~dev18_{arch}.deb';out.parent.mkdir(exist_ok=True)
 subprocess.run(['dpkg-deb','--root-owner-group','--build',str(stage),str(out)],check=True)
 print(out)

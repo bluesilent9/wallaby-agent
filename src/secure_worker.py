@@ -6,6 +6,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 import json,os,socket,socketserver,struct,threading,time
 from protected_memory import enforce,root
 from secure_bridge import receive,ENV
+from worker_upgrade import VERSION,PROTOCOL
 from configuration import Config,discover_cookie
 from node_client import Core
 from approval_store import Store,digest
@@ -23,6 +24,9 @@ def delivery_pending(state):
     for item in state['outbox'].values():
         if item['kind'] in ('wallet_sync_preferences','wallet_setup_identity','node_identity','wallet_transfer_preview'):continue
         payload=item['payload']
+        # Retirement cancellation is an explicit outcome the Dashboard must flag;
+        # retain it until acknowledged, unlike optional sync denial notices.
+        if item['kind']=='wallet_retirement_result':return True
         signed=payload.get('message',{})
         if payload.get('status')=='denied' or isinstance(signed,dict) and signed.get('status')=='denied':continue
         return True
@@ -65,7 +69,7 @@ class Workspace:
         except Exception:connected=False
         return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
     def service_status(self):
-        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
+        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'worker_version':VERSION,'worker_protocol':PROTOCOL,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
         self._service_snapshot=dict(result);return result
     def begin_close(self,deadline=None):
         if self.busy() or self.archives and (self.archives.loaded or self.archives.staged) or delivery_pending(self.store.read()):raise ValueError('Finish active wallet work, wait for queued Dashboard deliveries and unload archival wallets before closing the protected window and disconnecting its node.')
@@ -124,7 +128,7 @@ class Workspace:
             if not self.lock.acquire(blocking=False):
                 enforce()
                 result=dict(getattr(self,'_service_snapshot',{'pending':[],'denied':[],'transfer':{},'burn':{},'outbox_count':0}))
-                result.update(connected=self.node_status['color']=='green',protected={'running':True,'viewer':False},busy=True,window_required=getattr(self,'window_required',False),viewer_open=any(p.poll() is None for p in self.viewers),sync='A protected operation is in progress. Continue in the protected window.')
+                result.update(worker_version=VERSION,worker_protocol=PROTOCOL,connected=self.node_status['color']=='green',protected={'running':True,'viewer':False},busy=True,window_required=getattr(self,'window_required',False),viewer_open=any(p.poll() is None for p in self.viewers),sync='A protected operation is in progress. Continue in the protected window.')
                 return result
             try:
                 enforce();self.configure(environment);return self.service_status()

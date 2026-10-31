@@ -20,7 +20,7 @@ def closing():
     return (runtime_dir()/'workspace-closing').exists()
 
 class Lifecycle:
-    def __init__(self):self.thread=None;self.retry_after=0
+    def __init__(self):self.thread=None;self.retry_after=0;self.legacy_view_seen=False
     def poll(self):
         from protected_memory import required
         if not required() or self.thread and self.thread.is_alive() or time.monotonic()<self.retry_after:return
@@ -29,6 +29,12 @@ class Lifecycle:
         from secure_bridge import call
         with control_lock(blocking=False) as acquired:
             if not acquired:return
+            upgrade=runtime_dir()/'worker-upgrading'
+            if upgrade.exists():
+                with (runtime_dir()/'worker-upgrade.lock').open('a') as lock:
+                    try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                    except BlockingIOError:return
+                    upgrade.unlink(missing_ok=True) # crashed starter, no active upgrade owner
             config=Config()
             try:state=call('service_status',timeout=2)
             except ValueError:
@@ -45,7 +51,8 @@ class Lifecycle:
                     except (OSError,subprocess.TimeoutExpired):pass
                 return # Unavailable status is not evidence of a closed window.
             if not isinstance(state,dict) or not state.get('protected',{}).get('running'):return
-            closed=state.get('window_required') is True and state.get('viewer_open') is False
+            if state.get('viewer_open'):self.legacy_view_seen=True
+            closed=(state.get('window_required') is True or 'window_required' not in state and self.legacy_view_seen) and state.get('viewer_open') is False
             if config.values['enabled']['node']:
                 if not closed:return
                 import copy
@@ -61,8 +68,8 @@ class Lifecycle:
         from secure_bridge import stop,call
         from runtime import write_status,runtime_dir
         try:
-            if call('ui.prepare_close',time.monotonic()+4,timeout=6).get('ok') is not True:raise ValueError('Protected worker did not confirm closing.')
             stop()
+            self.legacy_view_seen=False
             write_status('node','red','Off · protected window closed and workspace cleared.',lifecycle=True)
         except Exception:
             self.retry_after=time.monotonic()+30

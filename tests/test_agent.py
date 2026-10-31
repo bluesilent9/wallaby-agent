@@ -104,7 +104,7 @@ class WebSecurityTests(unittest.TestCase):
  def test_retired_service_is_not_exposed_or_accepted(self):
   headers={'Authorization':'Bearer secret','Content-Type':'application/json'}
   code,data=self.call('/api/state',headers)
-  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development Build 17')
+  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development Build 18')
   self.assertEqual(set(data['config']['enabled']),{'ddns','dashboard','node'});self.assertNotIn('jellyfin',data['status'])
   self.assertEqual(self.call('/api/toggle',headers,json.dumps({'service':'jellyfin','enabled':True}))[0],400)
  def test_dashboard_toggle_does_not_require_cookie_or_enable_node(self):

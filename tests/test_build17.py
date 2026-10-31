@@ -110,10 +110,12 @@ class NodeAndWindow(unittest.TestCase):
 class CleanupVerification(unittest.TestCase):
  def test_successful_service_stop_requires_empty_verified_ram(self):
   from secure_bridge import stop
-  with tempfile.TemporaryDirectory() as tmp,patch('configuration.Config',return_value=SimpleNamespace(values={'enabled':{'node':False}})),patch('secure_bridge.call',return_value={'busy':False}),patch('secure_bridge.subprocess.run',return_value=Mock(returncode=0)),patch('secure_bridge.root',return_value=Path(tmp)),patch('protected_memory.noswap_path',return_value=True):
-   self.assertIn('cleared',stop()['message'])
-   (Path(tmp)/'remaining-fixture').write_text('fixture')
-   with self.assertRaisesRegex(ValueError,'empty protected RAM'):stop()
+  with tempfile.TemporaryDirectory() as tmp:
+   ram=Path(tmp)/'ram';ram.mkdir();runtime=Path(tmp)/'runtime';runtime.mkdir()
+   with patch('configuration.Config',return_value=SimpleNamespace(values={'enabled':{'node':False}})),patch('secure_bridge.call',side_effect=lambda method,*a,**kw:{'ok':True} if method=='ui.prepare_close' else {'busy':False}),patch('runtime.runtime_dir',return_value=runtime),patch('secure_bridge.subprocess.run',return_value=Mock(returncode=0)),patch('secure_bridge.root',return_value=ram),patch('protected_memory.noswap_path',return_value=True):
+    self.assertIn('cleared',stop()['message'])
+    (ram/'remaining-fixture').write_text('fixture')
+    with self.assertRaisesRegex(ValueError,'empty protected RAM'):stop()
 
 class NodeAPI(unittest.TestCase):
  def test_enabling_is_blocked_during_cleanup_without_prompting(self):
