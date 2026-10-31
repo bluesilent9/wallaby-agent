@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import json,os,socket,socketserver,struct,threading,time
+from decimal import Decimal
 from protected_memory import enforce,root
 from secure_bridge import receive,ENV
 from worker_upgrade import VERSION,PROTOCOL
@@ -122,8 +123,15 @@ class Workspace:
             enforce()
             from activity_log import DiagnosticLog
             return DiagnosticLog().records()
-        if method=='ui.prepare_close':
-            if len(args)!=1 or type(args[0]) not in (int,float) or not time.monotonic()<args[0]<time.monotonic()+8:raise ValueError('Close request expired; no workspace state was changed.')
+        if method in ('ui.request_close','ui.prepare_close'):
+            if method=='ui.request_close':
+                if args:raise ValueError('The native close request takes no arguments.')
+            else:
+                # Compatibility for an already running older viewer. The wire
+                # decoder deliberately preserves fractional numbers as Decimal.
+                if len(args)!=1 or type(args[0]) not in (int,float,Decimal):raise ValueError('Invalid legacy close request.')
+                deadline=args[0]
+                if isinstance(deadline,Decimal) and not deadline.is_finite() or not time.monotonic()<deadline<time.monotonic()+8:raise ValueError('Close request expired; no workspace state was changed.')
             if not self.lock.acquire(blocking=False):raise ValueError('Finish the active protected operation before closing.')
             try:
                 enforce();self.begin_close();return {'ok':True}

@@ -18,6 +18,8 @@ vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'.
  available=true;context.window.updateWorkspace(fixture());context.window.setWorkspaceAction(null);assert.equal(get('#workspace-dot').className,'dot green');
  context.window.updateWorkspace({...fixture(),viewer_open:true});assert.equal(get('main').inert,true);assert.equal(get('aside').inert,true);assert.equal(get('#protected-window-lock').hidden,false);
  assert.equal(get('#close-protected-view').hidden,true);
+ context.window.updateWorkspace({...fixture(),viewer_open:true,legacy_close_recovery:true});assert.equal(get('#close-protected-view').hidden,false);assert.match(get('#close-protected-view').textContent,/older protected window/);
+ context.window.updateWorkspace({...fixture(),viewer_open:true,legacy_close_recovery:false});assert.equal(get('#close-protected-view').hidden,true);
  context.window.updateWorkspace({...fixture(),viewer_open:false,cleanup_pending:true});assert.equal(get('#protected-window-lock').hidden,false);assert.equal(get('#close-protected-view').hidden,true);
  context.window.updateWorkspace({...fixture(),viewer_open:false,cleanup_recovery:true});assert.equal(get('#close-protected-view').hidden,false);
  let pending=get('#close-protected-view').events.click();assert.match(get('#protected-lock-status').textContent,/Disconnecting node/);release({message:'Closed view.'});await pending;assert.equal(get('main').inert,false);assert.equal(get('#protected-window-lock').hidden,true);

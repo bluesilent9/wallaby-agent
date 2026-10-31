@@ -1,5 +1,7 @@
 # Build 20 protected close and recovery
 
+**Correction:** Build 20 did not fix native close in actual use. Its JSON decoder produced Decimal deadlines while the guard allowed only int/float. Fresh requests were therefore rejected before the later timing checks. The explanation below describes the incomplete Build 20 change, not a successful deployed fix. [Build 21](AGENT_BUILD21_NATIVE_CLOSE.md) replaces the native request and tests the actual wire boundary.
+
 The native protected-window X remains the normal close control. Build 17–19 issued a four-second lease and then checked it again after mandatory protection and local-state checks. A request admitted while current could consequently fail with `Close request expired; no workspace state was changed.` Build 20 uses that lease only to admit a fresh request and never queues it behind a live action. Once admitted, all protection and unfinished-work checks must pass; elapsed checking time alone does not cancel it. Native and ordinary stop clients allow 40 seconds for those checks. Stale requests and active wallet work/deliveries/archives remain refusals.
 
 Successful native close seals the worker against new secret operations, exits the viewer, disconnects only the node interface, hands off sanitized logs, stops temporary children and verifies empty non-swapping RAM before returning to normal configuration. The ordinary page remains inert while the viewer is open or cleanup is confirmed in progress. Its normal overlay text is unchanged and **has no close button**.

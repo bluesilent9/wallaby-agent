@@ -26,15 +26,16 @@ async function closeProtectedView(){
 $('#close-protected-view').addEventListener('click',closeProtectedView);
 $('#resume-older-workspace').addEventListener('click',()=>run(async()=>{const result=await api('protected/open',{page:'authorise'});notify({message:result.message});}));
 function windowMode(w){
- const viewer=!!w?.protected?.viewer,recover=!!w?.cleanup_recovery&&!viewer,locked=!viewer&&(!!w?.viewer_open||recover||!!w?.cleanup_pending);
+ const viewer=!!w?.protected?.viewer,legacy=!!w?.legacy_close_recovery&&!viewer,recover=(!!w?.cleanup_recovery||legacy)&&!viewer,locked=!viewer&&(!!w?.viewer_open||recover||!!w?.cleanup_pending);
  $('#close-protected-view').hidden=!recover;
- $('#protected-lock-title').textContent=recover?'Protected workspace needs cleanup':w?.cleanup_pending?'Protected workspace is closing':'Protected window is open';
- $('#protected-lock-explanation').textContent=recover?'The protected window is no longer present, but RAM cleanup was not confirmed. Use the recovery button to retry safe cleanup.':w?.cleanup_pending?'The protected window has closed. Wait for node disconnection, log handoff and protected RAM cleanup to finish.':'Continue Bitcoin work in the protected window. Regular configuration is locked until that window closes.';
+ $('#close-protected-view').textContent=legacy?'Close older protected window safely':'Clean up protected workspace';
+ $('#protected-lock-title').textContent=legacy?'Older protected window needs an upgrade':recover?'Protected workspace needs cleanup':w?.cleanup_pending?'Protected workspace is closing':'Protected window is open';
+ $('#protected-lock-explanation').textContent=legacy?'This older worker has the known native-close fault. Use the guarded escape button to close it safely before upgrading.':recover?'The protected window is no longer present, but RAM cleanup was not confirmed. Use the recovery button to retry safe cleanup.':w?.cleanup_pending?'The protected window has closed. Wait for node disconnection, log handoff and protected RAM cleanup to finish.':'Continue Bitcoin work in the protected window. Regular configuration is locked until that window closes.';
  for(const selector of ['aside','main']){const area=document.querySelector(selector);area.inert=locked;area.classList.toggle('regular-locked',locked);}
  $('#protected-window-lock').hidden=!locked;
  for(const name of ['services','authorise','synchronisation','burn','message'])document.querySelector('[data-page="'+name+'"]').disabled=name==='services'?viewer:!viewer;
  $('#protected-processing').hidden=!viewer;
- $('#resume-older-workspace').hidden=viewer||!w?.protected?.running||w.worker_version==='2.0.0~dev20';
+ $('#resume-older-workspace').hidden=viewer||!w?.protected?.running||w.worker_version==='2.0.0~dev21';
  $('#page-services').hidden=viewer||page!=='services';
  if(viewer&&page==='services')showPage(initialPage==='services'?'authorise':initialPage);
 }

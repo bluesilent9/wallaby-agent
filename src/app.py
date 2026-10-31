@@ -13,6 +13,9 @@ from approval_store import Store
 from configuration import Config,hostname,discover_cookie,SERVICES
 from runtime import runtime_dir,read_status,write_status,apply_config,ctl,worker,monitor,retire_jellyfin
 
+def legacy_close_window(public):
+    return public.get('viewer_open') is True and public.get('worker_version') in ('2.0.0~dev17','2.0.0~dev18','2.0.0~dev19','2.0.0~dev20')
+
 LOCAL_ACTION_LOCK=threading.RLock()
 TRANSFER_LOCK=threading.RLock()
 
@@ -74,7 +77,7 @@ def workspace(server):
         try:
             snapshot=call('status' if inside() else 'service_status')
             if not inside():
-                status=read_status('node');snapshot['cleanup_recovery']=snapshot.get('viewer_open') is False and status.get('cleanup_failed') is True
+                status=read_status('node');snapshot['legacy_close_recovery']=legacy_close_window(snapshot);snapshot['cleanup_recovery']=snapshot.get('viewer_open') is False and status.get('cleanup_failed') is True
                 snapshot['cleanup_pending']=snapshot.get('viewer_open') is False and status.get('lifecycle') is True and status.get('color')=='amber'
             return snapshot
         except ValueError as error:return {'connected':False,'pending':[],'denied':[],'sync':str(error),'outbox_count':0,'transfer':{},'burn':{},'protected':{'running':False,'message':str(error)},'busy':False}
@@ -113,14 +116,14 @@ class Handler(BaseHTTPRequestHandler):
             from activity_log import DiagnosticLog
             try:return self.reply(200,DiagnosticLog().text().encode('utf-8'),'text/plain; charset=utf-8')
             except (OSError,ValueError):return self.reply(500,{'error':'Diagnostic log storage is unavailable. Check its ownership and permissions.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev20'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev21'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
                 if not v['cookie']:
                     cookie=discover_cookie()
                     if cookie:v['cookie']=cookie;c.save(v)
-                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development Build 20','node_support':node_support(v),'workspace':workspace(self.server)})
+                return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':'V2 Development Build 21','node_support':node_support(v),'workspace':workspace(self.server)})
         paths={'/':'index.html','/app.js':'app.js','/logs.js':'logs.js','/cancellation.js':'cancellation.js','/workspace.js':'workspace.js','/message.js':'message.js','/disc_operations.js':'disc_operations.js','/synchronisation.js':'synchronisation.js','/wallet_setup.js':'wallet_setup.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
         asset_path=urlsplit(self.path).path
         if asset_path not in paths:return self.reply(404,{'error':'Not found.'})
@@ -151,10 +154,12 @@ class Handler(BaseHTTPRequestHandler):
                 if inside():raise ValueError('Use the protected window close control.')
                 from secure_bridge import call,stop
                 public=call('service_status',timeout=8)
-                if public.get('viewer_open') is not False:raise ValueError('Close the protected window using its own close control first.')
-                if not read_status('node').get('cleanup_failed'):raise ValueError('Automatic cleanup is still running or no recovery is required.')
+                legacy=legacy_close_window(public)
+                if not legacy and public.get('viewer_open') is not False:raise ValueError('Close the protected window using its own close control first.')
+                if not legacy and not read_status('node').get('cleanup_failed'):raise ValueError('Automatic cleanup is still running or no recovery is required.')
+                if legacy:call('ui.close',timeout=60)
                 from activity_log import event
-                event('workspace.recovery','Safe cleanup retry requested after confirmed viewer loss and failed automatic cleanup.')
+                event('workspace.recovery','Guarded legacy window close accepted; continuing safe cleanup.' if legacy else 'Safe cleanup retry requested after confirmed viewer loss and failed automatic cleanup.')
                 config=Config();values=copy.deepcopy(config.values);values['enabled']['node']=False;apply_config(config,values)
                 result=stop();write_status('node','red','Off · protected workspace recovery completed.',lifecycle=True,cleanup_failed=False)
                 return self.reply(200,result)
@@ -304,7 +309,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev20'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev21'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -322,7 +327,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev20':
+    if installed!='2.0.0~dev21':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -332,7 +337,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev20') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev21') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

@@ -33,10 +33,10 @@ class CloseTests(unittest.TestCase):
   w.busy.return_value=True
   with patch('secure_worker.enforce'),self.assertRaisesRegex(ValueError,'Finish active'):w.dispatch('ui.prepare_close',[time.monotonic()+4],{})
   self.assertFalse(w.closing)
- def test_only_the_exact_legacy_expiry_uses_the_old_guarded_close(self):
-  error=WorkspaceFailure('worker_rejected','Close request expired; no workspace state was changed.')
+ def test_only_unsupported_new_action_uses_old_guarded_close(self):
+  error=WorkspaceFailure('worker_rejected','Unsupported protected action.')
   with patch('secure_bridge.call',side_effect=[error,{'message':'Closed'}]) as call,patch('worker_upgrade.inspect_legacy') as inspect:prepare_stop({})
-  self.assertEqual([c.args[0] for c in call.call_args_list],['ui.prepare_close','ui.close']);inspect.assert_not_called()
+  self.assertEqual([c.args[0] for c in call.call_args_list],['ui.request_close','ui.close']);inspect.assert_not_called()
   with patch('secure_bridge.call',side_effect=WorkspaceFailure('worker_rejected','Finish active work.')) as call,self.assertRaises(WorkspaceFailure):prepare_stop({})
   self.assertEqual(call.call_count,1)
 

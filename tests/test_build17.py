@@ -18,7 +18,7 @@ class LifecycleTests(unittest.TestCase):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.env=patch.dict(os.environ,{'XDG_CONFIG_HOME':self.temp.name,'XDG_RUNTIME_DIR':self.temp.name});self.env.start();self.addCleanup(self.env.stop)
   c=Config();v=copy.deepcopy(c.values);v['hostname']='example.test';v['enabled']={k:True for k in v['enabled']};c.save(v)
   self.state={'protected':{'running':True},'window_required':True,'viewer_open':False,'busy':False};self.life=Lifecycle()
-  self.patches=[patch('protected_memory.required',return_value=True),patch('secure_bridge.call',side_effect=lambda *a,**kw:{'ok':True} if a[0]=='ui.prepare_close' else copy.deepcopy(self.state)),patch('runtime.apply_config',side_effect=lambda c,v:c.save(v)),patch('node_lifecycle.threading.Thread',DeferredThread)]
+  self.patches=[patch('protected_memory.required',return_value=True),patch('secure_bridge.call',side_effect=lambda *a,**kw:{'ok':True} if a[0]=='ui.request_close' else copy.deepcopy(self.state)),patch('runtime.apply_config',side_effect=lambda c,v:c.save(v)),patch('node_lifecycle.threading.Thread',DeferredThread)]
   self.mocks=[p.start() for p in self.patches]
   for p in self.patches:self.addCleanup(p.stop)
  def test_closing_window_disables_only_node_and_schedules_cleanup_without_browser_polling(self):
@@ -112,7 +112,7 @@ class CleanupVerification(unittest.TestCase):
   from secure_bridge import stop
   with tempfile.TemporaryDirectory() as tmp:
    ram=Path(tmp)/'ram';ram.mkdir();runtime=Path(tmp)/'runtime';runtime.mkdir()
-   with patch('configuration.Config',return_value=SimpleNamespace(values={'enabled':{'node':False}})),patch('secure_bridge.call',side_effect=lambda method,*a,**kw:{'ok':True} if method=='ui.prepare_close' else {'busy':False}),patch('runtime.runtime_dir',return_value=runtime),patch('secure_bridge.subprocess.run',return_value=Mock(returncode=0)),patch('secure_bridge.root',return_value=ram),patch('activity_log.handoff'),patch('protected_memory.noswap_path',return_value=True):
+   with patch('configuration.Config',return_value=SimpleNamespace(values={'enabled':{'node':False}})),patch('secure_bridge.call',side_effect=lambda method,*a,**kw:{'ok':True} if method=='ui.request_close' else {'busy':False}),patch('runtime.runtime_dir',return_value=runtime),patch('secure_bridge.subprocess.run',return_value=Mock(returncode=0)),patch('secure_bridge.root',return_value=ram),patch('activity_log.handoff'),patch('protected_memory.noswap_path',return_value=True):
     self.assertIn('cleared',stop()['message'])
     (ram/'remaining-fixture').write_text('fixture')
     with self.assertRaisesRegex(ValueError,'empty protected RAM'):stop()

@@ -2,13 +2,15 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 20
+# Wallaby Agent V2 — Development Build 21
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 20 DEB](dist/wallaby-agent_2.0.0~dev20_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 21 DEB](dist/wallaby-agent_2.0.0~dev21_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
 
-Build 20 fixes the protected window's native close deadline: slow mandatory checks no longer expire an already admitted request. The ordinary overlay has no normal close button; a recovery button appears only after confirmed viewer loss and failed cleanup. Active private work still prevents cleanup. [Close/recovery details](AGENT_BUILD20_CLOSE.md).
+Build 21 fixes the confirmed native X-close wire-format fault: fractional deadlines arrived as `Decimal`, but the old guard accepted only int/float and reported every fresh request as expired. Native close and ordinary safe-stop now use an **argument-free `ui.request_close`** action with the same local protection/unfinished-work checks. Tests cover the real socket and JSON decoder, including the original failure. Known affected running older viewers also get a guarded escape button. [Root cause, recovery and verification](AGENT_BUILD21_NATIVE_CLOSE.md).
+
+Build 20 introduced viewer-loss recovery, but its native-close path remained broken until Build 21. [Corrected historical close notes](AGENT_BUILD20_CLOSE.md).
 
 The supplied Fee Estimates logs confirmed that a complete verbose mempool exceeded the 16 MiB RPC boundary. Build 20 adds **wallaby_mempool_snapshot**, a read-only, immutable public snapshot in pages of 1,000 transactions. Ordinary RPC limits and response semantics remain unchanged. **Dashboard needs the matching paging update before its estimated-block visualization will work with a large mempool.** [Dashboard change and logging suggestions](DASHBOARD_FEE_PAGING.md).
 

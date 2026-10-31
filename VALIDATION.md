@@ -1,24 +1,23 @@
-# Agent V2 Development Build 20 validation
+# Agent V2 Development Build 21 validation
 
-The accompanying Build 20 test log records the final regression/focused runs and JavaScript checks. The package-verification receipt records source/document comparisons and SHA-256. No production Core, installed Agent services, SSH/firewall rules, physical discs or pruning settings were changed.
+Final regression/focused results are in the accompanying Build21 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
 
-## Build 20 checks
+## Native close regression
 
-- Reproduced the native-close failure using an admitted four-second request followed by eight seconds of simulated mandatory OS checks. Closing now succeeds after those checks. Stale requests, active private work, lock contention and unfinished delivery/archive guards remain in force. Only the exact old-worker expiry uses its older guarded close action; other refusals never trigger that fallback.
-- Shipped ordinary-window JavaScript hides the normal close button, keeps configuration inert while a viewer is open/cleanup is pending, and exposes recovery only after confirmed viewer loss and failed cleanup. Authenticated API tests independently refuse an open/unknown viewer and absence of a cleanup failure. Successful recovery disables only the node, preserves DDNS-GO/Dashboard settings and invokes safe stop; failed stop never reports success or clears recovery evidence.
-- A real HTTP fixture returns more than 17 MiB of Core JSON. Ordinary verbose RPC still refuses its existing bound with safe byte-boundary measurements. The new local-only capture accepts the bounded larger input, extracts the explicit public fee-planning fields and returns a small page. Response handles are closed on refusal as well as success.
-- A 38,000-entry graph is captured once and delivered without missing/duplicate transactions across 38 immutable 1,000-entry pages. Exact modified fees and parent dependencies survive. Expired/replaced snapshots, invalid offsets/parameters, incomplete graphs, malformed/non-satoshi fees and overlapping capture are refused without partial projection data.
-- The current Dashboard Build 20 projection function produces identical output from normal entries and assembled snapshot fields. Real Bitcoin Core 31 regtest verifies snapshot transaction identities, virtual sizes and modified fees against ordinary getrawmempool output. Ordinary RPC shape stays unchanged.
-- New RPC is strictly public/read-only and takes no wallet endpoint. Existing private/signing/mutating direct RPC prohibitions continue. Log tests retain typed redaction, environment origins, seven UTC days/1 MiB per day, private file modes and safe handoff. New diagnostics record known local refusal categories, action/cleanup durations, capture counts and response-boundary measurements rather than payloads or raw exception text.
+The critical new test uses the actual Unix socket Handler, framing, same-user peer check, JSON encoding and production Decimal decoder. It reproduces the original Build20 validator rejecting a fresh fractional deadline before expiry. The production viewer close_allowed call now sends exactly `ui.request_close` with an empty argument list and receives an explicit successful close gate. The exact QMainWindow closeEvent body accepts its event after that real wire round trip.
 
-## Existing coverage
+Active private work and queued signed results refuse closure and do not arm closing. Legacy fresh Decimal deadlines are accepted; malformed new arguments, boolean/stale legacy deadlines are refused. The ordinary safe-stop helper uses the identical new no-argument gate. Existing archive/delivery/cleanup protections remain.
 
-The regression includes guarded mixed-worker upgrades, optional tunnel-only installation, native/private viewer boundaries, real-Core multisig/vault signing, archive restoration and BIP-322 messages, local cancellation backup/restoration, private/watch/multisig retirement, persistent sync denials, loss labels, and genuine missing-block replay with pruning unchanged.
+Known affected open Build17–20 workers may use a narrowly guarded escape route. Version/window checks are independent at the HTTP endpoint; guarded close must succeed before the node is disabled or cleanup attempted. Current, future and unknown open workers do not qualify. A busy old worker cannot be force-stopped. JavaScript verifies that only the known-legacy exception or confirmed failed cleanup exposes the ordinary recovery button.
 
-## Deployment limits and required Dashboard work
+## Existing regression coverage
 
-Native Qt/systemd/Polkit lifecycle is exercised with controlled substitutes, not a real privileged installation on wallet-laptop. The native X, log handoff and emergency cleanup still need on-device verification. No physical optical disc was written, and no production coins or wallets were used.
+The suite retains real-Core public mempool paging and exact Dashboard projection compatibility; large local HTTP versus ordinary result caps; safe diagnostic measurement/redaction/retention/handoff; native/private viewer boundaries; guarded mixed-version upgrades; optional tunnel-only installation; real-Core vault/multisig transaction and message signing; archive restoration; local cancellation backup/restore; private/watch/multisig retirement; sync exclusions; loss labels; and missing-block replay with pruning unchanged.
 
-**Dashboard must adopt the new allowlisted paging adapter before the reported large-mempool projection will succeed.** Its source was not edited. Required changes, validation rules, limits and suggested Dashboard log improvements are in DASHBOARD_FEE_PAGING.md. The 64 MiB local capture / 100,000-entry bounds and Dashboard's independent existing projection complexity limit fail explicitly; this is not an unbounded mempool implementation.
+## Deployment limits
 
-Unknown/unreachable worker state is never proof that its viewer or private work is gone. Recovery does not bypass protection, unfinished-work or delivery checks, and does not force-discard RAM. Logs/working Bitcoin data preserve the existing protected-RAM and explicitly authorised persistence boundaries documented in the README.
+The close tests mock OS protection evidence, but not the socket, JSON codec, production viewer request or worker close dispatch. An additional real PyQt6 offscreen QMainWindow test exercises the actual event: the window hides on success and remains visible on a busy refusal. It is stronger than the direct-call Build20 check and specifically covers the confirmed cause. The complete native Qt/systemd lifecycle still needs confirmation on wallet-laptop after installing Build21. No physical disc was written and no production coins were used.
+
+The user confirmed that the documented guarded ui.close command closed the currently stuck wallet-laptop viewer. No forced service kill, root RAM deletion or private-operation replay was used.
+
+Build20's Dashboard fee-paging follow-up is unchanged and still documented in DASHBOARD_FEE_PAGING.md; Build21's close fix introduces no additional Dashboard protocol requirement. Logs retain seven UTC days and 1 MiB/day, with existing protected RAM/persistence boundaries unchanged.

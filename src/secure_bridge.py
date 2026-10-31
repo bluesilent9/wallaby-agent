@@ -121,7 +121,7 @@ def compatible(state):
             prepare_stop(peer)
             _stop_service()
             fresh=_ensure_running()
-            if not current(fresh):raise WorkspaceFailure('upgrade_version','The restarted worker is still an older build. Reinstall Build 20 before reconnecting.')
+            if not current(fresh):raise WorkspaceFailure('upgrade_version','The restarted worker is still an older build. Reinstall Build 21 before reconnecting.')
             return fresh
         finally:flag.unlink(missing_ok=True)
 
@@ -142,20 +142,20 @@ def stop():
 
 def prepare_stop(peer):
     from activity_log import event
-    started=time.monotonic()
     from worker_upgrade import unsupported,inspect_legacy
     try:
-        if call('ui.prepare_close',time.monotonic()+4,timeout=40).get('ok') is not True:raise ValueError('Protected worker did not confirm closing.')
+        if call('ui.request_close',timeout=40).get('ok') is not True:raise ValueError('Protected worker did not confirm closing.')
     except WorkspaceFailure as error:
-        if str(error)=='Close request expired; no workspace state was changed.':
-            # Build17–19 can expire during mandatory protection checks. The old
-            # ui.close action performs the same local busy/delivery gate again.
-            event('workspace.close','Older worker close lease expired during protection checks; retrying its guarded local close action.')
-            call('ui.close',timeout=40);return
         if not unsupported(error):
-            event('workspace.close','Safe close refused · '+error.code+' · elapsed_ms='+str(round((time.monotonic()-started)*1000)))
+            event('workspace.close','Safe close refused · '+error.code)
             raise
-        inspect_legacy(peer)
+        # A pre-Build21 worker has no argument-free close action. Its existing
+        # ui.close performs the same unfinished-work/delivery check, without a
+        # fractional deadline, and closes only its tracked viewer children.
+        try:call('ui.close',timeout=40)
+        except WorkspaceFailure as legacy:
+            if not unsupported(legacy):raise
+            inspect_legacy(peer)
 
 def _stop_service():
     from activity_log import handoff,event
