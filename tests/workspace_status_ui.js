@@ -21,12 +21,17 @@ vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'.
  context.window.updateWorkspace({...fixture(),viewer_open:true,legacy_close_recovery:true});assert.equal(get('#close-protected-view').hidden,false);assert.match(get('#close-protected-view').textContent,/older protected window/);
  context.window.updateWorkspace({...fixture(),viewer_open:true,legacy_close_recovery:false});assert.equal(get('#close-protected-view').hidden,true);
  context.window.updateWorkspace({...fixture(),viewer_open:false,cleanup_pending:true});assert.equal(get('#protected-window-lock').hidden,false);assert.equal(get('#close-protected-view').hidden,true);
+ context.window.updateWorkspace({...fixture(),viewer_open:false,cleanup_pending:true,recovery:{expired:true}});assert.equal(get('main').inert,false);assert.equal(get('#protected-window-lock').hidden,true);
  context.window.updateWorkspace({...fixture(),viewer_open:false,cleanup_recovery:true});assert.equal(get('#close-protected-view').hidden,false);
  let pending=get('#close-protected-view').events.click();assert.match(get('#protected-lock-status').textContent,/Disconnecting node/);release({message:'Closed view.'});await pending;assert.equal(get('main').inert,false);assert.equal(get('#protected-window-lock').hidden,true);
  context.window.updateWorkspace({...fixture(),viewer_open:false,cleanup_recovery:true});pending=get('#close-protected-view').events.click();fail(Error('Finish active wallet work.'));await pending;assert.match(get('#protected-lock-status').textContent,/Finish active/);
  vm.runInContext("page='message'",context);context.window.updateWorkspace({...fixture(),protected:{running:true,viewer:true}});assert.equal(get('[data-page="services"]').disabled,true);assert.equal(get('#page-services').hidden,true);assert.equal(get('main').inert,false);
  for(const name of ['authorise','synchronisation','burn','message'])assert.equal(get('[data-page="'+name+'"]').disabled,false);
  assert.equal(get('#protected-processing').hidden,false);
+ const protectedState={...fixture(),protected:{running:true,viewer:true},recovery:{active:true,remaining:15,message:'Connection issue between the agent and Bitcoin Core'}};
+ context.window.updateWorkspace(protectedState);assert.equal(get('main').inert,true);assert.equal(get('aside').inert,true);assert.equal(get('#node-recovery-lock').hidden,false);assert.match(get('#node-recovery-message').textContent,/15 seconds/);
+ vm.runInContext("showPage('burn')",context);assert.equal(vm.runInContext('page',context),'message');
+ context.window.updateWorkspace({...protectedState,recovery:{active:false}});assert.equal(get('main').inert,false);assert.equal(get('#node-recovery-lock').hidden,true);
  const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');assert.equal(html.includes('id="stop-protected"'),false);assert.equal(html.includes('id="start-protected"'),false);
  console.log('Workspace status, inert regular page, close feedback and absent manual workspace controls: passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

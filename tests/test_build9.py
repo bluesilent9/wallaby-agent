@@ -14,7 +14,7 @@ from protected_memory import enforce,noswap_path
 from disc_backup import pack,decrypt_file,media,image,readback
 from regtest_support import Regtest
 
-BINARY='/tmp/wallaby-core31-test/bitcoin-31.0/bin/bitcoind'
+BINARY=os.environ.get('WALLABY_TEST_BITCOIND','/tmp/wallaby-core31-test/bitcoin-31.0/bin/bitcoind')
 
 class PublicAndDisc(unittest.TestCase):
  def setUp(self):

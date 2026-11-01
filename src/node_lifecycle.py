@@ -52,30 +52,32 @@ class Lifecycle:
                 return # Unavailable status is not evidence of a closed window.
             if not isinstance(state,dict) or not state.get('protected',{}).get('running'):return
             if state.get('viewer_open'):self.legacy_view_seen=True
-            closed=(state.get('window_required') is True or 'window_required' not in state and self.legacy_view_seen) and state.get('viewer_open') is False
+            recovery=state.get('recovery',{});expired=recovery.get('expired') is True
+            notice=recovery.get('message') if expired else None
+            closed=expired or (state.get('window_required') is True or 'window_required' not in state and self.legacy_view_seen) and state.get('viewer_open') is False
             if config.values['enabled']['node']:
                 if not closed:return
                 import copy
                 new=copy.deepcopy(config.values);new['enabled']['node']=False
                 apply_config(config,new)
             if state.get('busy'):
-                write_status('node','red','Node interface is off. Protected RAM was retained for unfinished wallet work. Re-enable the node to resume it.',lifecycle=True)
+                write_status('node','red',(notice+'. ' if notice else '')+'Node interface is off. Protected RAM was retained for unfinished wallet work. Re-enable the node to resume it.',lifecycle=True,recovery_notice=notice)
                 return
             flag=runtime_dir()/'workspace-closing';flag.write_text('closing\n')
-            write_status('node','amber','Node disconnected. Closing its protected workspace and clearing RAM…',lifecycle=True)
-            self.thread=threading.Thread(target=self.clean,daemon=True);self.thread.start()
-    def clean(self):
+            write_status('node','amber','Node disconnected. Closing its protected workspace and clearing RAM…',lifecycle=True,recovery_notice=notice)
+            self.thread=threading.Thread(target=self.clean,args=(notice,),daemon=True);self.thread.start()
+    def clean(self,notice=None):
         from secure_bridge import stop,call
         from runtime import write_status,runtime_dir
         try:
             stop()
             self.legacy_view_seen=False
-            write_status('node','red','Off · protected window closed and workspace cleared.',lifecycle=True)
+            write_status('node','red',(notice+'. Automatic reconnection failed after 15 seconds. Turn on the node interface to retry.' if notice else 'Off · protected window closed and workspace cleared.'),lifecycle=True,recovery_notice=notice)
         except Exception as error:
             from activity_log import event
             from secure_bridge import WorkspaceFailure
             code=error.code if isinstance(error,WorkspaceFailure) else 'cleanup_unconfirmed'
             event('workspace.cleanup','Cleanup did not confirm completion · '+code+' · '+type(error).__name__)
             self.retry_after=time.monotonic()+30
-            write_status('node','red','Node interface is off, but protected workspace cleanup did not confirm completion. Keep the computer awake; re-enable the node to inspect unfinished work.',lifecycle=True,cleanup_failed=True)
+            write_status('node','red',(notice+'. ' if notice else '')+'Node interface is off, but protected workspace cleanup did not confirm completion. Keep the computer awake; re-enable the node to inspect unfinished work.',lifecycle=True,cleanup_failed=True,recovery_notice=notice)
         finally:(runtime_dir()/'workspace-closing').unlink(missing_ok=True)

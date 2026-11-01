@@ -4,7 +4,7 @@ function el(tag,props={},...children){const e=document.createElement(tag);for(co
 function button(label,klass,action){const b=el('button',{type:'button',class:klass},label);b.addEventListener('click',()=>run(action));return b;}
 async function run(action){if(working)return;working=true;notify();try{await action();}catch(error){notify(error);}finally{working=false;await refresh(true);}}
 function pipe(value){let n=BigInt(value),neg=n<0n;n=neg?-n:n;return(neg?'−':'')+'₿ '+(n/100000000n)+'.'+String(n/1000000n%100n).padStart(2,'0')+' | '+String(n%1000000n).padStart(6,'0')+' sats';}
-function showPage(next){if(workspace?.protected?.viewer?next==='services':next!=='services')return;page=next;for(const p of ['services','authorise','synchronisation','burn','message']){$('#page-'+p).hidden=p!==next;document.querySelector('[data-page="'+p+'"]').classList.toggle('current',p===next);}if(next==='authorise')renderApprovals();updateNotices();if(next==='burn')window.renderBurn?.();if(next==='message'&&!$('#message-wallets').children.length&&typeof loadMessageWallets==='function')run(loadMessageWallets);}
+function showPage(next){if(workspace?.protected?.viewer&&workspace?.recovery?.active)return;if(workspace?.protected?.viewer?next==='services':next!=='services')return;page=next;for(const p of ['services','authorise','synchronisation','burn','message']){$('#page-'+p).hidden=p!==next;document.querySelector('[data-page="'+p+'"]').classList.toggle('current',p===next);}if(next==='authorise')renderApprovals();updateNotices();if(next==='burn')window.renderBurn?.();if(next==='message'&&!$('#message-wallets').children.length&&typeof loadMessageWallets==='function')run(loadMessageWallets);}
 for(const b of document.querySelectorAll('[data-page]'))b.addEventListener('click',()=>showPage(b.dataset.page));
 function renderProtection(w){
  const active=!!w?.protected?.running,changing=!!workspaceAction;
@@ -26,16 +26,18 @@ async function closeProtectedView(){
 $('#close-protected-view').addEventListener('click',closeProtectedView);
 $('#resume-older-workspace').addEventListener('click',()=>run(async()=>{const result=await api('protected/open',{page:'authorise'});notify({message:result.message});}));
 function windowMode(w){
- const viewer=!!w?.protected?.viewer,legacy=!!w?.legacy_close_recovery&&!viewer,recover=(!!w?.cleanup_recovery||legacy)&&!viewer,locked=!viewer&&(!!w?.viewer_open||recover||!!w?.cleanup_pending);
+ const viewer=!!w?.protected?.viewer,legacy=!!w?.legacy_close_recovery&&!viewer,recover=(!!w?.cleanup_recovery||legacy)&&!viewer,reconnecting=viewer&&!!w?.recovery?.active,recoveryExit=!viewer&&!!w?.recovery?.expired&&!w?.viewer_open,locked=!viewer&&(!!w?.viewer_open||recover||!!w?.cleanup_pending&&!recoveryExit);
  $('#close-protected-view').hidden=!recover;
  $('#close-protected-view').textContent=legacy?'Close older protected window safely':'Clean up protected workspace';
  $('#protected-lock-title').textContent=legacy?'Older protected window needs an upgrade':recover?'Protected workspace needs cleanup':w?.cleanup_pending?'Protected workspace is closing':'Protected window is open';
  $('#protected-lock-explanation').textContent=legacy?'This older worker has the known native-close fault. Use the guarded escape button to close it safely before upgrading.':recover?'The protected window is no longer present, but RAM cleanup was not confirmed. Use the recovery button to retry safe cleanup.':w?.cleanup_pending?'The protected window has closed. Wait for node disconnection, log handoff and protected RAM cleanup to finish.':'Continue Bitcoin work in the protected window. Regular configuration is locked until that window closes.';
- for(const selector of ['aside','main']){const area=document.querySelector(selector);area.inert=locked;area.classList.toggle('regular-locked',locked);}
+ for(const selector of ['aside','main']){const area=document.querySelector(selector);area.inert=locked||reconnecting;area.classList.toggle('regular-locked',locked||reconnecting);}
  $('#protected-window-lock').hidden=!locked;
+ $('#node-recovery-lock').hidden=!reconnecting;
+ $('#node-recovery-message').textContent=reconnecting?w.recovery.message+'. Reconnecting… '+w.recovery.remaining+' seconds remaining.':'';
  for(const name of ['services','authorise','synchronisation','burn','message'])document.querySelector('[data-page="'+name+'"]').disabled=name==='services'?viewer:!viewer;
  $('#protected-processing').hidden=!viewer;
- $('#resume-older-workspace').hidden=viewer||!w?.protected?.running||w.worker_version==='2.0.0~dev21';
+ $('#resume-older-workspace').hidden=viewer||!w?.protected?.running||w.worker_version==='2.0.0~dev22';
  $('#page-services').hidden=viewer||page!=='services';
  if(viewer&&page==='services')showPage(initialPage==='services'?'authorise':initialPage);
 }

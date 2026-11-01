@@ -49,7 +49,7 @@ class DiagnosticsTests(unittest.TestCase):
  def test_rpc_failure_prevents_registration_and_green(self):
   status=Mock();client=NodeClient({},1234,threading.Event(),status);original=ConnectionFailure('rpc','cookie_missing','Choose the cookie.')
   with patch.object(client.core,'ready',side_effect=original),patch.object(client,'post') as post,self.assertRaises(ConnectionFailure) as failure:client.run()
-  self.assertIs(failure.exception,original);post.assert_not_called();status.assert_not_called()
+  self.assertIs(failure.exception,original);post.assert_not_called();status.assert_called_once_with('red',str(original))
  def test_first_session_failure_is_preserved(self):
   client=NodeClient({},1234,threading.Event(),Mock());original=ConnectionFailure('rpc','refused','Local RPC refused connection.')
   client.fail(original);client.fail(HTTPFailure(401));self.assertIs(client.error,original);self.assertEqual(client.status.call_count,1);client.pool.shutdown()

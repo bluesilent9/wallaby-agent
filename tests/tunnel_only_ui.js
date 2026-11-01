@@ -34,4 +34,12 @@ const box=commandPanel.items[0];assert.equal(box.items[0].items[0].textContent,s
  reject(Error('Protected workspace setup was cancelled.'));await pending;assert.equal(get('node:.dot').className,'dot red');assert.match(get('node:.status-text').textContent,/cancelled/);assert.equal(state.config.enabled.node,false);
  vm.runInContext('render(fixture)',sandbox);assert.match(get('node:.status-text').textContent,/cancelled/);
  pending=vm.runInContext("change('toggle',{service:'node',enabled:true},document.querySelector('[unused]'))",sandbox);await new Promise(setImmediate);state.config.enabled.node=true;state.status.node={color:'amber',message:'Checking Bitcoin Core RPC…'};accept({ok:true});await pending;
- assert.equal(get('node:.status-text').textContent,'Checking Bitcoin Core RPC…');assert.equal(get('node:.switch').attributes['aria-checked'],'true');console.log('Node toggle: preparation progress, retained local failure, retry and runtime diagnostics passed.');})().catch(e=>{console.error(e);process.exitCode=1;});
+ assert.equal(get('node:.status-text').textContent,'Checking Bitcoin Core RPC…');assert.equal(get('node:.switch').attributes['aria-checked'],'true');console.log('Node toggle: preparation progress, retained local failure, retry and runtime diagnostics passed.');
+// Timeout diagnostics survive the node toggle switching off and stay on Services.
+const notice='Connection issue between the agent and Bitcoin Core';
+state.status.node={color:'red',message:notice,lifecycle:true,recovery_notice:notice};
+state.node_support={available:true};state.config.enabled.node=false;sandbox.fixture=state;vm.runInContext('nodeFeedback=null;render(fixture)',sandbox);
+assert.match(get('#message').textContent,/Bitcoin Core/);assert.match(get('#message').textContent,/15 seconds/);assert.equal(get('node:.status-text').textContent,notice);
+
+})().catch(e=>{console.error(e);process.exitCode=1;});
+

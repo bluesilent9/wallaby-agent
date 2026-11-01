@@ -15,7 +15,7 @@ from disc_restore import Archives
 from message_signing import Messages,maps,challenge
 from wallet_preview import fingerprint
 from test_build8 import paired
-BINARY='/tmp/wallaby-core31-test/bitcoin-31.0/bin/bitcoind'
+BINARY=os.environ.get('WALLABY_TEST_BITCOIND','/tmp/wallaby-core31-test/bitcoin-31.0/bin/bitcoind')
 
 class Redundancy(unittest.TestCase):
  def test_streamed_copies_recover_after_bad_header_and_bad_payload_without_capacity_allocation(self):

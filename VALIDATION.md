@@ -1,6 +1,10 @@
-# Agent V2 Development Build 21 validation
+# Agent V2 Development Build 22 validation
 
-Final regression/focused results are in the accompanying Build21 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+Final regression/focused results are in the accompanying Build22 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+
+## Build 22 connection recovery
+
+New recovery tests exercise the real request-cap exception, stale-heartbeat 401, monotonic 15-second deadline, successful replacement session, stale callback isolation, worker-side operation refusal over actual framed JSON IPC, independent timeout closure with a held wallet lock, Core/Dashboard notices, guarded cleanup and retained private work. The protected UI is inert during recovery and returns on success. Initial connection failures remain distinct from loss of an established connection. See AGENT_BUILD22_RECOVERY.md.
 
 ## Native close regression
 
@@ -16,7 +20,7 @@ The suite retains real-Core public mempool paging and exact Dashboard projection
 
 ## Deployment limits
 
-The close tests mock OS protection evidence, but not the socket, JSON codec, production viewer request or worker close dispatch. An additional real PyQt6 offscreen QMainWindow test exercises the actual event: the window hides on success and remains visible on a busy refusal. It is stronger than the direct-call Build20 check and specifically covers the confirmed cause. The complete native Qt/systemd lifecycle still needs confirmation on wallet-laptop after installing Build21. No physical disc was written and no production coins were used.
+The close tests mock OS protection evidence, but not the socket, JSON codec, production viewer request or worker close dispatch. An additional real PyQt6 offscreen QMainWindow test exercises the actual event: the window hides on success and remains visible on a busy refusal. It is stronger than the direct-call Build20 check and specifically covers the confirmed cause. The complete native Qt/systemd lifecycle still needs confirmation on wallet-laptop after installing Build22. No physical disc was written and no production coins were used.
 
 The user confirmed that the documented guarded ui.close command closed the currently stuck wallet-laptop viewer. No forced service kill, root RAM deletion or private-operation replay was used.
 

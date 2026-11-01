@@ -21,7 +21,7 @@ class HTTPFailure(Exception):
     def __init__(self,status):self.status=status;super().__init__('HTTP request failed (%d).'%status)
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1',response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev21'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev22'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -119,8 +119,9 @@ class NodeClient:
         except Exception as error:raise describe('dashboard',error) from None
     def fail(self,error):
         with self.lock:
-            if self.error is not None:return
+            if self.error is not None or self.failed.is_set():return
             self.error=describe('dashboard',error);self.failed.set()
+        if getattr(self,'on_failure',None):self.on_failure(self.error)
         self.status('red',str(self.error))
     def consume(self,response):
         if not isinstance(response,dict):raise protocol_failure('response_object','Expected a JSON object.')
@@ -163,11 +164,12 @@ class NodeClient:
         except Exception as error:self.fail(error)
         finally:self.pending.release()
     def heartbeat(self):
-        while not self.stop.wait(15) and not self.failed.is_set():
+        while not self.stop.wait(5) and not self.failed.is_set():
             try:
                 self.check_core()
                 if self.stop.is_set() or self.failed.is_set():return
-                self.consume(self.post('heartbeat',{}));self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
+                self.consume(self.post('heartbeat',{},timeout=5))
+                if not self.stop.is_set() and not self.failed.is_set():self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
             except Exception as error:self.fail(error)
     def run(self):
         try:
@@ -176,7 +178,7 @@ class NodeClient:
             self.status('amber','Local Bitcoin Core RPC connected. Registering with Wallaby Dashboard…')
             try:mac=adapter_mac()
             except Exception:raise ConnectionFailure('node_identity','adapter','No usable local network adapter identity was found. Check the network interface before registering this node.') from None
-            r=self.post('register',{'mac':mac,'hostname':socket.gethostname().split('.')[0],'rpc':{'version':1,'methods':sorted(METHODS)}})
+            r=self.post('register',{'mac':mac,'hostname':socket.gethostname().split('.')[0],'rpc':{'version':1,'methods':sorted(METHODS)}},timeout=5)
             if self.stop.is_set():return
             if not isinstance(r,dict) or r.get('protocol')!='wallaby-agent' or r.get('version')!=1 or not isinstance(r.get('connection_token'),str) or not r['connection_token']:
                 raise ConnectionFailure('dashboard','protocol','Dashboard registration returned an incompatible Agent protocol or no session token. Check the Dashboard Agent service/version on port 56443.')
@@ -186,9 +188,12 @@ class NodeClient:
             exchange_thread=threading.Thread(target=exchange.run,args=(self.failed,),daemon=True);self.threads.append(exchange_thread);exchange_thread.start()
             self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
             thread=threading.Thread(target=self.heartbeat,daemon=True);self.threads.append(thread);thread.start()
-            while not self.stop.is_set() and not self.failed.is_set():self.consume(self.post('poll',{'wait_seconds':20},timeout=25))
+            while not self.stop.is_set() and not self.failed.is_set():self.consume(self.post('poll',{'wait_seconds':2},timeout=5))
             if self.failed.is_set():raise self.error or ConnectionFailure('dashboard','session','Dashboard node session ended unexpectedly. Check the Dashboard Agent service.')
         except Exception as error:
+            # Record the first failure before disconnect/late heartbeat callbacks.
+            # A session-limit rotation must not be overwritten by its old token's 401.
+            self.fail(error)
             raise self.error or describe('dashboard',error) from None
         finally:
             self.failed.set()

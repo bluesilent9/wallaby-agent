@@ -126,20 +126,25 @@ def worker(kind):
             last_failure=failure.detail()
             print(f'Wallaby Agent: stage={failure.stage} code={failure.code} type={type(error).__name__}: {failure}',file=sys.stderr,flush=True)
         finally:
+            if kind=='node' and failure is not None:
+                try:
+                    from secure_bridge import call
+                    call('node.connection_lost',failure.stage if failure.stage in ('rpc','dashboard','ssh','ssh_forward','ssh_local') else 'dashboard',failure.code,timeout=2)
+                except (ValueError,OSError):pass
             if session_stop is not None:session_stop.set()
             if tunnel is not None:tunnel.close()
         if stop.is_set():break
         if failure and failure.code=='master_wait':
             publish('amber',str(failure),tunnel=False,stage='ssh');stop.wait(2);continue
         if fingerprint(Config().values)!=fingerprint(config):continue
-        retry=delay+random.uniform(0,3)
+        retry=(3 if kind=='node' else delay)+random.uniform(0,.3 if kind=='node' else 3)
         publish('red',str(failure)+' Retrying automatically.',tunnel=False,stage=failure.stage,code=failure.code,retry_at=time.time()+retry)
         stop.wait(retry);delay=min(300,delay*2)
-    publish('red','Off',tunnel=False)
+    if not read_status(kind).get('lifecycle'):publish('red','Off',tunnel=False)
 
 def monitor():
     retire_jellyfin()
-    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev21','pid':os.getpid()}))
+    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev22','pid':os.getpid()}))
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     from node_lifecycle import Lifecycle
     lifecycle=Lifecycle()
@@ -189,7 +194,7 @@ def monitor():
                     failure=master.failure();status=('red',str(failure)+' Retrying automatically.')
                     extra={'stage':failure.stage,'code':failure.code,'retry_at':time.time()+delay}
                     master.close();master=None;(runtime_dir()/'master.json').unlink(missing_ok=True)
-                    due=now+delay+random.uniform(0,3);delay=min(300,delay*2)
+                    due=now+(2 if cfg['enabled']['node'] else delay)+random.uniform(0,.3 if cfg['enabled']['node'] else 3);delay=min(300,delay*2)
                 else:status=('amber','Authenticating SSH over IPv6…')
             write_status('server',*status,tunnel=status[0]=='green',**extra)
             notify_approvals();stop.wait(1)

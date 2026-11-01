@@ -35,6 +35,8 @@ def delivery_pending(state):
 
 class Workspace:
     def __init__(self):
+        from node_recovery import Recovery
+        self.recovery=Recovery();self.node_epoch=0
         self.store=Store(root()/ 'state');self.store.identity_root=Config().root
         # Never replay the legacy non-volatile approvals.json into a new workspace.
         # Only the schema-limited denial store survives workspace shutdown.
@@ -72,12 +74,77 @@ class Workspace:
         s=self.store.read();return bool(self.archives and (self.archives.reading) or s.get('history_jobs') or any(v.get('proposal',{}).get('kind')=='builder_cancel' for v in s['pending'].values()) or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
     def state(self):
         saved=self.store.read()
-        try:self.ops.core.ready();connected=self.node_status['color']=='green'
-        except Exception:connected=False
-        return {'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn') and not v.get('cancel_requested')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
+        connected=self.node_status['color']=='green'
+        return {'recovery':self.recovery_state(),'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn') and not v.get('cancel_requested')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
     def service_status(self):
-        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'worker_version':VERSION,'worker_protocol':PROTOCOL,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
+        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'recovery':self.recovery_state(),'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'worker_version':VERSION,'worker_protocol':PROTOCOL,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
         self._service_snapshot=dict(result);return result
+    def recovery_state(self):
+        return self.recovery.snapshot() if hasattr(self,'recovery') else {}
+    def connection_lost(self,error):
+        from diagnostics import describe
+        from activity_log import event
+        with self.recovery.lock:
+            failure=describe('dashboard',error);before=self.recovery_state()
+            self.recovery.lost(failure);state=self.recovery_state()
+            if state.get('active'):
+                event('node.recovery',('Retry failed' if before.get('active') else 'Started')+' · '+failure.stage+' · '+failure.code+' · budget_seconds=15 · remaining='+str(state['remaining']))
+                self.node_status={'color':'amber','message':state['message']+'. Reconnecting for up to 15 seconds…','recovery':state}
+            else:self.node_status={'color':'red','message':str(failure),'failure':failure.detail(),'failed':True}
+    def recovery_watch(self,generation):
+        # Never block the deadline behind a Core call, a long poll or a password
+        # dialogue. Only tracked UI children close here; private RAM survives until
+        # the ordinary lifecycle confirms no operation/archive/delivery is active.
+        while self.node_generation==generation:
+            state=self.recovery_state()
+            if self.recovery.tick():
+                state=self.recovery_state()
+                from activity_log import event
+                self.closing=True
+                if self.node_stop:self.node_stop.set()
+                event('node.recovery','Expired · '+state['stage']+' · '+state['code']+' · budget_seconds=15')
+                for process in list(self.viewers):
+                    if process.poll() is None:
+                        try:process.terminate()
+                        except ProcessLookupError:pass
+                return
+            if self.node_stop.is_set() and not state.get('active'):return
+            time.sleep(.2)
+    def start_node(self,port):
+        from node_client import NodeClient
+        from activity_log import event
+        if self.recovery_state().get('expired'):raise ValueError('Connection recovery expired. Re-enable the node interface on Services to retry.')
+        self.node_generation=__import__('secrets').token_hex(16);generation=self.node_generation
+        self.node_stop=threading.Event();stop=self.node_stop;self.node_port=port
+        if not self.recovery_state().get('active'):self.node_status={'color':'amber','message':'Connecting the protected node interface.'}
+        def work():
+            while not stop.is_set() and self.node_generation==generation and not self.recovery_state().get('expired'):
+                self.node_epoch+=1;epoch=self.node_epoch;self.recovery.attempt+=1
+                if self.recovery_state().get('active'):event('node.recovery','Attempt · '+str(self.recovery.attempt)+' · remaining='+str(self.recovery_state()['remaining']))
+                failed=threading.Event()
+                def current(epoch=epoch,failed=failed):return self.node_generation==generation and self.node_epoch==epoch and not stop.is_set() and not failed.is_set()
+                def failure(error,current=current,failed=failed):
+                    with self.recovery.lock:
+                        if current():
+                            failed.set();self.connection_lost(error)
+                def status(color,message,current=current):
+                    with self.recovery.lock:
+                        if not current() or color=='red':return
+                        if color=='green':
+                            recovering=self.recovery_state().get('active')
+                            if not self.recovery.connected():return
+                            if recovering:event('node.recovery','Recovered · fresh authenticated session · attempt='+str(self.recovery.attempt))
+                        elif self.recovery_state().get('active'):return
+                        if self.node_status.get('color')!=color or self.node_status.get('message')!=message:event('node.connection',color+' · '+message)
+                        self.node_status={'color':color,'message':message}
+                client=NodeClient(self.ops.core.config,port,stop,status);client.on_failure=failure
+                try:client.run()
+                except Exception as error:failure(error)
+                if not self.recovery_state().get('active'):return
+                if stop.wait(2):return
+        self.node=threading.Thread(target=work,daemon=True);self.node.start()
+        threading.Thread(target=self.recovery_watch,args=(generation,),daemon=True).start()
+        return {'session':generation}
     def begin_close(self,deadline=None):
         if self.busy() or self.archives and (self.archives.loaded or self.archives.staged) or delivery_pending(self.store.read()):raise ValueError('Finish active wallet work, wait for queued Dashboard deliveries and unload archival wallets before closing the protected window and disconnecting its node.')
         if deadline is not None and time.monotonic()>=deadline:raise ValueError('Close request expired; no workspace state was changed.')
@@ -136,6 +203,13 @@ class Workspace:
             try:
                 enforce();self.begin_close();return {'ok':True}
             finally:self.lock.release()
+        if method=='node.connection_lost':
+            enforce()
+            from diagnostics import ConnectionFailure
+            if len(args)!=2 or args[0] not in ('rpc','dashboard','ssh','ssh_forward','ssh_local') or not isinstance(args[1],str) or not __import__('re').fullmatch('[a-z][a-z0-9_]{0,63}',args[1]):raise ValueError('Invalid connection failure category.')
+            self.connection_lost(ConnectionFailure(args[0],args[1],'Node transport interrupted.'))
+            if self.node_stop:self.node_stop.set()
+            return {'ok':True}
         if method in ('node.status','node.stop'):
             enforce()
             if len(args)!=1 or args[0]!=self.node_generation:return {'color':'red','message':'Node session changed. Reconnecting.','failed':True}
@@ -149,7 +223,7 @@ class Workspace:
             if not self.lock.acquire(blocking=False):
                 enforce()
                 result=dict(getattr(self,'_service_snapshot',{'pending':[],'denied':[],'transfer':{},'burn':{},'outbox_count':0}))
-                result.update(worker_version=VERSION,worker_protocol=PROTOCOL,connected=self.node_status['color']=='green',protected={'running':True,'viewer':False},busy=True,window_required=getattr(self,'window_required',False),viewer_open=any(p.poll() is None for p in self.viewers),sync='A protected operation is in progress. Continue in the protected window.')
+                result.update(recovery=self.recovery_state(),worker_version=VERSION,worker_protocol=PROTOCOL,connected=self.node_status['color']=='green',protected={'running':True,'viewer':False},busy=True,window_required=getattr(self,'window_required',False),viewer_open=any(p.poll() is None for p in self.viewers),sync='A protected operation is in progress. Continue in the protected window.')
                 return result
             try:
                 enforce();self.configure(environment);return self.service_status()
@@ -157,6 +231,8 @@ class Workspace:
         with self.lock:
             enforce();self.configure(environment)
             if getattr(self,'closing',False) and method not in ('ui.arm','ui.close'):raise ValueError('The protected workspace is closing. Reconnect the node before starting another operation.')
+            if self.recovery_state().get('active') and method not in ('status','ui.arm','ui.close','ui.open','node.start'):
+                raise ValueError('Node connection recovery is in progress. Protected operations are paused; no operation was started.')
             saved=self.store.read()
             changing=method in ('wallet.sign','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm')
             if changing and args:
@@ -170,6 +246,7 @@ class Workspace:
                 if candidate.get('kind')!='builder_cancel' and (candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']):raise ValueError('Finish the current wallet setup and its physical backups first.')
             if method=='service_status':return self.service_status()
             if method=='ui.arm':
+                if hasattr(self,'recovery'):self.recovery.reset()
                 self.closing=False
                 if not any(p.poll() is None for p in self.viewers):self.window_required=False
                 return {'ok':True}
@@ -181,21 +258,7 @@ class Workspace:
                 if self.node and self.node.is_alive():
                     if port!=self.node_port or self.node_stop.is_set():raise ValueError('Previous node session is still closing.')
                     return {'session':self.node_generation}
-                self.node_generation=__import__('secrets').token_hex(16);self.node_stop=threading.Event();self.node_port=port;self.node_status={'color':'amber','message':'Connecting the protected node interface.'}
-                from node_client import NodeClient
-                from diagnostics import describe
-                def status(color,message):
-                    from activity_log import event
-                    if self.node_status.get('color')!=color or self.node_status.get('message')!=message:event('node.connection',color+' · '+message)
-                    self.node_status={'color':color,'message':message}
-                def work():
-                    try:NodeClient(self.ops.core.config,port,self.node_stop,status).run()
-                    except Exception as error:
-                        failure=describe('rpc',error)
-                        from activity_log import event
-                        event('node.connection','Failed · '+failure.stage+' · '+failure.code)
-                        self.node_status={'color':'red','message':str(failure),'failure':failure.detail(),'failed':True}
-                self.node=threading.Thread(target=work,daemon=True);self.node.start();return {'session':self.node_generation}
+                return self.start_node(port)
             if method=='status':return self.state()
             if method=='core.health':self.ops.core.ready();return {'ok':True}
             if method=='core.public':
@@ -230,7 +293,7 @@ class Workspace:
             if method=='setup.cancel':return self.setup.cancel(*args)
             if method=='setup.participate':return self.setup.approve_proposal(*args)
             if method in ('disc.read','disc.load','disc.unload','message.wallets','message.prepare','message.sign'):
-                if self.node_status['color']!='green':raise ValueError('Connect the Bitcoin Core Node Dashboard Interface before using Disc Operations or Sign Message.')
+                if self.node_status['color']!='green':raise ValueError('The node connection is recovering. Protected operations are paused; no operation was started.')
                 if saved.get('setup_active') or saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):raise ValueError('Finish the current wallet setup, transfer or history operation first.')
             if method=='disc.read':
                 if self.archives.reading:raise ValueError('An optical read is already active.')

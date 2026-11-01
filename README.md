@@ -2,11 +2,15 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 21
+# Wallaby Agent V2 — Development Build 22
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 21 DEB](dist/wallaby-agent_2.0.0~dev21_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 22 DEB](dist/wallaby-agent_2.0.0~dev22_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 22 automatically recovers an established node connection for **15 seconds**. The entire protected window is greyed and inert while fresh authenticated sessions are attempted; a successful connection restores it. If recovery expires, the tracked window closes, only the node service switches off, and Services displays whether the failure was **Agent ↔ Dashboard** or **Agent ↔ Bitcoin Core**. Active wallet work, archives and queued results retain protected RAM for explicit resumption; idle workspaces hand off diagnostics and clear RAM normally. [Recovery and investigation](AGENT_BUILD22_RECOVERY.md).
+
+The supplied log confirmed an Agent session-request-limit failure, followed by an old heartbeat's authentication error overwriting the terminal status. Build 22 keeps the first failure, prevents stale callbacks from changing a replacement session, and automatically registers a fresh session without clearing the active token's replay-protection set or replaying acknowledged RPC requests. The Dashboard chat also identified a server liveness gap: authenticated RPC results and Agent exchanges did not refresh its connection timer. Its Build 23 work addresses that independently. No new Dashboard protocol is required for Agent recovery.
 
 Build 21 fixes the confirmed native X-close wire-format fault: fractional deadlines arrived as `Decimal`, but the old guard accepted only int/float and reported every fresh request as expired. Native close and ordinary safe-stop now use an **argument-free `ui.request_close`** action with the same local protection/unfinished-work checks. Tests cover the real socket and JSON decoder, including the original failure. Known affected running older viewers also get a guarded escape button. [Root cause, recovery and verification](AGENT_BUILD21_NATIVE_CLOSE.md).
 

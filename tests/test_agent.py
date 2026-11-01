@@ -79,7 +79,7 @@ class RPCTests(unittest.TestCase):
  def test_node_never_green_without_core(self):
   status=Mock();n=NodeClient(Config().values,1234,threading.Event(),status)
   with patch.object(n.core,'ready',side_effect=ConnectionError),self.assertRaises(ConnectionError):n.run()
-  status.assert_not_called();n.pool.shutdown()
+  self.assertNotIn('green',[c.args[0] for c in status.call_args_list]);n.pool.shutdown()
 
 class WebSecurityTests(unittest.TestCase):
  def setUp(self):
@@ -104,7 +104,7 @@ class WebSecurityTests(unittest.TestCase):
  def test_retired_service_is_not_exposed_or_accepted(self):
   headers={'Authorization':'Bearer secret','Content-Type':'application/json'}
   code,data=self.call('/api/state',headers)
-  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development Build 21')
+  self.assertEqual(code,200);self.assertEqual(data['version'],'V2 Development Build 22')
   self.assertEqual(set(data['config']['enabled']),{'ddns','dashboard','node'});self.assertNotIn('jellyfin',data['status'])
   self.assertEqual(self.call('/api/toggle',headers,json.dumps({'service':'jellyfin','enabled':True}))[0],400)
  def test_dashboard_toggle_does_not_require_cookie_or_enable_node(self):
