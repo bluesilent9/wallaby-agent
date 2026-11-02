@@ -59,16 +59,21 @@ class BatchTransfer(Transfer):
         if not isinstance(credentials,dict) or set(credentials)!=peers:raise ValueError('Enter receiving credentials and independently verified SSH fingerprint for each receiving computer.')
         for data in credentials.values():
             if not isinstance(data,dict) or set(data)!={'username','password','fingerprint'}:raise ValueError('Invalid receiving credentials.')
-        freeze(self.store,keys,'send');self.error=''
+        freeze(self.store,keys,'send');self.error='';skipped=0
         try:
             for key in keys:
                 current=self.store.read()['pending'].get(key)
-                if not current or current.get('withdrawn'):continue
+                if not current or current.get('withdrawn'):skipped+=1;continue
                 with self.store.edit() as s:s['active_transfer']=key
                 data=credentials[current['proposal']['peer']['node_id']]
                 super().send(key,**data)
             completed=self.store.read()['completed']
             if all(k in completed for k in keys):self.success_until=time.time()+5
+            elif skipped:
+                self.error='Synchronisation batch interrupted: '+str(sum(k in completed for k in keys))+' of '+str(len(keys))+' selected transfers completed. Dashboard withdrew '+str(skipped)+' selected requests, which were skipped. Review the current list; no operation was automatically repeated.'
+                from activity_log import event
+                event('sync.batch',self.error)
+                raise ValueError(self.error)
         finally:
             release(self.store)
             for data in credentials.values():data['password']=None

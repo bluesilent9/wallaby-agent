@@ -31,6 +31,14 @@ def dashboard(source,root,port="0"):
  original=node_health.classify
  node_health.classify=lambda info:original(dict(info,chain='main')) # Test coins only.
  Path(root).mkdir(parents=True,exist_ok=True);registry=NodeRegistry(Path(root)/'config.cfg');server=create_agent_server(registry,port=int(port),ipv4=False);server.start()
+ original_exchange=registry.hub.exchange
+ def measured_exchange(*args,**kwargs):
+  started=time.monotonic()
+  try:return original_exchange(*args,**kwargs)
+  finally:
+   elapsed=time.monotonic()-started
+   if elapsed>1:print('FIXTURE exchange elapsed_seconds='+str(round(elapsed,3)),file=sys.stderr,flush=True)
+ registry.hub.exchange=measured_exchange
  def poll_nodes():
   while True:
    try:
@@ -41,6 +49,11 @@ def dashboard(source,root,port="0"):
  threading.Thread(target=poll_nodes,daemon=True).start();reply({'port':server.server_port,'polling':'production-health'})
  def control(c):
   if c['op']=='advance':clock['offset']=c['seconds'];return True
+  if c['op']=='clear_profile':
+   from profile_archive import ProfileArchive
+   with registry.lock:
+    ProfileArchive(registry.config).replace();registry.reset()
+   return {'cleared':True}
   if c['op']=='status':
    state=registry.hub.read();result={}
    for token,row in list(registry.connections.items()):
@@ -93,6 +106,8 @@ def agent(source,config):
  thread=threading.Thread(target=connect,daemon=True);thread.start();reply({'started':c['name']})
  def control(x):
   if x['op']=='advance':clock['offset']=x['seconds'];return True
+  if x['op']=='rotate_ipv6':
+   c['ipv6']=x['ipv6'];Path(config).write_text(json.dumps(c));return True
   if x['op']=='status':
    state=store.read();listing=rows(store)
    return {'rows':len(listing),'send':sum(r['direction']=='send' for r in listing),'receive':sum(r['direction']=='receive' for r in listing),'previews':len(state.get('transfer_previews',{})),'peers':len({r['peer_id'] for r in listing}),'excluded':len(state.get('sync_exclusions',{})),'completed':len(state['completed']),'outbox':len(state['outbox']),'error':state.get('exchange_error'),'thread_errors':errors,'transfer_error':transfer.error,'wallets':rpc(core,'listwallets')}
@@ -112,7 +127,7 @@ def agent(source,config):
    for row in rows(store):
     if row['direction']=='send':
      p=state['pending'][row['id']]['proposal'];choose(store,row['id'],True,p['public_wallet']['wallet_name']!='hot01');credentials[p['peer']['node_id']]={'username':'fixture','password':'fixture-not-a-real-password','fingerprint':c['host_fingerprint']}
-   transfer.send_batch(credentials);return {'completed':len(store.read()['completed']),'credentials_cleared':all(d['password'] is None for d in credentials.values())}
+   transfer.send_batch(credentials);state=store.read();return {'completed':len(state['completed']),'credentials_cleared':all(d['password'] is None for d in credentials.values()),'remaining':[{'wallet':r['proposal']['public_wallet']['wallet_name'],'direction':r['proposal'].get('direction'),'peer':r['proposal'].get('peer',{}).get('hostname'),'state':r['state'],'withdrawn':r.get('withdrawn',False)} for r in state['pending'].values()],'transfer_error':transfer.error}
   if x['op']=='stop':stop.set();transfer.close();thread.join(8);return {'stopped':not thread.is_alive()}
   raise ValueError('Unknown fixture command')
  commands(control)
@@ -166,6 +181,7 @@ def coordinator(agent_source,dashboard_source,out):
   for i,name in enumerate(('wallet-laptop','treasury-australia','treasury-russia')):
    folder=base/name;folder.mkdir();config=folder/'role.json';configs.append(config);roles.append({'root':str(folder),'name':name,'core':nodes[i].core.config,'ipv6':'2001:db8::'+str(i+1),'mac':'02:aa:00:00:00:0'+str(i+1),'port':port,'hostkey':hostkey,'host_fingerprint':fp})
   peers={r['ipv6']:str(p) for r,p in zip(roles,configs)}
+  peers['2001:db8::12']=str(configs[1]) # Alternate address for the same real receiver process.
   for config,r in zip(configs,roles):r['peers']=peers;config.write_text(json.dumps(r))
   agents={}
   for i in (1,2,0):agents[roles[i]['name']]=Process(['agent',agent_source,str(configs[i])],output/(roles[i]['name']+'-stderr.log'));processes.append(agents[roles[i]['name']])
@@ -176,12 +192,27 @@ def coordinator(agent_source,dashboard_source,out):
     current=states();signature={n:(s['rows'],s['previews'],s['excluded']) for n,s in current.items()}
     if signature!=last:stage('queue_progress',counts=signature);last=signature
     dashboard_state=server.command({'op':'status'});live=dashboard_state['nodes']
-    if all(current[n]['rows']==count and (not previews or current[n]['previews']>=count) and n in live and live[n]['permissions'] and live[n]['permissions']['ready'] and live[n]['inventory'] and live[n]['queue']==count for n,count in expected.items()):return current
+    if all(current[n]['rows']==count and current[n]['error'] is None and (not previews or current[n]['previews']>=count) and n in live and live[n]['permissions'] and live[n]['permissions']['ready'] and live[n]['inventory'] and live[n]['queue']==count for n,count in expected.items()):return current
     time.sleep(1)
    snapshot=server.command({'op':'status'});(output/'failure-dashboard.json').write_text(json.dumps(snapshot,indent=2));(output/'failure-agents.json').write_text(json.dumps(current,indent=2));raise AssertionError('Expected queues '+str(expected)+'; actual '+str(signature))
   expected={'wallet-laptop':22,'treasury-australia':11,'treasury-russia':11};initial=wait_counts(expected);assert initial['wallet-laptop']['peers']==2;stage('all_three_real_exchange_queues_verified',counts={n:s['rows'] for n,s in initial.items()})
   policy=agents['treasury-russia'].command({'op':'disable_one'});wait_counts({'wallet-laptop':21,'treasury-australia':11,'treasury-russia':10},previews=False);agents['treasury-russia'].command({'op':'enable','id':policy});wait_counts(expected);stage('local_denial_enable_isolated_to_one_recipient')
   agents['treasury-australia'].close();agents['treasury-australia']=Process(['agent',agent_source,str(configs[1])],output/'australia-reconnect-stderr.log');processes.append(agents['treasury-australia']);wait_counts(expected);stage('recipient_reconnect_verified')
+  # Match the reported installed lifecycle: keep all Agent workspaces alive,
+  # clear the Dashboard profile through its production storage operation, and
+  # let real HTTP re-registration rebuild all lists without Ownership records.
+  server.command({'op':'clear_profile'});reset=wait_counts(expected)
+  assert not any(v['error'] for v in reset.values()),reset
+  stage('profile_clear_live_agents_reauthenticated_and_queues_rediscovered_without_ownership')
+  if os.environ.get('WALLABY_TEST_ROTATE_IPV6')=='1':
+   before=agents['wallet-laptop'].command({'op':'codes'});agents['treasury-australia'].command({'op':'rotate_ipv6','ipv6':'2001:db8::12'})
+   deadline=time.monotonic()+150
+   while time.monotonic()<deadline:
+    current=wait_counts(expected,timeout=150);after=agents['wallet-laptop'].command({'op':'codes'})
+    if not set(before)==set(after):break
+    time.sleep(1)
+   else:raise AssertionError('IPv6 rotation did not replace stale transfer bindings')
+   stage('same_receiver_new_ipv6_fresh_reviews_without_ownership')
   server.command({'op':'advance','seconds':1000})
   for a in agents.values():a.command({'op':'advance','seconds':1000})
   time.sleep(5);aged=wait_counts(expected);assert not any(v['error'] for v in aged.values());stage('reviews_survive_sixteen_minutes_without_reauthorising_transfers')
@@ -191,7 +222,10 @@ def coordinator(agent_source,dashboard_source,out):
    codes=agents[name].command({'op':'codes'});assert len(codes)==11;assert all(sender_codes[k]==v for k,v in codes.items()),'Independent review codes diverged on reconnect'
   stage('all_twenty_two_independent_review_codes_match_after_reconnects')
   for name in ('treasury-australia','treasury-russia'):agents[name].command({'op':'authorise'})
-  sent=agents['wallet-laptop'].command({'op':'send'},timeout=240);assert sent['completed']==22 and sent['credentials_cleared'],sent;stage('twenty_two_direct_transfers_verified',**sent)
+  sent=agents['wallet-laptop'].command({'op':'send'},timeout=240)
+  if sent['completed']!=22 or not sent['credentials_cleared']:
+   (output/'transfer-failure-agents.json').write_text(json.dumps(states(),indent=2));(output/'transfer-failure-dashboard.json').write_text(json.dumps(server.command({'op':'status'}),indent=2))
+  assert sent['completed']==22 and sent['credentials_cleared'],sent;stage('twenty_two_direct_transfers_verified',**sent)
   deadline=time.monotonic()+40
   while time.monotonic()<deadline:
    final=states()

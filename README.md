@@ -2,11 +2,15 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 28
+# Wallaby Agent V2 — Development Build 29
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 28 DEB](dist/wallaby-agent_2.0.0~dev28_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 29 DEB](dist/wallaby-agent_2.0.0~dev29_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 29 pairs with **Dashboard V1 Build 33**. It fixes empty synchronisation pages after clearing/reloading the Dashboard profile while Agent workspaces stay open. Queue revision numbers are scoped to authenticated Dashboard sessions; a new session can start at zero without erasing local operations, completion records or denial preferences. Within one session, backwards or altered same-number snapshots are still rejected. Late replies from remembered retired sessions cannot take over the list. Only hashed session identifiers are retained in protected RAM.
+
+Dismissing an unattempted offer now lets the same unchanged Dashboard list offer it again; disabling its incoming wallet policy still suppresses it only on that Agent. Re-enabling restores a current local offer immediately. Neither action authorises a transfer or replays attempted/completed work. Interrupted batches report their completed count; wallets received but awaiting history recovery remain distinct. Dashboard Build 33 refreshes stale IPv6 transfer bindings for the same node, keeps discovery independent of Ownership and replaces forced Ownership navigation with notifications. [Build 29 diagnosis and integration checks](AGENT_BUILD29_SYNC.md). The final test completed all 22 transfers after live profile reset, IPv6 rotation, preview ageing and Dashboard restart; 392 regression tests and 50 final focused checks pass.
 
 Build 28 pairs with **Dashboard V1 Build 32** to keep synchronisation requests and their exact signed public reviews available beyond the former 15-minute preview lifetime. Older reviews are accepted only against the exact active request, signature, challenge, public policy and both peer endpoints. Approval and independent fingerprint checks remain local. Sender and receiver still compare live Core data immediately before importing or sending a wallet; altered wallet data is refused. The page displays the signed snapshot's UTC date.
 

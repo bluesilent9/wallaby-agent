@@ -38,7 +38,7 @@ def cancel(store,key):
         row=s['pending'].get(key)
         if not row or row['proposal']['kind']!='wallet_transfer' or row['state']!='pending' or s.get('active_transfer') or s.get('sync_batch'):raise ValueError('Only an unattempted, inactive synchronization request can be cancelled.')
         s['pending'].pop(key);s.get('sync_choices',{}).pop(key,None)
-    return {'message':'Request cancelled locally. A later Dashboard queue revision may offer it again. Disable synchronisation to suppress this incoming policy instead.'}
+    return {'message':'Request dismissed locally. It will return while the Dashboard still offers it. Disable synchronisation to suppress this incoming policy instead.'}
 
 NAMESPACE='wallaby-sync-preferences-v1'
 

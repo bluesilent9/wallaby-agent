@@ -70,7 +70,11 @@ class Exchange:
                 LOCAL_RETIREMENT.cancel_remote(p['request_hash'])
         for p in proposals:
             self.proposal_kind=p['kind']
-            if p['kind'] in ('wallet_sync_queue','wallet_archive_queue','wallet_rename_queue'):self.store.receive(p)
+            if p['kind']=='wallet_sync_queue':
+                from sync_queue import apply_snapshot
+                from approval_store import digest
+                apply_snapshot(self.store,p['revision'],p['requests'],session=digest({'token':self.token}))
+            elif p['kind'] in ('wallet_archive_queue','wallet_rename_queue'):self.store.receive(p)
         for p in proposals:
             self.proposal_kind=p['kind']
             if p['kind'] in ('builder_cancel','wallet_retire_cancel') or blocked(self.store.read(),p):continue
@@ -123,6 +127,10 @@ class Exchange:
             advice={'agent_version':'Dashboard rejected the Agent version. Check both installed Development builds and restart the Agent only after safely finishing active work.','capabilities':'Dashboard rejected the Agent capability list. Update Dashboard to the matching build; do not disable local security validation.','identity_conflict':'Dashboard reports a node identity conflict. Resolve it on the Dashboard Nodes page.','session_expired':'Dashboard exchange session expired. The public node connection may need to register again.'}.get(reason)
             return ConnectionFailure('dashboard','exchange_'+(reason or 'http_'+str(error.status)),advice or str(failure))
         if isinstance(error,ValueError):
+            from sync_queue import RevisionError
+            if isinstance(error,RevisionError):
+                from activity_log import event
+                event('sync.queue.reject','Revision refused · previous='+str(error.previous)+' · incoming='+str(error.incoming)+' · same_authenticated_session=true')
             reason={'Invalid public descriptor fields.':'descriptor_fields','Invalid descriptor timestamp or activity.':'descriptor_metadata','Descriptor ranges exceed the safe automatic import limit.':'descriptor_range','Only checksummed public descriptors are accepted.':'descriptor_checksum','Private material is forbidden in Dashboard messages.':'private_material','Invalid synchronisation list.':'sync_list','A revision cannot change contents.':'sync_revision','Stale synchronisation list.':'sync_revision','Authorisation queue is full.':'queue_full','Only an Ed25519 Agent identity is supported.':'identity_format','No unique paired receiving request.':'unpaired_preview'}.get(str(error),'invalid_data')
             if self.phase in ('local_outbox','acknowledgement'):return ConnectionFailure('workspace','exchange_local_state','Protected workspace exchange storage was refused at '+self.phase+'. Queued data retained; inspect local workspace diagnostics.')
             return ConnectionFailure('dashboard','exchange_'+reason,'Agent rejected Dashboard exchange data at '+self.phase+' ('+self.proposal_kind+'); category '+reason+'. Queued data retained. Compare the Dashboard protocol log; no rejected request authorised a wallet operation.')

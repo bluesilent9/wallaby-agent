@@ -3,7 +3,12 @@ import socket,time,json
 from approval_store import digest,MAX_ITEMS
 
 
-def apply_snapshot(store,revision,requests):
+class RevisionError(ValueError):
+    def __init__(self,message,previous,incoming):
+        super().__init__(message);self.previous=previous;self.incoming=incoming
+
+
+def apply_snapshot(store,revision,requests,session=None):
     from vault_policy import validate_proposal
     if type(revision) is not int or revision<0:raise ValueError('Invalid synchronisation revision.')
     if not isinstance(requests,list) or len(requests)>MAX_ITEMS:raise ValueError('Too many synchronisation requests.')
@@ -14,12 +19,24 @@ def apply_snapshot(store,revision,requests):
         if p['kind']!='wallet_transfer' or p['transfer_id'] in ids:raise ValueError('Duplicate or invalid wallet request.')
         ids.add(p['transfer_id']);rows[digest(p)]=p
     with store.edit() as s:
+        # Revisions belong to an authenticated Dashboard session, not the RAM
+        # workspace lifetime. A profile reset can legitimately restart at zero.
+        # Store only token hashes; never discard local operation/approval records.
+        new_session=session is not None and session!=s.get('sync_session')
+        if new_session:
+            retired=s.setdefault('sync_retired_sessions',[])
+            if session in retired:raise ValueError('Retired synchronisation session.')
+            old=s.get('sync_session')
+            if old:retired.append(old)
+            del retired[:-128]
+            s['sync_session']=session
+            s.pop('sync_revision',None);s.pop('sync_snapshot_hash',None)
         previous=s.get('sync_revision',-1)
-        if revision<previous:raise ValueError('Stale synchronisation list.')
+        if revision<previous:raise RevisionError('Stale synchronisation list.',previous,revision)
         content=digest(requests)
         if revision==previous:
-            if s.get('sync_snapshot_hash')!=content:raise ValueError('A revision cannot change contents.')
-            return
+            if s.get('sync_snapshot_hash')!=content:raise RevisionError('A revision cannot change contents.',previous,revision)
+        before=digest(s['pending'])
         for key,row in list(s['pending'].items()):
             if row['proposal']['kind']=='wallet_transfer' and key not in rows:
                 if key==s.get('active_transfer') or row['state']!='pending':
@@ -46,9 +63,10 @@ def apply_snapshot(store,revision,requests):
                     verify_bound(store,cached,p)
                     s.setdefault('transfer_previews',{})[key]=cached
         s['sync_revision']=revision;s['sync_snapshot_hash']=content
+        changed=new_session or revision!=previous or before!=digest(s['pending'])
         offered_receive=sum(p['direction']=='receive' for p in requests);offered_send=len(requests)-offered_receive;disabled=sum(p['direction']=='receive' and policy_id(p) in s.get('sync_exclusions',{}) for p in requests);visible=sum(row['proposal']['kind']=='wallet_transfer' and not row.get('withdrawn') for row in s['pending'].values())
     from activity_log import event
-    event('sync.queue','Dashboard snapshot applied · revision='+str(revision)+' · receiving='+str(offered_receive)+' · sending='+str(offered_send)+' · locally_disabled='+str(disabled)+' · visible='+str(visible))
+    if changed:event('sync.queue','Dashboard snapshot applied · revision='+str(revision)+' · session_rebased='+str(new_session).lower()+' · receiving='+str(offered_receive)+' · sending='+str(offered_send)+' · locally_disabled='+str(disabled)+' · visible='+str(visible))
 
 
 def choose(store,key,selected,watch_only):
