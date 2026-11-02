@@ -31,18 +31,15 @@ def display(p):
     return label(value)
 
 def project(state,revision):
-    return validate({'version':1,'revision':revision,'wallets':copy.deepcopy(state.get('sync_exclusions',{}))|copy.deepcopy(state.get('archive_exclusions',{}))})
+    return validate({'version':1,'revision':revision,'wallets':copy.deepcopy(state.get('sync_exclusions',{}))})
 
 def overlay(state,data):
     data=validate(data)
-    state['sync_exclusions']={k:v for k,v in data['wallets'].items() if v.get('purpose')!='archive'};state['archive_exclusions']={k:v for k,v in data['wallets'].items() if v.get('purpose')=='archive'};state['sync_preferences_revision']=data['revision']
+    state['sync_exclusions']={k:v for k,v in data['wallets'].items() if v.get('purpose')!='archive'};state.pop('archive_exclusions',None);state['sync_preferences_revision']=data['revision']
     from sync_preferences import policy_id
     for key,row in list(state.get('pending',{}).items()):
         p=row['proposal']
-        if row['state']=='pending' and p['kind']=='archive_wallet':
-            from archive_requests import permission_id
-            if permission_id(p) in state['archive_exclusions']:state['pending'].pop(key);continue
-        if row['state']=='pending' and p['kind']=='wallet_transfer' and p['direction']=='receive' and policy_id(p) in data['wallets']:
+        if row['state']=='pending' and p['kind']=='wallet_transfer' and p['direction']=='receive' and policy_id(p) in state['sync_exclusions']:
             state['pending'].pop(key);state.get('sync_choices',{}).pop(key,None);state.get('transfer_previews',{}).pop(key,None)
 
 def strict_json(raw):

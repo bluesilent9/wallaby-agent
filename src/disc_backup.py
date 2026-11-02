@@ -225,6 +225,13 @@ class Burner:
         self.job=None;self.selected=None
         waiting=keep+self.pending;self.pending=[]
         for r in waiting:self.queue(*r)
+    def removable(self,key):
+        if self.thread and self.thread.is_alive():return False
+        if not self.job:return False
+        members=self.job.get('_members') or [(self.job['id'],self.job['wallets'],self.job['recovery'])]
+        if key in {r[0] for r in members}:
+            return self.job['phase']=='authorised' and not self.job.get('_prepared') and not self.job.get('discs_verified') and not self.job.get('_required_members')
+        return any(r[0]==key for r in self.pending)
     def validate_options(self,device,confirmed,disc_count=1,speed='slowest'):
         if not self.job or self.job['phase'] not in ('authorised','awaiting_disc','error','uncertain') or confirmed is not True:raise ValueError('Authorise and confirm a fresh blank M-Disc before writing.')
         if type(disc_count) is not int or not 1<=disc_count<=99:raise ValueError('Choose between 1 and 99 separate discs.')

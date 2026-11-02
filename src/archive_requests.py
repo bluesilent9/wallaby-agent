@@ -6,13 +6,16 @@ from vault_policy import text
 HEX=re.compile('[0-9a-f]{64}')
 
 def validate_task(p):
-    if not isinstance(p,dict) or p.get('version')!=1 or type(p.get('version')) is not int:raise ValueError('Invalid archive task.')
+    if not isinstance(p,dict) or (p.get('version')!=1 and not (p.get('kind')=='destroy_disc' and p.get('version')==2)) or type(p.get('version')) is not int:raise ValueError('Invalid archive task.')
     if p.get('kind')=='archive_wallet':
         if set(p)!={'kind','version','nonce','request_id','wallet','public_wallet','related_policies','require_local_authorisation'} or p['require_local_authorisation'] is not True:raise ValueError('Invalid archive-wallet fields.')
         text(p['wallet'],256);descriptors(p['public_wallet'])
         if p['public_wallet']['wallet_name']!=p['wallet'] or not isinstance(p['related_policies'],list) or len(p['related_policies'])>32:raise ValueError('Invalid archive wallet identity or related-policy list.')
         for raw in p['related_policies']:descriptors(raw)
     elif p.get('kind')=='destroy_disc':
+        if p.get('version')==2:
+            from extinct_discs import validate
+            return validate(p)
         required={'kind','version','nonce','request_id','archive_id','label','replacement_image_sha256'}
         if not required<=set(p)<=required|{'replacement_receipt'}:raise ValueError('Invalid disc-destruction fields.')
         text(p['label'],256)
@@ -31,8 +34,6 @@ def validate_queue(p):
         seen.add(row['request_id'])
     return p
 
-def permission_id(p):return digest({'purpose':'archive','public_descriptors':sorted(descriptors(p['public_wallet']))})
-
 def snapshot(store,p):
     validate_queue(p)
     with store.edit() as s:
@@ -48,7 +49,6 @@ def snapshot(store,p):
         s['archive_queue']={'queue_id':p['queue_id'],'revision':p['revision'],'hash':digest(p),'requests':copy.deepcopy(p['requests'])}
         for key,row in active.items():
             if key in s['completed'] or key in s['pending']:continue
-            if row['kind']=='archive_wallet' and permission_id(row) in s.get('archive_exclusions',{}):continue
             if len(s['pending'])>=128:raise ValueError('Local authorisation queue is full.')
             s['pending'][key]={'proposal':row,'state':'pending','received':__import__('time').time()}
 
@@ -58,13 +58,11 @@ def result(store,p,status,**extra):
     message={'version':1,'queue_id':queue.get('queue_id'),'request_id':p['request_id'],'status':status,**extra}
     message['signed_receipt']=sign(store,copy.deepcopy(message));store.queue('archive_queue_result',message);return message
 
-def delete(store,key,disable=False):
+def delete(store,key):
+    row=store.read()['pending'][key];p=row['proposal']
+    if p['kind'] not in ('archive_wallet','destroy_disc') or row['state']!='pending':raise ValueError('Only an unattempted archive task or an unused staged capture can be removed locally.')
+    receipt=result(store,p,'deleted')
     with store.edit() as s:
-        row=s['pending'][key];p=row['proposal']
-        if p['kind'] not in ('archive_wallet','destroy_disc') or row['state']!='pending':raise ValueError('Only an unattempted archive task can be removed locally.')
-        if disable:
-            if p['kind']!='archive_wallet':raise ValueError('Physical destruction tasks cannot be silently disabled.')
-            ident=permission_id(p);s.setdefault('archive_exclusions',{})[ident]={'policy_id':ident,'wallet_name':p['wallet'],'purpose':'archive'}
         s['pending'].pop(key)
-    if disable:result(store,p,'disabled')
-    return {'message':'Archiving disabled locally until you enable it in the denial list.' if disable else 'Removed locally. An active Dashboard request may be offered again.'}
+        s['completed'][key]={'kind':p['kind'],'at':__import__('time').time(),'result':receipt}
+    return {'message':'Archive request deleted. The signed deletion result is queued for the Dashboard. This does not report a successful burn or physical disc destruction.'}

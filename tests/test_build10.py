@@ -119,6 +119,8 @@ class CoreMessages(unittest.TestCase):
     for i,package in enumerate(packages):
         stage=Path(self.tmp.name)/('read-'+str(i));stage.mkdir();review=pool.inspect_package(package,'fixture-backup-password',stage);self.assertEqual(review['threshold'],2);pool.load(review['id'],True);self.addCleanup(lambda ident=review['id']:pool.unload(ident) if ident in pool.loaded else None);archives.append(pool.loaded[review['id']]['keys'][0])
     self.assertNotEqual(*archives)
+    loaded=pool.state()['loaded'];self.assertEqual(len(loaded),2);self.assertEqual(len({r['cosigner_id'] for r in loaded}),2);self.assertEqual(len({r['policy_hash'] for r in loaded}),1);self.assertEqual({r['signer_number'] for r in loaded},{2,3});self.assertTrue(all(r['threshold']==2 and r['total']==3 for r in loaded))
+    self.assertTrue(set(archives)<=set(rpc(core,'listwallets')));self.assertTrue(all(rpc(core,'getwalletinfo',[],route)['wallaby_storage']=='disc' for route in archives))
     duplicate=Path(self.tmp.name)/'duplicate';duplicate.mkdir()
     repeated=pool.inspect_package(packages[0],'fixture-backup-password',duplicate)
     with self.assertRaisesRegex(ValueError,'already'):pool.load(repeated['id'],True)
@@ -127,3 +129,5 @@ class CoreMessages(unittest.TestCase):
     same=m.sign(m.prepare([archives[0]],address,'Two archival discs, one message',first['psbt'])['id']);self.assertFalse(same['complete']);self.assertEqual(same['signatures_present'],1)
     second=m.sign(m.prepare([archives[1]],address,'Two archival discs, one message',first['psbt'])['id']);self.assertTrue(second['complete']);self.assertEqual(second['height'],50)
     together=m.sign(m.prepare(archives,address,'Two archival discs, one message')['id']);self.assertTrue(together['complete']);self.assertEqual(rpc(core,'getrawmempool'),[])
+
+    first_id=loaded[0]['id'];first=pool.loaded[first_id];folder=first['folder'];process=first['node'].process;pool.unload(first_id);self.assertFalse(folder.exists());self.assertIsNotNone(process.poll());self.assertEqual(len(pool.state()['loaded']),1);self.assertNotIn(archives[0],rpc(core,'listwallets'));self.assertIn(archives[1],rpc(core,'listwallets'))

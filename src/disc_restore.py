@@ -12,6 +12,7 @@ from disc_archive import recover,direct_read,decode_header,align,HEADER,MAX_PACK
 from vendor.embit.descriptor import Descriptor
 from vendor.embit.descriptor.checksum import checksum
 from vendor.embit.networks import NETWORKS
+MAX_ACCOUNTS=64
 
 class Archives:
     def __init__(self,core,store,binary,enforce):
@@ -39,7 +40,7 @@ class Archives:
                 return r
         return None
     def state(self):
-        with self.lock:return {'reading':self.reading,'message':self.message,'error':self.error,'staged':[r['review'] for r in self.staged.values()],'loaded':[{'id':k,'name':r['review']['name'],'policy_hash':r['recovery']['policy_hash'],'wallets':r['keys'],'monitor':r['monitor'],'storage':'Protected RAM only','archive_id':r.get('archive_id')} for k,r in self.loaded.items()]}
+        with self.lock:return {'reading':self.reading,'message':self.message,'error':self.error,'staged':[r['review'] for r in self.staged.values()],'loaded':[{'id':k,**{field:r['review'].get(field) for field in ('name','cosigner','cosigner_id','signer_number','threshold','total','chain','height','effective_policy_hash')},'policy_hash':r['recovery']['policy_hash'],'wallets':r['keys'],'monitor':r['monitor'],'storage':'Protected RAM only','archive_id':r.get('archive_id')} for k,r in self.loaded.items()]}
     def inspect(self,device,password):
         self.enforce()
         if not isinstance(device,str) or not re.fullmatch('/dev/sr[0-9]{1,2}',device):raise ValueError('Choose a local optical drive.')
@@ -88,11 +89,14 @@ class Archives:
                 else:
                     role=recovery.get('physical_cosigner_file');entries=[{'id':role,'kind':'setup_role','recovery':recovery}]
                     if set(names)!={'policy.json','wallets/'+str(role)+'.dat'}:raise ValueError('Legacy disc must contain exactly its assigned physical role.')
-                if len(self.staged)+len(self.loaded)+len(entries)>15:raise ValueError('Unload or discard archives before reading this wallet set.')
+                if len(self.staged)+len(self.loaded)+len(entries)>MAX_ACCOUNTS:raise ValueError('The protected session supports up to 64 staged/loaded signing accounts across discs, subject to available RAM. Remove unused accounts before reading this wallet set.')
                 for entry in entries:
                     target=folder/str(entry['id']);target.mkdir(mode=0o700)
                     prepared.append(self.stage_entry(entry['recovery'],z,'wallets/'+entry['id']+'.dat',target,archive_id))
             from archive_format import identity
+            from archive_inventory import member
+            from setup_messages import sign
+            self.store.queue('archive_inventory',sign(self.store,{'version':1,'event':'archive_observed','archive_id':archive_id,'payload_sha256':archive_id,'payload_verified':True,'readback_verified':False,'replacements':[],'members':[member(r['recovery']) for _,r in prepared]}))
             with self.lock:
                 self.catalogs[archive_id]={identity(r['recovery']):copy.deepcopy(r['recovery']) for ident,r in prepared}
                 for ident,row in prepared:self.staged[ident]=row
@@ -131,6 +135,7 @@ class Archives:
             except Exception:pass
         if 'display_name' in recovery:__import__('wallet_rename').name(recovery['display_name'])
         review={'id':ident,'name':recovery.get('display_name',p['name']),'threshold':p['threshold'],'total':len(p['cosigners']),'height':effective_height,'effective_policy_hash':digest(recovery.get('policy_extensions',[])),'chain':p['chain'],'cosigner':role['name'],'cosigner_id':role['id'],'policy_hash':expected,'receive_descriptor':descs[0],'change_descriptor':descs[1] if len(descs)>1 else descs[0],'samples':samples,'archive_id':archive_id,'additional_policies':recovery.get('policy_extensions',[])}
+        review['signer_number']=1 if generic else next(i+1 for i,item in enumerate(p['cosigners']) if item['id']==role['id'])
         return ident,{'review':review,'recovery':recovery,'folder':folder,'wallet':wallet,'role':role,'archive_id':archive_id,'generic':generic}
     def load(self,ident,confirmed):
         self.enforce()

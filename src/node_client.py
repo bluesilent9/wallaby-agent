@@ -30,7 +30,7 @@ def exchange_http_reason(data):
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1',response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev29'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev30'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -100,6 +100,10 @@ class Core:
         if response.get('error') is not None:return {'error':response['error']}
         if 'result' not in response:raise ConnectionFailure('rpc','response','Bitcoin Core returned no RPC result. Check the local RPC service and version.')
         value,_=clean_json(response['result'],MAX_RESULT_BYTES)
+        if method=='getwalletinfo' and wallet in ('Wallaby Extinct','Extinct') and isinstance(value,dict) and value.get('walletname')==wallet and value.get('private_keys_enabled') is False:
+            from wallet_labels import address_only
+            raw=self.call(ident+'-archive-policy' if isinstance(ident,str) else ident,'listdescriptors',[False],wallet,timeout)
+            if isinstance(raw.get('result'),dict) and address_only(raw['result']):value['wallaby_extinct']=True
         return {'result':value}
     def ready(self):
         from protected_memory import required,inside

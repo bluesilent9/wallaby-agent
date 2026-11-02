@@ -12,6 +12,12 @@ MAX_ITEMS=128
 def digest(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
 
+def title(p):
+    if p.get('kind')=='wallet_retire' and p.get('version')==3:
+        return ('Preserve history: '+p['archive_label']+' → '+p['wallet']) if p['phase']=='preserve' else 'Delete empty copies: '+p['wallet']
+    if p.get('kind')=='destroy_disc' and p.get('version')==2:return p['label']
+    return p.get('wallet',p.get('public_wallet',{}).get('wallet_name',p.get('name',p.get('proposal',{}).get('name',''))))
+
 class Store:
     def __init__(self,root=None,persistence=None):
         from protected_memory import required,root as secure_root
@@ -75,6 +81,7 @@ class Store:
     def deny(self,key):
         with self.edit() as s:
             if s['pending'][key]['proposal']['kind']=='builder_cancel':raise ValueError('Choose Delete and Cancel or Backup and Cancel locally.')
+            if s['pending'][key]['proposal']['kind']=='wallet_retire' and s['pending'][key]['state']!='pending':raise ValueError('This extinction operation was attempted or has an uncertain outcome. Inspect Core and reconcile it; it cannot be relabelled as an unstarted denial.')
             if s.get('active_transfer')==key:raise ValueError('Cancel the active transfer on Synchronisation first.')
             if s['pending'][key]['proposal']['kind']=='wallet_transfer':raise ValueError('Only Dashboard can remove synchronisation requests. Uncheck a wallet to leave it pending.')
             row=s['pending'].pop(key)
@@ -82,7 +89,8 @@ class Store:
             kind=row['proposal']['kind'];s['denied'][key]={'proposal':{'kind':kind},'wallet_name':display(row['proposal'])}
             result_kind={'sign_psbt_partial':'partial_sign_result','broadcast_transaction':'broadcast_result','wallet_transfer':'wallet_transfer_result','wallet_retire':'wallet_retirement_result'}.get(kind)
             if result_kind:
-                item={'kind':result_kind,'payload':{'request_hash':key,'status':'denied','message':'Denied locally.'}};s['outbox'][digest(item)]=item
+                phase={'phase':row['proposal']['phase'],'manifest_hash':row['proposal']['manifest_hash']} if kind=='wallet_retire' and row['proposal'].get('version')==3 else {}
+                item={'kind':result_kind,'payload':{'request_hash':key,'status':'denied','message':'Denied locally.',**phase}};s['outbox'][digest(item)]=item
             if len(s['denied'])>MAX_ITEMS:raise ValueError('Denied request list is full; remove a record first.')
     def forget(self,key):
         with self.edit() as s:s['denied'].pop(key,None)

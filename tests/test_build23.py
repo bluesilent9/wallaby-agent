@@ -3,7 +3,7 @@ import copy,json,os,tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import Mock,patch
 from approval_store import Store,digest
-from archive_requests import snapshot,delete,permission_id
+from archive_requests import snapshot,delete
 from archive_format import bundle,validate
 from disc_backup import pack,Burner
 from disc_restore import Archives
@@ -28,8 +28,9 @@ class LiveArchiveQueue(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.store=Store(self.tmp.name)
   from test_build7 import public
   self.raw=public();self.p=task(self.raw)
- def test_local_delete_reappears_but_disabled_wallet_does_not(self):
-  p=self.p;s=self.store;snapshot(s,queue([p]));key=digest(p);delete(s,key);self.assertNotIn(key,s.read()['pending']);snapshot(s,queue([p]));self.assertIn(key,s.read()['pending']);delete(s,key,True);snapshot(s,queue([p]));self.assertNotIn(key,s.read()['pending']);self.assertIn(permission_id(p),s.read()['archive_exclusions'])
+ def test_deleted_archive_is_reported_terminal_and_new_request_is_still_allowed(self):
+  p=self.p;s=self.store;snapshot(s,queue([p]));key=digest(p);delete(s,key);self.assertNotIn(key,s.read()['pending']);snapshot(s,queue([p]));self.assertNotIn(key,s.read()['pending']);self.assertEqual(s.read()['completed'][key]['result']['status'],'deleted')
+  again=copy.deepcopy(p);again['nonce']='c'*64;again['request_id']=digest({k:v for k,v in again.items() if k!='request_id'});snapshot(s,queue([again],2));self.assertIn(digest(again),s.read()['pending'])
  def test_withdrawal_requires_valid_complete_snapshot_not_disconnect(self):
   s=self.store;snapshot(s,queue([self.p]));before=s.read()['pending'];self.assertTrue(before)
   with self.assertRaises(ValueError):snapshot(s,{'kind':'wallet_archive_queue'})
@@ -40,10 +41,11 @@ class LiveArchiveQueue(unittest.TestCase):
    with self.assertRaises(ValueError):snapshot(self.store,p)
   changed=copy.deepcopy(self.p);changed['wallet']='someone else'
   with self.assertRaises(ValueError):snapshot(self.store,queue([changed],3))
- def test_persistent_archive_denial_is_separate_from_sync_denial(self):
-  from denial_storage import project,overlay,initial
-  state={'pending':{},'sync_exclusions':{},'archive_exclusions':{'b'*64:{'policy_id':'b'*64,'wallet_name':'Treasury','purpose':'archive'}}}
-  wire=project(state,1);fresh={'pending':{}};overlay(fresh,wire);self.assertFalse(fresh['sync_exclusions']);self.assertEqual(fresh['archive_exclusions'],state['archive_exclusions'])
+ def test_legacy_archive_denials_are_removed_without_changing_sync_preferences(self):
+  from denial_storage import project,overlay
+  sync={'policy_id':'a'*64,'wallet_name':'Sync wallet'};archive={'policy_id':'b'*64,'wallet_name':'Archive wallet','purpose':'archive'}
+  state={'pending':{},'archive_exclusions':{'b'*64:archive}};overlay(state,{'version':1,'revision':1,'wallets':{'a'*64:sync,'b'*64:archive}})
+  self.assertEqual(state['sync_exclusions'],{'a'*64:sync});self.assertNotIn('archive_exclusions',state);self.assertEqual(project(state,2)['wallets'],{'a'*64:sync})
  def test_withdrawal_does_not_erase_an_authorised_private_capture(self):
   snapshot(self.store,queue([self.p]));k=digest(self.p)
   with self.store.edit() as s:s['pending'][k]['state']='attempted'
@@ -175,7 +177,7 @@ class UpgradeAndCancellation(unittest.TestCase):
   self.assertIn('wallaby-agent-denials-v2',str(socket_path()))
   with tempfile.TemporaryDirectory() as d:
    Path(d).chmod(0o700);old=FileStore(d);old.commit(0,{'version':1,'revision':1,'wallets':{'a'*64:{'policy_id':'a'*64,'wallet_name':'Treasury'}}})
-   new=FileStore(d);state={};__import__('denial_storage').overlay(state,new.read());self.assertIn('a'*64,state['sync_exclusions']);state['archive_exclusions']={'b'*64:{'policy_id':'b'*64,'wallet_name':'SMSF','purpose':'archive'}};new.commit(1,__import__('denial_storage').project(state,2));self.assertEqual(len(new.read()['wallets']),2)
+   new=FileStore(d);state={};__import__('denial_storage').overlay(state,new.read());self.assertIn('a'*64,state['sync_exclusions']);state['archive_exclusions']={'b'*64:{'policy_id':'b'*64,'wallet_name':'SMSF','purpose':'archive'}};new.commit(1,__import__('denial_storage').project(state,2));self.assertEqual(len(new.read()['wallets']),1)
  def test_signed_policy_result_is_held_when_builder_cancels_its_request(self):
   from cancellation import held_item
   state={'cancelled_requests':{'a'*64:'c'*64}};item={'kind':'wallet_policy_refresh_result','payload':{'message':{'request_hash':'a'*64}}};self.assertTrue(held_item(state,item));self.assertFalse(held_item(state,{'kind':item['kind'],'payload':{'message':{'request_hash':'b'*64}}}))

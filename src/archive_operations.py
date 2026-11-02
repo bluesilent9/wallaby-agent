@@ -16,7 +16,13 @@ class Operations:
     def regular(self,name):return not any(name in r['routes'] for r in self.archives.loaded.values())
     def review(self,key):
         p=validate_task(self.store.read()['pending'][key]['proposal'])
+        job=self.jobs.get(key)
+        if p['kind']=='archive_wallet' and job and job['phase']=='queued':
+            return {'kind':'archive_wallet','id':key,'archive':{**job['facts'],'staged':True,'removable':self.setup.burner.removable(key)}}
         if p['kind']=='destroy_disc':
+            if p.get('version')==2:
+                from extinct_discs import review
+                return review(self,key)
             proof=self.destruction_proof(p)
             return {'kind':'destroy_disc','id':key,'destruction':{'archive_id':p['archive_id'],'label':p['label'],'replacement_image_sha256':p['replacement_image_sha256'],'coverage':proof['members'],'physical_confirmation_only':True}}
         if not self.regular(p['wallet']):raise ValueError('Dashboard archival is only for persistent node wallets. Use the explicit loaded-disc refresh operation for an archive.')
@@ -68,10 +74,23 @@ class Operations:
                         address_labels[label['address']]=label
                 recovery['policy_labels']=list(address_labels.values())
                 recovery['public_policies']={'wallet_name':p['wallet'],'descriptors':rows}
-            self.setup.burner.queue(key,{key:str(path)},recovery);self.jobs[key].update(phase='queued',recovery=recovery)
+            self.setup.burner.queue(key,{key:str(path)},recovery);self.jobs[key].update(phase='queued',recovery=recovery,facts=copy.deepcopy(facts))
             result(self.store,p,'queued')
             return {'message':'Wallet backup staged in protected RAM. Select it with other approved wallets in Disc Operations; verified completion is reported only after every requested disc passes read-back.','burn_authorised':True}
         except Exception:self.jobs[key]['phase']='error';raise
+    def delete(self,key):
+        self.enforce()
+        from archive_requests import delete
+        job=self.jobs.get(key)
+        if job:
+            if job['request'] is None or job['phase']!='queued' or not self.setup.burner.removable(key):raise ValueError('Only an unused staged archive can be removed. Finish or reconcile any disc write and read-back first.')
+            self.setup.burner.cancel_members({key})
+            # Do not mark a partially cleaned capture as unattempted.
+            job['phase']='discarding'
+            if job['folder']:shutil.rmtree(job['folder'])
+            with self.store.edit() as saved:saved['pending'][key]['state']='pending'
+            self.jobs.pop(key);self.reviews.pop(key,None)
+        return delete(self.store,key)
     def queue_loaded(self,ids,confirmed):
         self.enforce()
         if confirmed is not True or not isinstance(ids,list) or not ids or len(ids)>15 or len(set(ids))!=len(ids):raise ValueError('Select and explicitly approve loaded archive accounts for the replacement disc.')
@@ -95,6 +114,7 @@ class Operations:
         a=old.get('policy_extensions',[]);b=new.get('policy_extensions',[])
         if b[:len(a)]!=a:return False
         if old.get('kind')=='node_wallet':
+            if not {digest(v) for v in old.get('labels',[])}<={digest(v) for v in new.get('labels',[])}:return False
             old_raw=old.get('public_policies',old['public_wallet']);new_raw=new.get('public_policies',new['public_wallet'])
             if not descriptors(old_raw)<=descriptors(new_raw):return False
             if not {digest(v) for v in old.get('policy_labels',[])}<={digest(v) for v in new.get('policy_labels',[])}:return False
@@ -108,6 +128,8 @@ class Operations:
         else:
             from setup_messages import sign
             self.store.queue('archive_inventory',sign(self.store,{'version':1,'event':'replacement_verified',**evidence}))
+        from extinct_discs import completed
+        completed(self,{identity(r):r for _,_,r in job.get('_members') or [(key,None,row['recovery'])]},image_sha256)
         if getattr(self,'rename_complete',None):self.rename_complete(key,evidence)
         row['phase']='complete'
         if row['folder']:shutil.rmtree(row['folder'])
@@ -125,6 +147,7 @@ class Operations:
         return local
     def destroyed(self,key,confirmed):
         self.enforce();p=validate_task(self.store.read()['pending'][key]['proposal'])
+        if p.get('version')==2:raise ValueError('Use the extinct-disc checklist with the independently verified preserving Agent fingerprint.')
         if p['kind']!='destroy_disc' or confirmed is not True:raise ValueError('Confirm physical destruction locally before completing the task.')
         self.destruction_proof(p);result(self.store,p,'complete',destruction_confirmed_locally=True,archive_id=p['archive_id'],image_sha256=p['replacement_image_sha256'])
         with self.store.edit() as s:s['pending'].pop(key,None);s['completed'][key]={'kind':'destroy_disc','at':time.time()}

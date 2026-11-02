@@ -10,6 +10,9 @@ ARCHIVE='Wallaby Extinct'
 class MissingHistory(ValueError):pass
 
 def validate(p):
+    if p.get("version")==3:
+        from retirement_phases import validate as phased
+        return phased(p)
     fields={'kind','version','request_id','wallet','public_wallet','archive_label','require_zero_balance','delete_wallet'}
     if p.get('version')==2:fields.update(('nonce','delete_wallets'))
     if set(p)!=fields or p['kind']!='wallet_retire' or (p['version'],p['delete_wallet']) not in ((1,False),(2,True)) or type(p['version']) is not int or type(p['delete_wallet']) is not bool or p['require_zero_balance'] is not True:raise ValueError('Invalid wallet retirement proposal.')
@@ -31,7 +34,7 @@ def validate(p):
     if p['request_id']!=digest({k:v for k,v in p.items() if k!='request_id'}):raise ValueError('Retirement proposal hash differs.')
     return p
 
-def inventory(core,store,p):
+def inventory(core,store,p,collect_only=False):
     validate(p);name=p['wallet'];chain=rpc(core,'getblockchaininfo');info=rpc(core,'getwalletinfo',[],name)
     if chain.get('initialblockdownload') or chain.get('blocks')!=chain.get('headers') or info.get('scanning') or info.get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('Complete local wallet history is required. Finish node download and rescan first.')
     from wallet_setup_signing import signers_for_policy
@@ -66,10 +69,10 @@ def inventory(core,store,p):
             else:local_wallets.append(signer)
         local_wallets=sorted(set(local_wallets)|set(monitors))
         requested={item['wallet']:item for item in p['delete_wallets']}
-        if set(requested)!=set(local_wallets):raise ValueError('The retirement target list differs from independently identified local copies, monitors or dedicated signing accounts. Refresh the Dashboard request; no wallet was deleted.')
+        if not collect_only and set(requested)!=set(local_wallets):raise ValueError('The retirement target list differs from independently identified local copies, monitors or dedicated signing accounts. Refresh the Dashboard request; no wallet was deleted.')
         for candidate in local_wallets:
             local_info=rpc(core,'getwalletinfo',[],candidate)
-            if local_info.get('private_keys_enabled') is not requested[candidate]['private_keys_enabled'] or descriptors(rpc(core,'listdescriptors',[False],candidate))!=descriptors(requested[candidate]['public_wallet']):raise ValueError('A retirement target policy or private-key status differs from local Core.')
+            if not collect_only and (local_info.get('private_keys_enabled') is not requested[candidate]['private_keys_enabled'] or descriptors(rpc(core,'listdescriptors',[False],candidate))!=descriptors(requested[candidate]['public_wallet'])):raise ValueError('A retirement target policy or private-key status differs from local Core.')
             zero(candidate)
             other=rpc(core,'getwalletinfo',[],candidate)
             if other.get('scanning') or other.get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('Every local wallet copy must have complete history before retirement.')
@@ -111,20 +114,33 @@ def inventory(core,store,p):
             if lost:item['label']=lost[0]
     if not addresses:raise ValueError('This wallet has no confirmed used addresses to archive.')
     deletion=None
-    if p['delete_wallet']:
+    if p['delete_wallet'] and not collect_only:
         from wallet_deletion import target
         deletion=[{'wallet':wallet,'target':target(core,wallet)} for wallet in local_wallets]
-    return {'delete_wallet':p['delete_wallet'],'deletion':deletion,'local_wallets':local_wallets,'retained_signers':retained_signers,'watch_only':not info.get('private_keys_enabled'),'wallet':name,'archive':ARCHIVE,'public_identity':digest(sorted(descriptors(p['public_wallet']))),'addresses':sorted(addresses.values(),key=lambda x:x['address']),'transactions':len({txid for wallet,txid in transactions}),'blocks':chain['blocks'],'tip':chain['bestblockhash'],'private_wallet_retained':not p['delete_wallet'],'creates_loss_declaration':False}
+    records=sorted({txid:{'txid':txid,'blockhash':tx['blockhash']} for (wallet,txid),tx in transactions.items()}.values(),key=lambda r:r['txid'])
+    return {'transaction_records':records,'delete_wallet':p['delete_wallet'],'deletion':deletion,'local_wallets':local_wallets,'retained_signers':retained_signers,'watch_only':not info.get('private_keys_enabled'),'wallet':name,'archive':ARCHIVE,'public_identity':digest(sorted(descriptors(p['public_wallet']))),'addresses':sorted(addresses.values(),key=lambda x:x['address']),'transactions':len({txid for wallet,txid in transactions}),'blocks':chain['blocks'],'tip':chain['bestblockhash'],'private_wallet_retained':not p['delete_wallet'],'creates_loss_declaration':False}
 
 class Retirement:
     def __init__(self,core,store):self.core=core;self.store=store;self.reviews={};self.active=set()
     def review(self,key):
         p=self.store.read()['pending'][key]['proposal']
-        try:facts=inventory(self.core,self.store,p)
-        except MissingHistory as error:return {'kind':'wallet_retire','id':key,'retirement':{'wallet':p['wallet'],'history_required':True,'message':str(error)}}
+        try:
+            if p.get('version')==3:
+                from retirement_phases import review
+                facts=review(self.core,self.store,p)
+            else:facts=inventory(self.core,self.store,p)
+        except MissingHistory as error:return {'kind':'wallet_retire','id':key,'retirement':{'wallet':p['wallet'],'history_required':True,'history_preparation_imports':p.get('phase')=='preserve','message':str(error)}}
         self.reviews[key]=(facts,time.time());return {'kind':'wallet_retire','id':key,'retirement':facts}
     def prepare_history(self,key):
-        p=validate(self.store.read()['pending'][key]['proposal']);name=p['wallet'];raw=rpc(self.core,'listdescriptors',[False],name)
+        p=self.store.read()['pending'][key]['proposal']
+        if p.get('version')==3 and p['phase']=='preserve':
+            from retirement_phases import prepare_history
+            return prepare_history(self.core,self.store,key,p)
+        if p.get('version')==3:
+            from retirement_phases import internal
+            original=p;p=internal(p,p['wallet'],p['delete_wallets'])
+        else:original=p
+        validate(original);name=p['wallet'];raw=rpc(self.core,'listdescriptors',[False],name)
         from wallet_setup_signing import signers_for_policy
         private=bool(rpc(self.core,'getwalletinfo',[],name).get('private_keys_enabled'))
         if (p['version']==1 and not private and not signers_for_policy(self.core,raw)) or descriptors(raw)!=descriptors(p['public_wallet']):raise ValueError('Local signer/policy differs; no recovery job created.')
@@ -138,25 +154,34 @@ class Retirement:
         saved=self.store.read();row=saved['pending'].get(key);done=saved['completed'].get(key)
         if done and done.get('kind')!='wallet_retire':raise ValueError('Cancellation does not match a retirement request.')
         if done and not done.get('result'):
-            self.store.queue('wallet_retirement_result',{'request_hash':key,'status':'error','message':'An earlier completed retirement has no retained outcome evidence. It cannot be reported cancelled; inspect the local node.'});return
+            self.queue_result(key,{'request_hash':key,'status':'error','message':'An earlier completed retirement has no retained outcome evidence. It cannot be reported cancelled; inspect the local node.'});return
         if done and done.get('result'):
-            self.store.queue('wallet_retirement_result',done['result']);return
+            self.queue_result(key,done['result']);return
         if row and row['proposal']['kind']!='wallet_retire':raise ValueError('Retirement cancellation does not match a retirement request.')
         if row and row['state']=='attempted':
             with self.store.edit() as state:state.setdefault('retirement_cancel_pending',{})[key]=True
-            if key not in self.active:self.store.queue('wallet_retirement_result',{'request_hash':key,'status':'error','message':'An earlier retirement attempt has an uncertain outcome and cannot be reported cancelled. Inspect the local node.'})
+            if key not in self.active:self.queue_result(key,{'request_hash':key,'status':'error','message':'An earlier retirement attempt has an uncertain outcome and cannot be reported cancelled. Inspect the local node.'})
             return
         self._cancel_result(key)
+    def queue_result(self,key,result):return self.store.queue('wallet_retirement_result',self.result_fields(key,result))
+    def result_fields(self,key,result):
+        p=self.store.read()['pending'].get(key,{}).get('proposal',{})
+        if p.get('version')==3:result.update(phase=p['phase'],manifest_hash=p['manifest_hash'])
+        return result
     def _cancel_result(self,key):
-        result={'request_hash':key,'status':'cancelled','message':'Retirement authorisation withdrawn before wallet deletion. Existing wallet data was retained.'}
-        self.store.queue('wallet_retirement_result',result)
+        result=self.result_fields(key,{'request_hash':key,'status':'cancelled','message':'Retirement authorisation withdrawn before wallet deletion. Existing wallet data was retained.'})
+        self.queue_result(key,result)
         with self.store.edit() as state:
             state['pending'].pop(key,None);state.setdefault('cancelled_requests',{})[key]='retirement';state['completed'][key]={'kind':'wallet_retire','at':time.time(),'result':result};state.get('retirement_cancel_pending',{}).pop(key,None)
         self.reviews.pop(key,None)
         return {'message':result['message']}
-    def approve(self,key):
+    def approve(self,key,fingerprint=None):
         self.active.add(key)
-        try:return self._approve(key)
+        try:
+            if self.store.read()['pending'][key]['proposal'].get('version')==3:
+                from retirement_phases import approve
+                return approve(self,key,fingerprint)
+            return self._approve(key)
         finally:self.active.discard(key)
     def _approve(self,key):
         row=self.store.read()['pending'][key];old=self.reviews.get(key)
@@ -198,8 +223,8 @@ class Retirement:
                 deleted=True
             result={'request_hash':key,'status':'complete'}
             if row['proposal']['version']==2:result.update(archive_verified=True,history_verified=True,zero_balance_verified=True,wallet_deleted=deleted,archive_wallet=ARCHIVE,address_count=len(facts['addresses']),deleted_wallets=deleted_wallets)
-            self.store.queue('wallet_retirement_result',result)
+            self.queue_result(key,result)
             with self.store.edit() as s:s['completed'][key]={'kind':'wallet_retire','at':time.time(),'result':result};s['pending'].pop(key,None)
             return {'message':'Used public addresses and labels verified in Wallaby Extinct. '+('This node’s approved local wallet copies were unloaded, removed from startup and deleted.' if deleted else 'The original wallet remains loaded and unchanged (legacy archive-only request).')}
         except Exception:
-            self.store.queue('wallet_retirement_result',{'request_hash':key,'status':'error','message':'Archive operation incomplete or uncertain. Inspect Core locally before a fresh request.'});raise
+            self.queue_result(key,{'request_hash':key,'status':'error','message':'Archive operation incomplete or uncertain. Inspect Core locally before a fresh request.'});raise
