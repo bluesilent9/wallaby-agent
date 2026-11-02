@@ -16,13 +16,14 @@ def identity(recovery):
 
 def validate_node(recovery):
     required={'version','kind','chain','name','policy_hash','public_wallet','labels'}
-    if not isinstance(recovery,dict) or not required<=set(recovery)<=required|{'policy_extensions','public_policies','policy_labels'} or recovery['version']!=1 or recovery['kind']!='node_wallet':raise ValueError('Invalid node-wallet recovery record.')
+    if not isinstance(recovery,dict) or not required<=set(recovery)<=required|{'policy_extensions','public_policies','policy_labels','display_name'} or recovery['version']!=1 or recovery['kind']!='node_wallet':raise ValueError('Invalid node-wallet recovery record.')
     from vault_policy import NETWORK,text
     if recovery['chain'] not in NETWORK:raise ValueError('Invalid archive network.')
     text(recovery['name'],256);descriptors(recovery['public_wallet'])
     if recovery['policy_hash']!=digest(recovery['public_wallet']):raise ValueError('Archive public descriptor code differs.')
     from wallet_labels import validate_labels
     validate_labels(recovery['labels'])
+    if 'display_name' in recovery:__import__('wallet_rename').name(recovery['display_name'])
     if 'public_policies' in recovery:descriptors(recovery['public_policies'])
     if 'policy_labels' in recovery:validate_labels(recovery['policy_labels'])
     return recovery
@@ -55,7 +56,7 @@ def bundle(items,replaces=()):
         if kind=='setup_role':
             old=seen_policies.setdefault(r['policy_hash'],r['physical_cosigner_file'])
             if old!=r['physical_cosigner_file']:raise ValueError('Choose only one signing role per shared wallet on a disc. Put its other threshold roles on separate discs.')
-        name=r['name'] if kind=='node_wallet' else r['proposal']['name']
+        name=r.get('display_name',r['name'] if kind=='node_wallet' else r['proposal']['name'])
         entries.append({'id':ident,'kind':kind,'name':name,'recovery':r});wallets[ident]=next(iter(files.values()))
     value={'version':2,'format':'wallaby-archive-set','entries':entries,'replaces':sorted(set(replaces))};value['policy_hash']=digest(value);validate(value)
     return wallets,value

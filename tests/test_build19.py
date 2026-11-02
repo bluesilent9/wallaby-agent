@@ -57,7 +57,7 @@ class LogTests(unittest.TestCase):
   with patch('activity_log.handoff',side_effect=ValueError('RAM retained')),patch('secure_bridge.subprocess.run') as run,self.assertRaises(ValueError):_stop_service()
   run.assert_not_called()
  def test_old_worker_without_logs_can_close_but_current_cannot_skip(self):
-  for version,allowed in [('2.0.0~dev18',True),('2.0.0~dev24',False)]:
+  for version,allowed in [('2.0.0~dev18',True),('2.0.0~dev25',False)]:
    with patch('secure_bridge.call',side_effect=[WorkspaceFailure('worker_rejected','Unsupported protected action.'),{'worker_version':version}]):
     if allowed:handoff()
     else:

@@ -137,7 +137,7 @@ class CoreBatch(unittest.TestCase):
             frame_write(stream,{'operation':'public_wallet'});result=frame_read(stream);self.assertEqual(result['status'],'loaded',result);frame_write(stream,{'status':'confirmed'})
     t.thread.join(5);self.assertFalse(t.listener);self.assertFalse(self.store.read().get('sync_batch'));self.assertEqual(len(self.store.read()['completed']),2)
     for p in incoming:
-        name='Wallaby Watch '+p['transfer_id'][:24];self.assertFalse(rpc(self.receiver.core,'getwalletinfo',[],name)['private_keys_enabled'])
+        name=facts[digest(p)]['public_wallet']['wallet_name']+'_watch';self.assertFalse(rpc(self.receiver.core,'getwalletinfo',[],name)['private_keys_enabled'])
         for row in facts[digest(p)]['address_labels']:self.assertEqual(rpc(self.receiver.core,'getaddressinfo',[row['address']],name)['labels'],[row['label']])
  def test_fixed_address_extinct_subsets_and_loss_labels_from_own_core(self):
     name='Extinct archive8';rpc(self.core,'createwallet',{'wallet_name':name,'disable_private_keys':True,'blank':True,'descriptors':True})
@@ -160,7 +160,7 @@ class CoreBatch(unittest.TestCase):
             frame_write(stream,{'operation':'manifest','transfer_id':p['transfer_id'],'peer_ipv6':p['peer']['ipv6'],'details':details,'watch_only':True});self.assertEqual(frame_read(stream)['status'],'review_required');self.assertTrue(frame_read(stream)['watch_only'])
             frame_write(stream,{'operation':'public_wallet'});reply=frame_read(stream);self.assertEqual(reply['status'],'loaded',reply);frame_write(stream,{'status':'confirmed'})
     finally:t.thread.join(5)
-    return 'Wallaby Watch '+p['transfer_id'][:24]
+    return details['public_wallet']['wallet_name']+'_watch'
  def test_extinct_addresses_and_loss_labels_are_imported(self):
     name='Historical transfer8';rpc(self.core,'createwallet',{'wallet_name':name,'disable_private_keys':True,'blank':True,'descriptors':True});address=rpc(self.core,'getnewaddress',[],'miner8');body='addr('+address+')';label='Earlier wallet | LOST:02/01/2020 00:00:00 UTC'
     rpc(self.core,'importdescriptors',{'requests':[{'desc':body+'#'+checksum(body),'timestamp':0,'label':label}]},name)

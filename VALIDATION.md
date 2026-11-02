@@ -1,6 +1,22 @@
-# Agent V2 Development Build 24 validation
+# Agent V2 Development Build 25 validation
 
-Final regression/focused results are in the accompanying Build24 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+Final regression/focused results are in the accompanying Build25 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+
+## Build 25 local rename and archive coordination
+
+Isolated official Core 31 tests rename an encrypted wallet containing confirmed test coins without copying its database: the inode, labels, balance, public descriptors and encryption state are checked, then Core is restarted to verify that only the new name autoloads. Watch-only renames append `_watch`; an existing target is refused before unloading. A separate process confirms that Core's loaded SQLite lock prevents the helper from moving a loaded wallet. Filesystem tests reject unexpected files, hard links, changed directory identities, unsupported paths and overwriting an existing destination.
+
+An injected reload failure after the directory move retains an explicitly uncertain result and attempted state; a second approval never repeats the move. Old and new names must be reconciled locally. Queues bind exact contents and withdraw only unattempted work. Current remote RPC remains read-only; no Dashboard message calls the filesystem helper directly.
+
+Archive tests distinguish the exact persistent duplicate signer from a different private signing account. A unique archive cannot skip replacement. Approved renames retain the original account metadata and stable archive-member identity. Replacement does not complete at queueing; the verified-burn callback is required. The resulting encrypted package is restored again to verify its new display name and original identity. A multi-wallet replacement retains the unchanged partner wallet and qualifies full old-disc coverage only when all members are included. Physical optical hardware is not exercised by these callback/fixture tests.
+
+The production two-interpreter Dashboard Build 29/Agent Build 25 probe verifies bound queued renames, the exact `david_smsf_old_watch` target, signed per-node completion, other nodes remaining pending, cancellation locked after the first confirmation, signed public archive membership and archive rename-target discovery. Browser tests cover local review, disabled skip for unique signers, default replacement and explicit duplicate-signer skip. Native Qt/socket regression checks preserve the existing X-close and protected workspace boundaries.
+
+The full regression run passed 353 tests (601.708 seconds). After the final multi-wallet replacement guard, all 12 rename tests passed (48.640 seconds), and 13 optical/cancellation regressions passed. Ten JavaScript suites and syntax checks passed; the real offscreen Qt/socket suite passed 15 tests. Earlier current-source boundary coverage passed 40 tests. Packaging byte comparisons accompany the package-verification record. No production services, wallets, Bitcoin, SSH/firewall or pruning settings were changed. The fixed system-service/desktop lifecycle and a real optical replacement still need target-machine testing; automated tests are not an independent security audit.
+
+## Local wallet correction controls
+
+The final combined local-deletion, retirement and rename run passed **31 tests**. Isolated Core 31 tests check exact funded-wallet balances, watch-only classification, explicit confirmation, changed/expired reviews, no replay after an uncertain helper response, unchanged unrelated wallets, deleted-wallet autoload removal and the existing retirement helper's reserved Extinct protection. A separate explicit local-user envelope permits intentional deletion of that archive only after its own review. Remote RPC and proposals cannot call the local delete controls. The DOM test executes the actual button/run wrapping pattern: No closes without deletion; Yes sends the bound one-use token. It checks different card colours, pipe balances, the Dashboard eye icon and red/green confirmation classes. No production wallet was deleted.
 
 ## Build 24 reported faults and upgrade cleanup
 
@@ -12,7 +28,7 @@ The persistent-denial test opens a new Store to simulate reboot, retains old chi
 
 Eight JavaScript suites passed, including one-row/multiple-child display, locked watch-only choice and the local obsolete-denial cleanup control. The real offscreen Qt/window-close and framed-IPC suite passed 15 tests. The separate-interpreter production Dashboard Build 28/Agent Build 24 probe passes grouped queue construction, strict Agent validation, signed sender labels, Dashboard signature/binding verification and receiver acceptance. No production nodes, services, wallets, firewall rules or pruning settings were changed.
 
-The first full regression run found two test-fixture errors from reusing an isolated Core wallet directory. The fixture now uses fresh temporary nodes per test; targeted reruns passed. The clean full regression run passed **339 tests** (628.603 seconds); the final grouped transfer/upgrade regression run passed **17 tests** (68.024 seconds), including all new denial migration tests. Additional current-source workspace/denial boundaries are recorded in the accompanying Build24 test log. Physical disc and complete target-machine GUI/privilege lifecycle testing remain outstanding.
+The first full regression run found two test-fixture errors from reusing an isolated Core wallet directory. The fixture now uses fresh temporary nodes per test; targeted reruns passed. The clean full regression run passed **339 tests** (628.603 seconds); the final grouped transfer/upgrade regression run passed **17 tests** (68.024 seconds), including all new denial migration tests. Additional current-source workspace/denial boundaries are recorded in the accompanying Build25 test log. Physical disc and complete target-machine GUI/privilege lifecycle testing remain outstanding.
 
 ## Build 23 archives and public policy renewal
 

@@ -40,7 +40,7 @@ class Workspace:
         self.store=Store(root()/ 'state');self.store.identity_root=Config().root
         # Never replay the legacy non-volatile approvals.json into a new workspace.
         # Only the schema-limited denial store survives workspace shutdown.
-        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.window_required=False;self.closing=False;self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.cancellations=None;self.archives=None;self.messages=None;self.environment={};self.archive_ops=None;self.refresh_ops=None
+        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.window_required=False;self.closing=False;self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.cancellations=None;self.archives=None;self.messages=None;self.environment={};self.archive_ops=None;self.refresh_ops=None;self.renames=None
     def configure(self,environment):
         for key,value in environment.items():
             if key not in ENV or not isinstance(value,str) or len(value)>4096 or any(ord(c)<32 for c in value):raise ValueError('Invalid local display environment.')
@@ -59,6 +59,10 @@ class Workspace:
             from archive_operations import Operations
             from policy_refresh import Refresh
             self.archive_ops=Operations(self.ops.core,self.store,self.setup,self.archives,enforce);self.refresh_ops=Refresh(self.ops.core,self.store,self.archives)
+            from rename_requests import Renames
+            self.renames=Renames(self.ops.core,self.store,self.archives,self.archive_ops,self.rename_guard)
+            from local_wallets import LocalWallets
+            self.local_wallets=LocalWallets(self.ops.core,self.rename_guard)
             self.messages=Messages(self.ops.core,self.store,lambda prompt:secret_dialog(prompt,self.environment))
             from cancellation import Cancellations
             self.cancellations=Cancellations(self.ops.core,self.store,self.setup,self.ops,self.environment)
@@ -73,8 +77,11 @@ class Workspace:
                 with open(path,'rb') as f:
                     if f.read(4)==b'\x7fELF':return path
         return '/usr/bin/bitcoind'
+    def rename_guard(self):
+        enforce()
+        if self.busy() or self.archives.reading or self.ops.prepared:raise ValueError('Finish active wallet work, prepared signing reviews and archive staging before renaming a wallet.')
     def busy(self):
-        s=self.store.read();return bool(getattr(self,'archive_ops',None) and self.archive_ops.busy() or any(v['proposal']['kind']=='destroy_disc' for v in s['pending'].values()) or self.archives and (self.archives.reading) or s.get('history_jobs') or any(v.get('proposal',{}).get('kind')=='builder_cancel' for v in s['pending'].values()) or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
+        s=self.store.read();return bool(getattr(self,'archive_ops',None) and self.archive_ops.busy() or any(v['proposal']['kind']=='destroy_disc' for v in s['pending'].values()) or self.archives and (self.archives.reading) or s.get('history_jobs') or any(r['proposal']['kind']=='wallet_rename' and r['state']!='pending' for r in s['pending'].values()) or any(v.get('proposal',{}).get('kind')=='builder_cancel' for v in s['pending'].values()) or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
     def state(self):
         saved=self.store.read()
         connected=self.node_status['color']=='green'
@@ -275,15 +282,22 @@ class Workspace:
                 Exchange(args[0],args[1],self.store).once();return {'ok':True}
             if method=='authorise.review':
                 kind=self.store.read()['pending'][args[0]]['proposal']['kind']
+                if kind=='wallet_rename':return self.renames.review(args[0])
                 if kind in ('archive_wallet','destroy_disc'):return self.archive_ops.review(args[0])
                 if kind=='wallet_policy_refresh':return self.refresh_ops.review(args[0])
                 if kind=='wallet_retire':return self.retirement.review(args[0])
                 if kind=='builder_cancel':return self.cancellations.review(args[0])
                 if kind.startswith('wallet_setup'):return self.setup.review(args[0])
                 return self.ops.prepare_request(args[0])
+            if method in ('local_wallets.list','local_wallets.review','local_wallets.delete'):
+                if self.node_status['color']!='green':raise ValueError('Reconnect the node interface before managing local wallets.')
+                action=method.split('.')[1]
+                return getattr(self.local_wallets,'listing' if action=='list' else action)(*args)
+            if method=='rename.approve':return self.renames.approve(*args)
             if method=='authorise.history':return self.retirement.prepare_history(*args)
             if method=='authorise.deny':
                 p=self.store.read()['pending'][args[0]]['proposal']
+                if p['kind']=='wallet_rename':return self.renames.deny(args[0])
                 if p['kind']=='builder_cancel':raise ValueError('Choose Delete and Cancel or Backup and Cancel after reviewing this cancellation.')
                 if p['kind'].startswith('wallet_setup'):self.setup.decline(args[0])
                 else:self.store.deny(*args)

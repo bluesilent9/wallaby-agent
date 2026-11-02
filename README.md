@@ -2,11 +2,23 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 24
+# Wallaby Agent V2 — Development Build 25
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 24 DEB](dist/wallaby-agent_2.0.0~dev24_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 25 DEB](dist/wallaby-agent_2.0.0~dev25_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 25 also adds **Local wallets** at the bottom of Authorise. Cards show loaded persistent wallets using Core's own names, different colours and exact BTC pipe balances; the Dashboard eye icon marks watch-only copies. The bin opens a local confirmation with red **Yes** and green **No**, focused on No. This deletes only the selected node's wallet directory, including its local keys if present; it leaves other nodes, discs and synchronisation preferences unchanged. Deletion is not the Extinct workflow and does not preserve an address archive automatically. Only a fresh, exact local review may delete; changed wallets, active operations, unsupported/custom paths and RAM-only disc wallets are refused. Dashboard RPC cannot invoke this control.
+
+Build 25 adds queued **wallet renames** for **Dashboard V1 Build 29**. Each Agent independently reviews the old wallet, requested name and exact public descriptor identity on Authorise. A persistent node wallet is unloaded, its directory is atomically renamed without copying wallet bytes or overwriting a destination, and Core reloads it. Completion requires unchanged public policy, key capability, encryption and balance. The startup entry follows the new name. A failed or uncertain attempt is retained for reconciliation and never replayed automatically.
+
+Watch copies consistently receive the new name with one `_watch` suffix: **`david_smsf` → `david_smsf_old`**, and **`david_smsf_watch` → `david_smsf_old_watch`**. New ordinary watch-only synchronisation uses the sender's signed local wallet name with the same suffix. The reserved grouped `Wallaby Extinct` container retains its name.
+
+An archive rename preserves its original signed creation proposal, policy code, keys and every old vault-policy generation; its new display name is added to the authenticated encrypted recovery metadata. A replacement remains unfinished until every requested disc passes read-back. All members of an old multi-wallet disc must be locally loaded and retained, including unchanged wallets. The local “replacement not required because this wallet will be made extinct” choice is enabled only when a persistent private-key wallet on the same Agent contains the **exact archived signing account**. A different multisig cosigner or a Dashboard claim is insufficient. Old physical discs are unchanged by a RAM-only metadata rename or this skip choice.
+
+Verified initial and replacement burns report signed public membership so Dashboard can track Wallet Builder archives as well as later Archive Wallet copies. A rename-produced replacement is already renamed; it must not become a repeated new rename target. Legacy archives without recorded package IDs need to be read once before a task can target their actual signing route. [Rename, archive and cancellation protocol](DASHBOARD_RENAME_PROTOCOL.md).
+
+Automatic filesystem renaming supports standard `~/.bitcoin` and Bitcoin Core Snap wallet directories. Custom wallet directories require local manual reconciliation. The new fixed unprivileged rename helper accepts only reviewed, unloaded wallet-directory identities; it cannot read/copy wallet bytes, overwrite targets or rename arbitrary paths. Remote read-only RPC permissions remain unchanged. Package installation does not restart an older worker holding unfinished work.
 
 Build 24 matches **Dashboard V1 Build 28** for grouped **Extinct** synchronisation. Each sender/receiver pair gets one watch-only request containing the retired wallets; expand it to see names, addresses and funds from the sender's signed local-Core preview. Historical watch imports left in several old Core containers can be independently combined into the public preview without moving private keys. The receiver creates or extends its one `Wallaby Extinct` archive, retaining old addresses and labels; conflicting local labels block the import.
 

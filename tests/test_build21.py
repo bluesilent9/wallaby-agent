@@ -71,5 +71,5 @@ class LegacyEscape(unittest.TestCase):
   self.assertEqual(code,400);apply.assert_not_called();stop.assert_not_called()
  def test_current_unknown_or_future_open_worker_never_treated_as_broken_legacy(self):
   from app import legacy_close_window
-  for version in ('2.0.0~dev24','2.0.0~dev24','unknown',None):self.assertFalse(legacy_close_window({'viewer_open':True,'worker_version':version}))
+  for version in ('2.0.0~dev25','2.0.0~dev25','unknown',None):self.assertFalse(legacy_close_window({'viewer_open':True,'worker_version':version}))
   self.assertTrue(legacy_close_window({'viewer_open':True,'worker_version':'2.0.0~dev20'}));self.assertFalse(legacy_close_window({'viewer_open':False,'worker_version':'2.0.0~dev20'}))

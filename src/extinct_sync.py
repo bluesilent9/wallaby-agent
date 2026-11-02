@@ -91,7 +91,9 @@ def import_watch(core,store,key,p,details):
     """Keep one local archive; save exact merged recovery evidence before mutation."""
     from wallet_recovery import history_missing,earliest,require,staging_timestamp
     from wallet_labels import apply_labels
-    group=grouped(p['public_wallet']);name=ARCHIVE if group else 'Wallaby Watch '+p['transfer_id'][:24]
+    group=grouped(p['public_wallet'])
+    from wallet_rename import watch_name
+    name=ARCHIVE if group else watch_name(details['public_wallet']['wallet_name'] or 'Default wallet')
     loaded=rpc(core,'listwallets');exists=any(w['name']==name for w in rpc(core,'listwalletdir')['wallets'])
     merged=copy.deepcopy(details)
     if exists:

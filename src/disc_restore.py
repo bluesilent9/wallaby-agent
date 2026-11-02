@@ -39,7 +39,7 @@ class Archives:
                 return r
         return None
     def state(self):
-        with self.lock:return {'reading':self.reading,'message':self.message,'error':self.error,'staged':[r['review'] for r in self.staged.values()],'loaded':[{'id':k,'name':r['recovery']['proposal']['name'],'policy_hash':r['recovery']['policy_hash'],'wallets':r['keys'],'monitor':r['monitor'],'storage':'Protected RAM only','archive_id':r.get('archive_id')} for k,r in self.loaded.items()]}
+        with self.lock:return {'reading':self.reading,'message':self.message,'error':self.error,'staged':[r['review'] for r in self.staged.values()],'loaded':[{'id':k,'name':r['review']['name'],'policy_hash':r['recovery']['policy_hash'],'wallets':r['keys'],'monitor':r['monitor'],'storage':'Protected RAM only','archive_id':r.get('archive_id')} for k,r in self.loaded.items()]}
     def inspect(self,device,password):
         self.enforce()
         if not isinstance(device,str) or not re.fullmatch('/dev/sr[0-9]{1,2}',device):raise ValueError('Choose a local optical drive.')
@@ -129,7 +129,8 @@ class Archives:
             try:
                 d=Descriptor.from_string(desc);sample=d.derive(0) if d.is_wildcard else d;samples.append({'branch':'Receiving' if i==0 else 'Change','address':sample.script_pubkey().address(NETWORKS[p['chain']])})
             except Exception:pass
-        review={'id':ident,'name':p['name'],'threshold':p['threshold'],'total':len(p['cosigners']),'height':effective_height,'effective_policy_hash':digest(recovery.get('policy_extensions',[])),'chain':p['chain'],'cosigner':role['name'],'cosigner_id':role['id'],'policy_hash':expected,'receive_descriptor':descs[0],'change_descriptor':descs[1] if len(descs)>1 else descs[0],'samples':samples,'archive_id':archive_id,'additional_policies':recovery.get('policy_extensions',[])}
+        if 'display_name' in recovery:__import__('wallet_rename').name(recovery['display_name'])
+        review={'id':ident,'name':recovery.get('display_name',p['name']),'threshold':p['threshold'],'total':len(p['cosigners']),'height':effective_height,'effective_policy_hash':digest(recovery.get('policy_extensions',[])),'chain':p['chain'],'cosigner':role['name'],'cosigner_id':role['id'],'policy_hash':expected,'receive_descriptor':descs[0],'change_descriptor':descs[1] if len(descs)>1 else descs[0],'samples':samples,'archive_id':archive_id,'additional_policies':recovery.get('policy_extensions',[])}
         return ident,{'review':review,'recovery':recovery,'folder':folder,'wallet':wallet,'role':role,'archive_id':archive_id,'generic':generic}
     def load(self,ident,confirmed):
         self.enforce()
@@ -167,7 +168,7 @@ class Archives:
                     apply_labels(c,'archive-policy',r['recovery']['policy_labels'],write=True)
                 # Explicit local restore approval, never a remotely asserted ready bit.
                 first=r['review']['receive_descriptor'];address=rpc(c,'deriveaddresses',[first,[0,0]] if '*' in first else [first])[0];None if r.get('generic') else rpc(c,'setlabel',[address,'Wallaby setup ready:'+r['recovery']['policy_hash']],'archive-policy')
-                label='Disc '+r['recovery']['policy_hash'][:12]+' '+r['role']['id'];monitor=label+' policy';routes={label:'archive-key',monitor:'archive-policy'}
+                label='Disc '+(r['recovery']['display_name']+' ' if r['recovery'].get('display_name') else '')+r['recovery']['policy_hash'][:12]+' '+r['role']['id'];monitor=label+' policy';routes={label:'archive-key',monitor:'archive-policy'}
                 r.update(node=node,routes=routes,keys=[label],monitor=monitor);self.loaded[ident]=r;self.staged.pop(ident)
             except Exception:node.close();raise
             return {'message':'Archive key loaded in protected RAM. Request its signature from Dashboard, then review it on Authorise. It will be lost when unloaded or this workspace closes.'}

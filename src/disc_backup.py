@@ -186,7 +186,7 @@ class Burner:
         rows=(self.job.get('_members') or [(self.job['id'],self.job['wallets'],self.job['recovery'])]) if self.job else []
         rows+=self.pending
         result['completed_sets']=list(self.completed_sets)
-        result['queue']=[{'id':i,'name':r.get('name',r.get('proposal',{}).get('name','Wallet')),'policy_hash':r['policy_hash'],'selected':i in (self.selected if self.selected is not None else [self.job['id']] if self.job else [])} for i,w,r in rows]
+        result['queue']=[{'id':i,'name':r.get('display_name',r.get('name',r.get('proposal',{}).get('name','Wallet'))),'policy_hash':r['policy_hash'],'selected':i in (self.selected if self.selected is not None else [self.job['id']] if self.job else [])} for i,w,r in rows]
         return result
     def authorise(self,job_id,wallets,recovery):
         if self.job:raise ValueError('Finish the current disc session first.')
@@ -199,8 +199,11 @@ class Burner:
         if not self.job or self.job['phase']!='authorised' or self.job.get('_prepared'):raise ValueError('Select wallets before preparing the first disc.')
         available={self.job['id']}|{i for i,w,r in self.pending}
         if not isinstance(ids,list) or not 1<=len(ids)<=15 or len(set(ids))!=len(ids) or not set(ids)<=available:raise ValueError('Choose 1 to 15 approved archive rows.')
+        if not set(self.job.get('_required_members',[]))<=set(ids):raise ValueError('Every wallet from the original disc must remain selected for this replacement.')
         self.selected=list(ids);return {'ok':True}
     def combine(self):
+        required=self.job.get('_required_members',[])
+        if required and not set(required)<=set(self.selected or []):raise ValueError('Every wallet from the original disc must remain selected for this replacement.')
         if self.job.get('_members'):return
         if self.selected is None and self.job['recovery'].get('kind')=='node_wallet':self.selected=[self.job['id']]
         if self.job.get('_prepared') or self.selected is None:return
@@ -210,7 +213,7 @@ class Burner:
         replacements=self.replacement_resolver(chosen) if self.replacement_resolver else []
         wallets,recovery=bundle(chosen,replacements)
         self.pending=[v for v in rows if v[0] not in self.selected]
-        self.job=None;self.authorise(chosen[0][0],wallets,recovery);self.job['_members']=chosen;self.selected=[v[0] for v in chosen]
+        self.job=None;self.authorise(chosen[0][0],wallets,recovery);self.job['_members']=chosen;self.job['_required_members']=required;self.selected=[v[0] for v in chosen]
     def cancel_members(self,ids):
         if self.thread and self.thread.is_alive():raise ValueError('Wait for optical writing and verification to finish before cancelling archive members.')
         self.pending=[r for r in self.pending if r[0] not in ids]
@@ -259,7 +262,7 @@ class Burner:
                         job.update(phase='awaiting_disc',message='Disc '+str(job['discs_verified'])+' verified. Remove it, insert a fresh blank disc, then explicitly continue. The remaining recovery material stays in protected RAM.');return
                     all_verified=True;job['phase']='completing'
                     for member in job.get('_members') or [(job['id'],None,None)]:self.on_complete(member[0],sha)
-                    self.completed_sets.append({'archive_id':job.get('archive_id'),'discs_verified':job['discs_verified'],'image_sha256':sha,'wallet_names':[r.get('name',r.get('proposal',{}).get('name','Wallet')) for i,w,r in job.get('_members') or [(job['id'],None,job['recovery'])]]});self.completed_sets=self.completed_sets[-32:]
+                    self.completed_sets.append({'archive_id':job.get('archive_id'),'discs_verified':job['discs_verified'],'image_sha256':sha,'wallet_names':[r.get('display_name',r.get('name',r.get('proposal',{}).get('name','Wallet'))) for i,w,r in job.get('_members') or [(job['id'],None,job['recovery'])]]});self.completed_sets=self.completed_sets[-32:]
                     import shutil
                     shutil.rmtree(directory);job.update(phase='complete',message='Success! All '+str(disc_count)+' requested disc(s) passed complete direct read-back verification.',finished=time.time())
                 except Exception as error:

@@ -103,11 +103,12 @@ class Operations:
         row=self.jobs[key];job=self.setup.burner.job;container=job['recovery'];members=sorted(identity(r) for i,w,r in job.get('_members') or [(key,None,row['recovery'])])
         replacements=container.get('replaces',[])
         for old in replacements:self.verified_replacements[old]={'image_sha256':image_sha256,'members':members,'old_policies_retained':True,'readback_verified':True}
-        evidence={'archive_id':job.get('archive_id'),'disc_count':job['disc_count'],'readback_verified':True,'image_sha256':image_sha256,'archive_members':members,'replacements':[{ 'archive_id':old,**self.verified_replacements[old]} for old in replacements]}
+        evidence={'members':__import__('archive_inventory').evidence(job),'archive_id':job.get('archive_id'),'disc_count':job['disc_count'],'readback_verified':True,'image_sha256':image_sha256,'archive_members':members,'replacements':[{ 'archive_id':old,**self.verified_replacements[old]} for old in replacements]}
         if row['request']:result(self.store,row['request'],'complete',**evidence)
         else:
             from setup_messages import sign
             self.store.queue('archive_inventory',sign(self.store,{'version':1,'event':'replacement_verified',**evidence}))
+        if getattr(self,'rename_complete',None):self.rename_complete(key,evidence)
         row['phase']='complete'
         if row['folder']:shutil.rmtree(row['folder'])
         with self.store.edit() as s:

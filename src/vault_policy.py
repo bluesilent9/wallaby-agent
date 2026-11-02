@@ -40,6 +40,9 @@ def public_vault(v):
     return v
 
 def validate_proposal(p):
+    if isinstance(p,dict) and p.get('kind') in ('wallet_rename','wallet_rename_queue'):
+        from rename_requests import validate_task,validate_queue
+        return validate_queue(p) if p['kind']=='wallet_rename_queue' else validate_task(p)
     if isinstance(p,dict) and p.get('kind')=='wallet_archive_queue':
         from archive_requests import validate_queue
         return validate_queue(p)

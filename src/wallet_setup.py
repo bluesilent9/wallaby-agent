@@ -185,6 +185,8 @@ class WalletSetup:
         if ident not in self.disc_sessions:
             if not getattr(self,'external_burn_complete',None):raise ValueError('Unknown external archive completion.')
             return self.external_burn_complete(ident,sha)
+        from archive_inventory import initial
+        initial(self.store,self.burner.job,sha)
         binding,cosigner=self.disc_sessions[ident];session=self.sessions[binding];review=session['review']
         self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'session_id':session['proposal']['session_id'],'proposal_hash':binding,'policy_hash':review['policy_hash'],'status':'backup_verified','cosigner_file':cosigner,'image_sha256':sha}))
         session['discs_remaining'].remove(cosigner)

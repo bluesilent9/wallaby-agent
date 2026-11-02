@@ -33,7 +33,7 @@ class Exchange:
         from cancellation import held_item,blocked
         ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1)
         items=[{'id':key,**row} for key,row in ordered if not held_item(state,row)][:8]
-        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement','wallet_retirement_v2','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_policy_refresh_v1']}
+        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement','wallet_retirement_v2','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_policy_refresh_v1','wallet_rename_v1']}
         address=local_ipv6()
         if address:body['node_info']={'ipv6':address}
         self.phase='http'
@@ -54,7 +54,7 @@ class Exchange:
         self.phase='proposal_validation'
         for p in r['proposals']:
             # Record only a fixed known kind, never remote strings or payloads.
-            known={'builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc'}
+            known={'wallet_rename','wallet_rename_queue','builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc'}
             self.proposal_kind=p.get('kind') if isinstance(p,dict) and p.get('kind') in known else 'unknown'
             proposals.append(validate_proposal(p))
         self.phase='proposal_application'
@@ -68,7 +68,7 @@ class Exchange:
                 LOCAL_RETIREMENT.cancel_remote(p['request_hash'])
         for p in proposals:
             self.proposal_kind=p['kind']
-            if p['kind'] in ('wallet_sync_queue','wallet_archive_queue'):self.store.receive(p)
+            if p['kind'] in ('wallet_sync_queue','wallet_archive_queue','wallet_rename_queue'):self.store.receive(p)
         for p in proposals:
             self.proposal_kind=p['kind']
             if p['kind'] in ('builder_cancel','wallet_retire_cancel') or blocked(self.store.read(),p):continue
@@ -92,7 +92,7 @@ class Exchange:
                 public=' '.join(key.read_text().split()[:2]);self.store.queue('wallet_setup_identity',sign(self.store,{'version':1,'challenge':p['challenge'],'public_key':public,'fingerprint':fingerprint(public),'hostname':socket.gethostname()}))
             elif p['kind']=='node_identity':
                 if address:self.store.queue('node_identity',{'ipv6':address})
-            elif p['kind'] not in ('wallet_sync_queue','wallet_archive_queue'):self.store.receive(p)
+            elif p['kind'] not in ('wallet_sync_queue','wallet_archive_queue','wallet_rename_queue'):self.store.receive(p)
         self.phase='sender_preview';self.proposal_kind='wallet_transfer'
         saved=self.store.read()
         if not saved.get('sync_batch') and not saved.get('active_transfer'):

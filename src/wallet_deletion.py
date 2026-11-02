@@ -15,8 +15,8 @@ def bases(home=None):
     home=Path.home() if home is None else Path(home)
     return [base/net/'wallets' for base in (home/'.bitcoin',home/'snap/bitcoin-core/common/.bitcoin') for net in ('','testnet3','testnet4','signet','regtest')]
 
-def target(core,name):
-    if not isinstance(name,str) or not name or name in ('.','..','Wallaby Extinct') or '/' in name or '\\' in name:raise ValueError('Automatic retirement requires a named wallet directory, not a default wallet or path.')
+def target(core,name,allow_extinct=False):
+    if not isinstance(name,str) or not name or (name in ('.','..') or name=='Wallaby Extinct' and not allow_extinct) or '/' in name or '\\' in name:raise ValueError('Automatic retirement requires a named wallet directory, not a default wallet or path.')
     base=Path(core.config['cookie']).expanduser().resolve().parent/'wallets'
     path=base/name
     if not path.is_dir() or path.is_symlink():raise ValueError('Cannot safely locate this wallet under the Core cookie directory. Custom wallet directories require local review; no wallet was deleted.')
@@ -24,10 +24,10 @@ def target(core,name):
     if info.st_uid!=os.getuid() or not stat.S_ISREG(db.st_mode) or db.st_uid!=os.getuid() or db.st_nlink!=1:raise ValueError('Unsafe wallet directory or database ownership.')
     return {'path':str(path),'directory':[info.st_dev,info.st_ino],'database':[db.st_dev,db.st_ino]}
 
-def remove(request,allowed=None):
+def remove(request,allowed=None,allow_extinct=False):
     if not isinstance(request,dict) or set(request)!={'path','directory','database'}:raise ValueError('Invalid deletion request.')
     path=Path(request['path'])
-    if not path.is_absolute() or path.name in ('.','..','Wallaby Extinct') or path.parent not in (bases() if allowed is None else allowed):raise ValueError('Wallet directory is outside the supported Core wallet locations.')
+    if not path.is_absolute() or (path.name in ('.','..') or path.name=='Wallaby Extinct' and not allow_extinct) or path.parent not in (bases() if allowed is None else allowed):raise ValueError('Wallet directory is outside the supported Core wallet locations.')
     for parent in (path,*path.parents):
         if parent.is_symlink():raise ValueError('Wallet paths must not contain symbolic links.')
     parent=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
@@ -61,8 +61,8 @@ def remove(request,allowed=None):
 
 def socket_path():return Path('/run/wallaby-agent-retirement')/str(os.getuid())/'delete.sock'
 
-def delete(request):
-    raw=json.dumps(request).encode()
+def delete(request,manual=False):
+    raw=json.dumps({'local_user_delete':request} if manual else request).encode()
     if len(raw)>4096:raise ValueError('Deletion metadata exceeds its limit.')
     try:
         with socket.socket(socket.AF_UNIX) as sock:
@@ -98,7 +98,8 @@ class Handler(socketserver.BaseRequestHandler):
                     if sent<len(packet):self.request.sendall(packet[sent:])
                 finally:os.close(fd)
                 return
-            reply=remove(request)
+            if isinstance(request,dict) and set(request)=={'local_user_delete'}:reply=remove(request['local_user_delete'],allow_extinct=True)
+            else:reply=remove(request)
         except Exception:reply={'deleted':False}
         try:
             raw=json.dumps(reply).encode();self.request.sendall(struct.pack('!I',len(raw))+raw)
