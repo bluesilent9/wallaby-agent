@@ -79,13 +79,26 @@ def prepare(core,store,key,p):
     store.queue('wallet_transfer_preview',{'request_hash':key,**payload});return payload
 
 def receive(store,payload):
-    candidates=[(key,row) for key,row in store.read()['pending'].items() if row['proposal']['kind']=='wallet_transfer' and row['proposal']['direction']=='receive' and row['proposal']['transfer_id']==payload.get('preview',{}).get('transfer_id')]
+    state=store.read();transfer_id=payload.get('preview',{}).get('transfer_id')
+    candidates=[(key,row) for key,row in state['pending'].items() if row['proposal']['kind']=='wallet_transfer' and row['proposal']['direction']=='receive' and row['proposal']['transfer_id']==transfer_id]
+    suppressed=False
+    if not candidates:
+        from sync_preferences import policy_id
+        # A just-disabled row can still have an in-flight Dashboard preview.
+        # Bind it to the last authoritative snapshot and verify normally, but
+        # never recreate the row or store/authorise its preview.
+        disabled=[p for p in state.get('sync_snapshot_requests',[]) if p['direction']=='receive' and p['transfer_id']==transfer_id and policy_id(p) in state.get('sync_exclusions',{})]
+        if len(disabled)==1:candidates=[(digest(disabled[0]),{'proposal':disabled[0]})];suppressed=True
     if len(candidates)!=1:raise ValueError('No unique paired receiving request.')
     key,row=candidates[0]
     if not row or row['proposal']['direction']!='receive':raise ValueError('No paired receiving request is active.')
     p=row['proposal'];proof=verify(store,payload);v=payload['preview']
     if v['version']!=(2 if p.get('transfer_version')==2 else 1):raise ValueError('Preview protocol differs from request.')
     if v['transfer_id']!=p['transfer_id'] or v['challenge']!=p.get('preview_challenge') or v['sender_ipv6']!=p['peer']['ipv6'] or v['receiver_ipv6']!=p.get('node_ipv6') or descriptors(v['public_wallet'])!=descriptors(p['public_wallet']):raise ValueError('Signed preview does not match the active wallet, challenge and peer addresses.')
+    if suppressed:
+        from activity_log import event
+        event('sync.preview','Ignored verified in-flight preview for a locally disabled incoming policy. No transfer authorised.')
+        return {**proof,'ignored':'locally_disabled'}
     with store.edit() as s:
         if key not in s['pending'] or s['pending'][key].get('withdrawn'):raise ValueError('Request was withdrawn.')
         previous=s.setdefault('transfer_previews',{}).get(key)

@@ -2,11 +2,13 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 25
+# Wallaby Agent V2 — Development Build 26
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 25 DEB](dist/wallaby-agent_2.0.0~dev25_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 26 DEB](dist/wallaby-agent_2.0.0~dev26_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 26 fixes an in-flight synchronisation-preview race: a sender-verified preview arriving immediately after the receiving user disables that policy is checked against the authoritative request and signature, then ignored. It cannot recreate the disabled request, authorise a transfer or block unrelated previews/outbox acknowledgements. Unknown requests, altered bindings, bad signatures and replacement of an active verified preview are still refused. This complements the Dashboard's exchange handling fix; it does not itself recreate requests withheld by the Dashboard. [Testing and integration details](AGENT_BUILD26_SYNC.md).
 
 Build 25 also adds **Local wallets** at the bottom of Authorise. Cards show loaded persistent wallets using Core's own names, different colours and exact BTC pipe balances; the Dashboard eye icon marks watch-only copies. The bin opens a local confirmation with red **Yes** and green **No**, focused on No. This deletes only the selected node's wallet directory, including its local keys if present; it leaves other nodes, discs and synchronisation preferences unchanged. Deletion is not the Extinct workflow and does not preserve an address archive automatically. Only a fresh, exact local review may delete; changed wallets, active operations, unsupported/custom paths and RAM-only disc wallets are refused. Dashboard RPC cannot invoke this control.
 

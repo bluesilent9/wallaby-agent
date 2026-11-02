@@ -1,6 +1,10 @@
-# Agent V2 Development Build 25 validation
+# Agent V2 Development Build 26 validation
 
-Final regression/focused results are in the accompanying Build25 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+Current focused results are in the accompanying Build26 test log; prior Build25 regression coverage is retained below. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+
+## Build 26 disabled-preview exchange race
+
+All **21 targeted tests passed** (2.450 seconds). Four new regression tests use real Ed25519 SSH signatures: 11 distinct wallet requests reduce to one after ten local denials, all 11 return after explicit re-enabling, a disabled in-flight preview cannot block another valid preview or an outbox acknowledgement, malformed signatures/changed bindings remain refused, and no fallback is permitted without an exact authoritative snapshot request. Existing preview replacement, replay, queue authority and exchange error/acknowledgement tests also pass. No production node or denial preference was modified. This narrow change does not alter private wallet, disc, lifecycle, native-window or SSH functionality.
 
 ## Build 25 local rename and archive coordination
 
