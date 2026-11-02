@@ -1,6 +1,20 @@
-# Agent V2 Development Build 27 validation
+# Agent V2 Development Build 28 validation
 
-Current focused results are in the accompanying Build27 test log; prior Build25 regression coverage is retained below. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+Current results are in the accompanying Build28 test log; prior Build25 regression coverage is retained below. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+
+## Build 28 three-Agent synchronisation and request lifetime
+
+The supplied Dashboard log records `preview_expired:11` for each cold receiver and `preview_expired:22` for the sender. The Agents correctly logged zero incoming requests and zero local exclusions. Dashboard Build 32 retains the pending requests; Agent Build 28 retains their exact signed public reviews beyond the former 15-minute limit while continuing to enforce the active request binding and live wallet checks.
+
+The clean full Python regression run passed **381 tests** (617.255 seconds). After the final bounded sender-review cache was added, **35 focused tests** passed (8.506 seconds). These include changed/future/withdrawn/misbound review refusal, no-UI identity startup, live-data rejection before SSH/backup, exact comparison-code restoration across temporary withdrawals, persistent denial and queue authority, and the legacy close compatibility guard. A prior full run exposed that legacy nonblocking-close compatibility regression; it is corrected, and the clean full run above passes. **16 offscreen Qt/framed-socket tests** and **10 JavaScript suites/syntax checks** also pass.
+
+The final `integration_sync_cluster.py` run uses three independent Agent processes, the production Dashboard Build 32 HTTP listener/RPC broker and three real isolated Core 31 nodes. Core wallet counts begin **13 / 2 / 2**. Actual discovery, permission signatures and pairing produce **22 sender requests and 11 for each receiver**. The test disables/re-enables one recipient policy, reconnects a receiver, advances public-review clocks by 1,000 seconds and restarts Dashboard. It waits for actual live permissions, inventory and authoritative queues rather than accepting only cached UI counts.
+
+Every one of the **22 independently displayed review codes matches** after reconnects. One locally selected sending batch completes **all 22 transfers** to both independently authorised recipients. It includes watch-only wallets, grouped Extinct metadata/labels, and one encrypted full private-key wallet to each receiver. Actual Core backup/import and wallet/history checks run; receiving Core wallet counts become 13 / 13, with the correct three private-key-enabled wallets on each, verified balances, cleared credential strings and empty final request lists after actual completion receipts.
+
+Test adapters explicitly select regtest in Dashboard network validation/health, supply fixture MAC/IPv6 identities, and replace SSH transport/readiness with same-user local relays. Signed public messages, request validation, pairing, batching, framing, Core database operations and receipts are not stubbed. Mainnet-only validation remains unchanged in the installed Dashboard. No live coins, user wallets, services, firewall or node settings were used or changed. This test does not prove real SSH authentication, IPv6 reachability, modem/UFW configuration or installed OS protection/lifecycle behavior; see AGENT_BUILD28_SYNC.md.
+
+Initial integration attempts identified test-harness setup problems (missing Dashboard health polling, mainnet-only checks versus regtest and the Unix-socket path length). The final runner documents these adapters and uses short isolated runtime paths. Only the passing final integration log/result is exported as the release result.
 
 ## Build 27 native close and cleanup
 

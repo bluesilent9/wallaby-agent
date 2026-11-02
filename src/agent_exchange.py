@@ -91,6 +91,7 @@ class Exchange:
                 from pathlib import Path
                 import socket
                 key=getattr(self.store,'identity_root',self.store.root)/'preview_identity.pub'
+                if not key.exists():sign(self.store,{'purpose':'identity-initialisation','version':1})
                 public=' '.join(key.read_text().split()[:2]);self.store.queue('wallet_setup_identity',sign(self.store,{'version':1,'challenge':p['challenge'],'public_key':public,'fingerprint':fingerprint(public),'hostname':socket.gethostname()}))
             elif p['kind']=='node_identity':
                 if address:self.store.queue('node_identity',{'ipv6':address})

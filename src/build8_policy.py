@@ -67,7 +67,7 @@ def proposal(p):
     elif kind=='wallet_transfer_preview':
         if set(p)!={'kind','preview','public_key','signature'}:raise ValueError('Invalid preview delivery.')
         from wallet_preview import validate_preview
-        validate_preview({k:p[k] for k in ('preview','public_key','signature')})
+        validate_preview({k:p[k] for k in ('preview','public_key','signature')},fresh=False)
     elif kind in ('sign_psbt_partial','broadcast_transaction'):
         required={'kind','request_id','chain','psbt'}|({'wallet'} if kind=='sign_psbt_partial' else {'txid'})
         allowed=required|{'output_policies'}|({'vault_intents'} if kind=='sign_psbt_partial' else set())

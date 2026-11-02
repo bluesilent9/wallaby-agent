@@ -2,11 +2,17 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 27
+# Wallaby Agent V2 — Development Build 28
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 27 DEB](dist/wallaby-agent_2.0.0~dev27_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 28 DEB](dist/wallaby-agent_2.0.0~dev28_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 28 pairs with **Dashboard V1 Build 32** to keep synchronisation requests and their exact signed public reviews available beyond the former 15-minute preview lifetime. Older reviews are accepted only against the exact active request, signature, challenge, public policy and both peer endpoints. Approval and independent fingerprint checks remain local. Sender and receiver still compare live Core data immediately before importing or sending a wallet; altered wallet data is refused. The page displays the signed snapshot's UTC date.
+
+A bounded sender-review cache stays in protected RAM across temporary peer withdrawals, preserving comparison codes when the same request returns. It never restores an authorisation or reuses a review for a new challenge. The identity handshake can initialise its Agent-only identity without depending on a page visit. Legacy native close admission keeps its original nonblocking behavior; the modern X gate retains Build 27's bounded wait.
+
+Multi-recipient synchronisation is a single selected batch, processed sequentially one wallet/peer at a time. Each receiving Agent independently authorises its own selected wallets and signing fingerprint; the sender supplies separate verified SSH credentials for each recipient. [Three-Agent/Core integration test and limits](AGENT_BUILD28_SYNC.md).
 
 Build 27 improves native protected-window close and safe cleanup. The X close gate can wait up to ten seconds for a short in-flight local action, then rechecks the existing private-work, archive and delivery guards. Accepted closing stops the node session immediately; late exchange replies are discarded without acknowledging unprocessed data or logging an intentional stop as a connection failure. A transient status refresh is marked separately from unfinished wallet work. Cleanup contention gets bounded, guarded automatic retries; it never forces away private work. Close refusals and sync snapshots now log useful fixed categories/counts. Re-enabling a wallet explains when the Dashboard has not offered an active request. [Build 27 findings and validation](AGENT_BUILD27_LIFECYCLE.md).
 

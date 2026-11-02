@@ -1,0 +1,23 @@
+# Agent V2 Build 28 / Dashboard V1 Build 32 synchronisation
+
+## Cause and Agent corrections
+
+The supplied logs show all three Agents received empty authoritative snapshots and had zero local exclusions. Dashboard's 15-minute expiry was hiding entire pending requests; Dashboard Build 32 removes that expiry. Agent also previously rejected an older signed review at schema verification, receiving authorisation and sending batch validation. Build 28 keeps unbound signature verification fresh by default but permits an older review only through exact request binding: transfer ID, challenge, public descriptors, direction and both IPv6 endpoints. Future/malformed timestamps, signatures and changed bindings are still refused. Active verified reviews cannot be silently replaced.
+
+Before transmission, the sender queries its own Core and compares the wallet policy, labels, vault data and each funded outpoint/amount/receipt block against the signed review. The receiver independently checks the direct peer's live manifest against that review, then verifies the imported wallet/history through its own Core. An old public review is not authority to sign, export or import anything by itself. Sender fingerprint/SSH host-key checks and separate local authorisations stay in place.
+
+Temporary withdrawal previously discarded the sender's comparison code while Dashboard retained the frozen review. Build 28 caches that signed sender review only in protected RAM, bounded to 128 entries and 2 MiB. Only the identical request key may restore it, and its signature and bindings are checked again. A new challenge gets a new review; a local denial remains authoritative. This cache does not survive clearing a whole protected workspace. If a new sender workspace produces a different code from an earlier frozen Dashboard review, reconcile the wallet and request fresh reviews through Nodes; do not ignore differing codes.
+
+The Agent identity handshake no longer relies on a page having initialised its public identity first. The ordinary protected-workspace starter already creates this Agent-only identity before entering its read-only mount; the fix also makes the exchange entry point independently usable. No Bitcoin key is involved.
+
+## Reproducible integration test
+
+Run `tests/integration_sync_cluster.py run AGENT_SRC DASHBOARD_SRC OUTPUT_DIRECTORY` with `WALLABY_TEST_BITCOIND` pointing to official Core 31. It starts a production Dashboard Agent HTTP listener/RPC broker, three independent Agent processes and three isolated real Core regtest instances. No test sets wallet inventories, pairing, request lists, identities, permissions, signed previews or completion results directly.
+
+The source has 13 wallets; each receiving cold node initially has the same two private-key wallets. Production discovery and pairing must yield 22 sender rows and 11 rows on each receiver. The sequence disables/enables one incoming policy without changing the other recipient, reconnects one recipient, advances all public-review clocks by 1,000 seconds, restarts Dashboard, compares all sender/receiver review codes, independently authorises both recipients and submits one send batch. It includes ordinary watch copies, grouped Extinct data with labels, and one encrypted full signing wallet for each recipient. The receiving Core databases, private-key flags, balances, all completion receipts, credential clearing and empty final queues are checked.
+
+Test-only boundaries are explicit: Dashboard's network constants/health and preview chain guard select regtest so invented coins and real unaltered regtest descriptors/scripts can be used. Fixture MAC/IPv6 identities stand in for three computers. SSH readiness and authenticated SSH pipes are replaced with same-user local relays; real framing, Core backup/import, wallet verification, Agent signatures and the production Dashboard HTTP/broker/queue/permissions implementations are exercised. The test does not validate real IPv6 routing, modem/UFW rules, SSH password authentication, Polkit, AppArmor, non-swapping RAM evidence or installed-system services. Those protections and network setup are not bypassed in the shipped application; these adapters exist only in the test runner.
+
+## Validation
+
+The clean full regression run passed 381 tests; 35 focused tests followed the final sender-cache addition. The final three-process run passed all 22 transfers and all 22 matching comparison codes, with 13 / 13 final receiver wallets and empty final queues. Sixteen native Qt/socket tests and ten JavaScript suites also pass. See VALIDATION.md and the accompanying Build28 test log/result. Functional regression checks are not a substitute for target-machine/network testing.

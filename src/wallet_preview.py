@@ -21,7 +21,7 @@ def fingerprint(public_key):
     if len(raw)!=51 or raw[:19]!=b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20':raise ValueError('Invalid Ed25519 key format.')
     return 'SHA256:'+base64.b64encode(hashlib.sha256(raw).digest()).decode().rstrip('=')
 
-def validate_preview(payload):
+def validate_preview(payload,fresh=True):
     from peer_wallet import validate_details
     if not isinstance(payload,dict) or set(payload)!={'preview','public_key','signature'}:raise ValueError('Invalid signed wallet preview.')
     p=payload['preview'];required={'version','transfer_id','challenge','sender_ipv6','receiver_ipv6','public_wallet','chain','funded_outputs','node_tip','generated_at'}
@@ -31,7 +31,8 @@ def validate_preview(payload):
     ipv6(p['sender_ipv6']);ipv6(p['receiver_ipv6']);descriptors(p['public_wallet'])
     validate_details({k:p[k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels') if k in p})
     if not isinstance(p['node_tip'],dict) or set(p['node_tip'])!={'height','hash'} or type(p['node_tip']['height']) is not int or not 0<=p['node_tip']['height']<500000000 or not re.fullmatch('[0-9a-f]{64}',str(p['node_tip']['hash'])):raise ValueError('Invalid preview block reference.')
-    if type(p['generated_at']) is not int or not time.time()-900<=p['generated_at']<=time.time()+120:raise ValueError('Wallet preview expired or has a future timestamp. Start a fresh request.')
+    stamp=p['generated_at'];now=time.time()
+    if type(stamp) is not int or not 0<stamp<=now+120 or fresh and stamp<now-900:raise ValueError('Wallet preview expired or has a future timestamp. Start a fresh request.')
     fingerprint(payload['public_key'])
     if not isinstance(payload['signature'],str) or len(payload['signature'])>4096:raise ValueError('Invalid preview signature size.')
     try:signature=base64.b64decode(payload['signature'],validate=True)
@@ -54,13 +55,26 @@ def sign(store,preview):
         subprocess.run(['/usr/bin/ssh-keygen','-Y','sign','-f',str(key),'-n',NAMESPACE,str(file)],check=True,capture_output=True,timeout=10)
         return {'preview':preview,'public_key':public,'signature':base64.b64encode(file.with_suffix('.sig').read_bytes()).decode()}
 
-def verify(store,payload):
-    p=validate_preview(payload)
+def verify(store,payload,fresh=True):
+    p=validate_preview(payload,fresh=fresh)
     with tempfile.TemporaryDirectory(dir=store.root) as root:
         allowed=Path(root)/'allowed';signature=Path(root)/'signature';allowed.write_text('wallaby-preview '+payload['public_key']+'\n');signature.write_bytes(base64.b64decode(payload['signature'],validate=True))
         result=subprocess.run(['/usr/bin/ssh-keygen','-Y','verify','-f',str(allowed),'-I','wallaby-preview','-n',NAMESPACE,'-s',str(signature)],input=canonical(p),capture_output=True,timeout=10)
         if result.returncode:raise ValueError('The sending Agent’s public preview signature is invalid.')
     return {'fingerprint':fingerprint(payload['public_key']),'preview_hash':digest(p)}
+
+def verify_bound(store,payload,p):
+    """A frozen review belongs to one active request, not a 15-minute session.
+
+    This never approves a transfer. Both peers still compare live Core facts
+    against this immutable signed review immediately before any wallet data moves.
+    """
+    proof=verify(store,payload,fresh=False);v=payload['preview']
+    if v['version']!=(2 if p.get('transfer_version')==2 else 1):raise ValueError('Preview protocol differs from request.')
+    sender=p['node_ipv6'] if p['direction']=='send' else p['peer']['ipv6']
+    receiver=p['peer']['ipv6'] if p['direction']=='send' else p['node_ipv6']
+    if v['transfer_id']!=p['transfer_id'] or v['challenge']!=p.get('preview_challenge') or v['sender_ipv6']!=sender or v['receiver_ipv6']!=receiver or descriptors(v['public_wallet'])!=descriptors(p['public_wallet']):raise ValueError('Signed preview does not match the active wallet, challenge and peer addresses.')
+    return proof
 
 def prepare(core,store,key,p):
     from peer_wallet import wallet_details,local_ipv6
@@ -92,9 +106,7 @@ def receive(store,payload):
     if len(candidates)!=1:raise ValueError('No unique paired receiving request.')
     key,row=candidates[0]
     if not row or row['proposal']['direction']!='receive':raise ValueError('No paired receiving request is active.')
-    p=row['proposal'];proof=verify(store,payload);v=payload['preview']
-    if v['version']!=(2 if p.get('transfer_version')==2 else 1):raise ValueError('Preview protocol differs from request.')
-    if v['transfer_id']!=p['transfer_id'] or v['challenge']!=p.get('preview_challenge') or v['sender_ipv6']!=p['peer']['ipv6'] or v['receiver_ipv6']!=p.get('node_ipv6') or descriptors(v['public_wallet'])!=descriptors(p['public_wallet']):raise ValueError('Signed preview does not match the active wallet, challenge and peer addresses.')
+    p=row['proposal'];proof=verify_bound(store,payload,p)
     if suppressed:
         from activity_log import event
         event('sync.preview','Ignored verified in-flight preview for a locally disabled incoming policy. No transfer authorised.')

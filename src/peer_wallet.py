@@ -202,10 +202,10 @@ class Transfer:
         with self.lock:
             current,row=active(self.store)
             if key!=current or not row or row['proposal']['direction']!='receive':raise ValueError('Review the active receiving request.')
-            from wallet_preview import verify
+            from wallet_preview import verify_bound
             payload=self.store.read().get('transfer_previews',{}).get(key)
             if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('The initial node-verified wallet preview is missing. Dashboard Build 8 needs the documented preview protocol update; receiving is disabled until then.')
-            proof=verify(self.store,payload)
+            proof=verify_bound(self.store,payload,row['proposal'])
             if sender_fingerprint!=proof['fingerprint']:raise ValueError('The Agent identity fingerprint must match the sending Agent’s own screen. Dashboard is not a trusted source for it.')
             if row['state']!='pending':raise ValueError('This receiving request was already attempted. Reconcile it before retrying.')
             if not readiness(row['proposal'])['listening']:raise ValueError('Start the receiving machine’s IPv6 SSH listener using the displayed instructions, then Authorise again.')
@@ -345,8 +345,8 @@ class Transfer:
             if not isinstance(fingerprint,str) or not re.fullmatch('SHA256:[A-Za-z0-9+/]{43}',fingerprint):raise ValueError('Compare and enter the fingerprint shown on the receiving Agent. Do not obtain it from Dashboard.')
             payload=self.store.read().get('transfer_previews',{}).get(key)
             if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('Dashboard needs the initial signed-preview protocol update before this wallet can be sent. No credentials or wallet file were sent.')
-            from wallet_preview import verify
-            verify(self.store,payload)
+            from wallet_preview import verify_bound
+            verify_bound(self.store,payload,row['proposal'])
             p=row['proposal'];peer=ipv6(p['peer']['ipv6']);own=local_ipv6(peer)
             if not own:raise ValueError('No routable local IPv6 route to the receiving peer.')
             details=wallet_details(self.core,p,self.store)

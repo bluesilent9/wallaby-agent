@@ -1,5 +1,5 @@
 """Dashboard-owned request list; selection and transfer authority are local only."""
-import socket,time
+import socket,time,json
 from approval_store import digest,MAX_ITEMS
 
 
@@ -24,7 +24,15 @@ def apply_snapshot(store,revision,requests):
             if row['proposal']['kind']=='wallet_transfer' and key not in rows:
                 if key==s.get('active_transfer') or row['state']!='pending':
                     row['withdrawn']=True # Audit an operation already attempted; never erase its outcome.
-                else:s['pending'].pop(key);s.get('transfer_previews',{}).pop(key,None);s.get('sync_choices',{}).pop(key,None)
+                else:
+                    # Keep an unchanged sender review across a temporary peer
+                    # disconnect. Re-signing it would change the independently
+                    # compared code while Dashboard retains the frozen original.
+                    payload=s.get('transfer_previews',{}).pop(key,None)
+                    if payload and row['proposal']['direction']=='send':
+                        cache=s.setdefault('sync_review_cache',{});cache[key]=payload
+                        while len(cache)>MAX_ITEMS or len(json.dumps(cache).encode())>2*1024*1024:cache.pop(next(iter(cache)))
+                    s['pending'].pop(key);s.get('sync_choices',{}).pop(key,None)
         s['sync_snapshot_requests']=requests
         from sync_preferences import policy_id
         for key,p in rows.items():
@@ -32,6 +40,11 @@ def apply_snapshot(store,revision,requests):
             if key not in s['pending'] and key not in s['completed']:
                 if len(s['pending'])>=MAX_ITEMS:raise ValueError('Authorisation queue is full.')
                 s['pending'][key]={'proposal':p,'received':time.time(),'state':'pending'}
+                cached=s.get('sync_review_cache',{}).pop(key,None) if p['direction']=='send' else None
+                if cached:
+                    from wallet_preview import verify_bound
+                    verify_bound(store,cached,p)
+                    s.setdefault('transfer_previews',{})[key]=cached
         s['sync_revision']=revision;s['sync_snapshot_hash']=content
         offered_receive=sum(p['direction']=='receive' for p in requests);offered_send=len(requests)-offered_receive;disabled=sum(p['direction']=='receive' and policy_id(p) in s.get('sync_exclusions',{}) for p in requests);visible=sum(row['proposal']['kind']=='wallet_transfer' and not row.get('withdrawn') for row in s['pending'].values())
     from activity_log import event

@@ -2,7 +2,7 @@
 import threading,time
 from peer_wallet import Transfer,active,readiness
 from sync_queue import rows,selected,freeze,release
-from wallet_preview import verify
+from wallet_preview import verify_bound
 from wallet_recovery import Recovery
 
 class BatchTransfer(Transfer):
@@ -26,13 +26,13 @@ class BatchTransfer(Transfer):
             if p.get('transfer_version')!=2:raise ValueError('Multiple and watch-only transfers require the documented Build 8 queue/transfer protocol from Dashboard.')
             payload=saved.get('transfer_previews',{}).get(key)
             if not payload:raise ValueError('Each selected wallet needs its signed initial public preview before authorisation.')
-            verify(self.store,payload)
+            verify_bound(self.store,payload,p)
     def authorise_batch(self,fingerprints):
         keys=selected(self.store,'receive');self.validate_batch(keys,'receive')
         saved=self.store.read()
         if not isinstance(fingerprints,dict) or set(fingerprints)!=set(keys):raise ValueError('Independently compare every sending Agent fingerprint.')
         for key in keys:
-            proof=verify(self.store,saved['transfer_previews'][key])
+            proof=verify_bound(self.store,saved['transfer_previews'][key],saved['pending'][key]['proposal'])
             if fingerprints[key]!=proof['fingerprint']:raise ValueError('A sending Agent fingerprint does not match. Compare it directly on that computer.')
         if not readiness(saved['pending'][keys[0]]['proposal'])['listening']:raise ValueError('Start the receiving machine’s IPv6 SSH listener using the displayed instructions.')
         freeze(self.store,keys,'receive')

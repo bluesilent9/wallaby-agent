@@ -217,7 +217,8 @@ class Workspace:
                 if len(args)!=1 or type(args[0]) not in (int,float,Decimal):raise ValueError('Invalid legacy close request.')
                 deadline=args[0]
                 if isinstance(deadline,Decimal) and not deadline.is_finite() or not time.monotonic()<deadline<time.monotonic()+8:raise ValueError('Close request expired; no workspace state was changed.')
-            if not self.lock.acquire(timeout=10 if method=='ui.request_close' else max(0,min(4,float(deadline)-time.monotonic()))):
+            admitted=self.lock.acquire(timeout=10) if method=='ui.request_close' else self.lock.acquire(blocking=False)
+            if not admitted:
                 from activity_log import event
                 event('workspace.close','Close deferred · reason=local_action_in_progress · RAM retained')
                 raise ValueError('Finish the active protected operation before closing. A local action is still responding; no workspace was discarded.')

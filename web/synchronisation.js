@@ -40,6 +40,7 @@ function renderSync(t){
 }
 function renderWallet(t){
  const p=t.proposal,receive=p.direction==='receive',setup=t.setup,box=el('section',{class:'server-card result-card'},el('h3',{},receive?'Receiving wallet details':'Sending wallet details'),el('p',{},'Wallet: '+(t.details?.public_wallet?.wallet_name||p.public_wallet.wallet_name)),el('p',{class:'hint'},'Wallet names are labels. Compare the public descriptors and signed preview code with the other computer using a channel independent of Dashboard.'));
+ if(t.initial_preview?.preview?.generated_at)box.append(el('p',{class:'hint'},'Signed public snapshot: '+new Date(t.initial_preview.preview.generated_at*1000).toISOString().replace('T',' ').replace('.000Z',' UTC')+'. This is a review snapshot. Both Agents recheck live wallet details before transfer; changed wallet data requires a new review.'));
  if(t.preview_error)box.append(el('p',{class:'warning'},t.preview_error));
  const group=(t.rows||[]).find(r=>r.id===t.id);if(group?.extinct_group){box.append(el('h3',{},'Retired wallets inside this Extinct archive'));for(const c of group.extinct_children||[])box.append(el('article',{class:'public-fact'},el('strong',{},c.name),el('p',{},c.addresses.length+' address(es) · '+pipe(c.amount_sats)),...c.addresses.map(a=>el('code',{},a))));}
  const descriptors=t.details?.public_wallet?.descriptors||p.public_wallet.descriptors,details=el('details',{},el('summary',{},'Public descriptors ('+descriptors.length+')'));
