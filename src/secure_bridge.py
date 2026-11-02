@@ -133,7 +133,8 @@ def stop():
     with (runtime_dir()/'worker-upgrade.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
         peer={};state=call('service_status',peer=peer)
-        if state['busy']:raise ValueError('Finish the wallet setup, physical discs, transfer or history recovery before closing the protected workspace.')
+        if state.get('status_pending'):raise WorkspaceFailure('workspace_status_pending','Protected status is still being refreshed. Safe cleanup can retry after this local action finishes.')
+        if state['busy']:raise WorkspaceFailure('workspace_busy','Finish the wallet setup, physical discs, transfer or history recovery before closing the protected workspace.')
         flag=runtime_dir()/'worker-upgrading';flag.write_text('closing\n')
         try:
             prepare_stop(peer)

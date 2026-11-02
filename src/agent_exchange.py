@@ -12,8 +12,9 @@ from approval_store import Store
 from node_client import http_json,HTTPFailure
 
 class Exchange:
-    def __init__(self,port,token,store=None):self.port=port;self.token=token;self.store=store;self.unsupported=False;self.phase='local_outbox';self.proposal_kind='none'
+    def __init__(self,port,token,store=None):self.port=port;self.token=token;self.store=store;self.unsupported=False;self.phase='local_outbox';self.proposal_kind='none';self.cancelled=lambda:False
     def once(self):
+        if self.cancelled():return
         self.phase='local_outbox';self.proposal_kind='none'
         from protected_memory import required,inside
         if required() and not inside():
@@ -44,6 +45,7 @@ class Exchange:
                 with self.store.edit() as s:s['sync']='Dashboard does not yet support vault/signing exchange. Public data and unsigned PSBT exports remain queued locally.'
                 return
             raise
+        if self.cancelled():return
         self.phase='response'
         if not isinstance(r,dict) or set(r)!={'version','accepted','proposals'} or type(r['version']) is not int or r['version']!=1 or not isinstance(r['accepted'],list) or not isinstance(r['proposals'],list) or len(r['proposals'])>16:raise ValueError('Invalid Dashboard exchange response.')
         sent={i['id'] for i in items}
@@ -125,10 +127,11 @@ class Exchange:
             return ConnectionFailure('dashboard','exchange_'+reason,'Agent rejected Dashboard exchange data at '+self.phase+' ('+self.proposal_kind+'); category '+reason+'. Queued data retained. Compare the Dashboard protocol log; no rejected request authorised a wallet operation.')
         return failure
     def run(self,stop):
-        while not stop.is_set() and not self.unsupported:
+        while not stop.is_set() and not self.unsupported and not self.cancelled():
             delay=2
             try:self.once()
             except Exception as error:
+                if self.cancelled():return
                 from activity_log import event
                 failure=self.failure(error);delay=30
                 event('dashboard.exchange','Exchange failed · endpoint=/agent/v2/exchange · phase='+self.phase+' · kind='+self.proposal_kind+' · '+failure.stage+' · '+failure.code+' · retry_s=30 · '+str(failure))

@@ -33,6 +33,9 @@ def apply_snapshot(store,revision,requests):
                 if len(s['pending'])>=MAX_ITEMS:raise ValueError('Authorisation queue is full.')
                 s['pending'][key]={'proposal':p,'received':time.time(),'state':'pending'}
         s['sync_revision']=revision;s['sync_snapshot_hash']=content
+        offered_receive=sum(p['direction']=='receive' for p in requests);offered_send=len(requests)-offered_receive;disabled=sum(p['direction']=='receive' and policy_id(p) in s.get('sync_exclusions',{}) for p in requests);visible=sum(row['proposal']['kind']=='wallet_transfer' and not row.get('withdrawn') for row in s['pending'].values())
+    from activity_log import event
+    event('sync.queue','Dashboard snapshot applied · revision='+str(revision)+' · receiving='+str(offered_receive)+' · sending='+str(offered_send)+' · locally_disabled='+str(disabled)+' · visible='+str(visible))
 
 
 def choose(store,key,selected,watch_only):

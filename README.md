@@ -2,11 +2,15 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 26
+# Wallaby Agent V2 — Development Build 27
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 26 DEB](dist/wallaby-agent_2.0.0~dev26_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 27 DEB](dist/wallaby-agent_2.0.0~dev27_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 27 improves native protected-window close and safe cleanup. The X close gate can wait up to ten seconds for a short in-flight local action, then rechecks the existing private-work, archive and delivery guards. Accepted closing stops the node session immediately; late exchange replies are discarded without acknowledging unprocessed data or logging an intentional stop as a connection failure. A transient status refresh is marked separately from unfinished wallet work. Cleanup contention gets bounded, guarded automatic retries; it never forces away private work. Close refusals and sync snapshots now log useful fixed categories/counts. Re-enabling a wallet explains when the Dashboard has not offered an active request. [Build 27 findings and validation](AGENT_BUILD27_LIFECYCLE.md).
+
+The supplied latest Dashboard log explicitly contains empty send/receive snapshots. The Dashboard chat is addressing stale/expired reviews hidden by its scheduler. Agent does not invent replacement transfer requests, replay old transfers or clear local denial preferences.
 
 Build 26 fixes an in-flight synchronisation-preview race: a sender-verified preview arriving immediately after the receiving user disables that policy is checked against the authoritative request and signature, then ignored. It cannot recreate the disabled request, authorise a transfer or block unrelated previews/outbox acknowledgements. Unknown requests, altered bindings, bad signatures and replacement of an active verified preview are still refused. This complements the Dashboard's exchange handling fix; it does not itself recreate requests withheld by the Dashboard. [Testing and integration details](AGENT_BUILD26_SYNC.md).
 

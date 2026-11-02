@@ -80,7 +80,7 @@ class NodeAndWindow(unittest.TestCase):
   self.assertTrue(worker.node_stop.is_set());worker.configure.assert_not_called();worker.lock.assert_not_called()
  def test_busy_window_refuses_close_without_terminating_viewer(self):
   from secure_worker import Workspace
-  worker=Workspace.__new__(Workspace);worker.busy=Mock(return_value=True);worker.archives=None;viewer=Mock();worker.viewers=[viewer]
+  worker=Workspace.__new__(Workspace);worker.busy=Mock(return_value=True);worker.archives=None;worker.store=Mock();worker.store.read.return_value={'outbox':{}};viewer=Mock();worker.viewers=[viewer]
   with self.assertRaisesRegex(ValueError,'Finish active'):worker.close_views()
   viewer.terminate.assert_not_called()
  def test_queued_dashboard_delivery_prevents_discarding_workspace(self):

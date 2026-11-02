@@ -22,4 +22,16 @@ class QtNativeClose(NativeWire):
    self.worker.closing=False;self.worker.busy.return_value=True;blocked=protected_viewer.Window();blocked.show();self.app.processEvents();self.assertFalse(blocked.close());self.assertTrue(blocked.isVisible());self.assertFalse(self.worker.closing);protected_viewer.QMessageBox.information.assert_called_once()
    self.worker.busy.return_value=False;self.assertTrue(blocked.close());actual.deleteLater();blocked.deleteLater();self.app.processEvents()
 
+
+ def test_real_x_close_waits_for_inflight_status_refresh(self):
+  import threading,time
+  source=ast.parse((Path(__file__).resolve().parents[1]/'src/protected_viewer.py').read_text());window=next(n for n in ast.walk(source) if isinstance(n,ast.ClassDef) and n.name=='Window');module=ast.fix_missing_locations(ast.Module(body=[window],type_ignores=[]))
+  with patch.object(protected_viewer,'QMainWindow',QMainWindow,create=True),patch.object(protected_viewer,'QMessageBox',Mock(),create=True):
+   exec(compile(module,'shipped-native-window','exec'),protected_viewer.__dict__);actual=protected_viewer.Window();actual.show();self.app.processEvents();held=threading.Event()
+   def refresh():
+    with self.worker.lock:held.set();time.sleep(.15)
+   thread=threading.Thread(target=refresh);thread.start();self.assertTrue(held.wait(2))
+   try:self.assertTrue(actual.close());self.app.processEvents();self.assertFalse(actual.isVisible());self.assertTrue(self.worker.closing);protected_viewer.QMessageBox.information.assert_not_called()
+   finally:thread.join();actual.deleteLater();self.app.processEvents()
+
 if __name__=='__main__':unittest.main(verbosity=2)

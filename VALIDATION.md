@@ -1,6 +1,12 @@
-# Agent V2 Development Build 26 validation
+# Agent V2 Development Build 27 validation
 
-Current focused results are in the accompanying Build26 test log; prior Build25 regression coverage is retained below. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+Current focused results are in the accompanying Build27 test log; prior Build25 regression coverage is retained below. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+
+## Build 27 native close and cleanup
+
+**78 targeted tests passed** (19.370 seconds), including ten new tests for short lock contention over the real framed Unix socket, node stopping only after an accepted close, refusal with undelivered signed results, transient status snapshots, automatic guarded cleanup retry, bounded failure retention, no stopping from unverified status, late HTTP reply cancellation and explicit empty-queue/re-enable diagnostics. Existing lifecycle, upgrades, manual recovery, denial persistence, preview binding and 15-second connection recovery tests pass.
+
+**16 real offscreen Qt/socket tests passed** (8.112 seconds). The actual shipped QMainWindow close event waits for a short in-flight status refresh, then closes without a refusal dialogue; an active wallet or signed delivery retains the window. **Ten JavaScript suites and syntax checks passed.** Only version text changed in the UI; lifecycle changes are in the worker and monitor. Automated tests do not exercise installed systemd/Polkit or target-laptop desktop lifecycle. No live service, wallet, preference or server was changed.
 
 ## Build 26 disabled-preview exchange race
 

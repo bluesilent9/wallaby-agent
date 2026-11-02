@@ -156,9 +156,17 @@ class Workspace:
         threading.Thread(target=self.recovery_watch,args=(generation,),daemon=True).start()
         return {'session':generation}
     def begin_close(self,deadline=None):
-        if self.busy() or self.archives and (self.archives.loaded or self.archives.staged) or delivery_pending(self.store.read()):raise ValueError('Finish active wallet work, wait for queued Dashboard deliveries and unload archival wallets before closing the protected window and disconnecting its node.')
+        saved=self.store.read();reasons=[]
+        if self.busy():reasons.append('active_wallet_work')
+        if self.archives and (self.archives.loaded or self.archives.staged):reasons.append('archival_wallet_loaded')
+        if delivery_pending(saved):reasons.append('undelivered_operation_result')
+        if reasons:
+            from activity_log import event
+            event('workspace.close','Close refused · blockers='+','.join(reasons)+' · RAM retained')
+            raise ValueError('Finish active wallet work, wait for queued Dashboard deliveries and unload archival wallets before closing the protected window and disconnecting its node. Blocking: '+', '.join({'active_wallet_work':'wallet operations or history recovery','archival_wallet_loaded':'loaded or staged archival wallets','undelivered_operation_result':'completed operation results awaiting Dashboard delivery'}[v] for v in reasons)+'.')
         if deadline is not None and time.monotonic()>=deadline:raise ValueError('Close request expired; no workspace state was changed.')
         self.closing=True
+        if getattr(self,'node_stop',None):self.node_stop.set()
         from activity_log import event
         event('workspace.close','Safe close accepted; awaiting node disconnect and RAM cleanup.')
     def close_views(self):
@@ -209,7 +217,10 @@ class Workspace:
                 if len(args)!=1 or type(args[0]) not in (int,float,Decimal):raise ValueError('Invalid legacy close request.')
                 deadline=args[0]
                 if isinstance(deadline,Decimal) and not deadline.is_finite() or not time.monotonic()<deadline<time.monotonic()+8:raise ValueError('Close request expired; no workspace state was changed.')
-            if not self.lock.acquire(blocking=False):raise ValueError('Finish the active protected operation before closing.')
+            if not self.lock.acquire(timeout=10 if method=='ui.request_close' else max(0,min(4,float(deadline)-time.monotonic()))):
+                from activity_log import event
+                event('workspace.close','Close deferred · reason=local_action_in_progress · RAM retained')
+                raise ValueError('Finish the active protected operation before closing. A local action is still responding; no workspace was discarded.')
             try:
                 enforce();self.begin_close();return {'ok':True}
             finally:self.lock.release()
@@ -233,7 +244,7 @@ class Workspace:
             if not self.lock.acquire(blocking=False):
                 enforce()
                 result=dict(getattr(self,'_service_snapshot',{'pending':[],'denied':[],'transfer':{},'burn':{},'outbox_count':0}))
-                result.update(recovery=self.recovery_state(),worker_version=VERSION,worker_protocol=PROTOCOL,connected=self.node_status['color']=='green',protected={'running':True,'viewer':False},busy=True,window_required=getattr(self,'window_required',False),viewer_open=any(p.poll() is None for p in self.viewers),sync='A protected operation is in progress. Continue in the protected window.')
+                result.update(recovery=self.recovery_state(),worker_version=VERSION,worker_protocol=PROTOCOL,connected=self.node_status['color']=='green',protected={'running':True,'viewer':False},busy=True,status_pending=True,window_required=getattr(self,'window_required',False),viewer_open=any(p.poll() is None for p in self.viewers),sync='A protected operation is in progress. Continue in the protected window.')
                 return result
             try:
                 enforce();self.configure(environment);return self.service_status()

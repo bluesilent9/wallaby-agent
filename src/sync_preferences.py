@@ -19,13 +19,19 @@ def change(store,key,disable):
     return {'message':'Incoming synchronisation disabled for that exact public wallet policy on this Agent. The local denial list is saved across reboots. Dashboard may still show a missing-wallet notification until it reads the Agent’s permission status.'}
 
 def enable(store,ident):
+    restored=0
     with store.edit() as s:
         if s.get('active_transfer') or s.get('sync_batch'):raise ValueError('Finish the active transfer first.')
         s.setdefault('sync_exclusions',{}).pop(ident,None);s['sync_preferences_changed']=True
         for p in s.get('sync_snapshot_requests',[]):
             key=digest(p)
-            if p['direction']=='receive' and policy_id(p)==ident and key not in s['completed']:s['pending'].setdefault(key,{'proposal':p,'received':__import__('time').time(),'state':'pending'})
-    return {'message':'Synchronisation enabled for that wallet again.'}
+            if p['direction']=='receive' and policy_id(p)==ident and key not in s['completed']:
+                if key not in s['pending']:restored+=1
+                s['pending'].setdefault(key,{'proposal':p,'received':__import__('time').time(),'state':'pending'})
+        disabled=len(s['sync_exclusions'])
+    from activity_log import event
+    event('sync.permissions','Incoming policy enabled · disabled_remaining='+str(disabled)+' · restored_requests='+str(restored))
+    return {'message':'Synchronisation enabled for that wallet again.'+(' Its current request is available on Synchronisation.' if restored else ' Waiting for the Dashboard to offer an active request; no wallet data was imported.')}
 
 def cancel(store,key):
     with store.edit() as s:
