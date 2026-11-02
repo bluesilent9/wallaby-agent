@@ -170,6 +170,8 @@ class WalletOps:
             if p['kind']=='broadcast_transaction' and action!='broadcast':raise ValueError('Review and authorise broadcast locally.')
             if p['kind'] not in ('sign_psbt_partial','broadcast_transaction'):raise ValueError('This retired local builder operation is unavailable.')
             current=self.review(p['psbt'],p['wallet'],p['chain'],require_owned=p['kind']!='broadcast_transaction')
+            from policy_refresh import verify_output_policies
+            verify_output_policies(self,p,current)
             for i in current['inputs']:
                 if rpc(self.core,'gettxout',[i['txid'],i['vout'],True]) is None:raise ValueError('A reviewed input is no longer unspent. Review a fresh transaction.')
             if current!=p['review']:raise ValueError('Transaction or local wallet interpretation changed. Review again.')

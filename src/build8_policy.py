@@ -70,9 +70,11 @@ def proposal(p):
         validate_preview({k:p[k] for k in ('preview','public_key','signature')})
     elif kind in ('sign_psbt_partial','broadcast_transaction'):
         required={'kind','request_id','chain','psbt'}|({'wallet'} if kind=='sign_psbt_partial' else {'txid'})
-        allowed=required|({'vault_intents'} if kind=='sign_psbt_partial' else set())
+        allowed=required|{'output_policies'}|({'vault_intents'} if kind=='sign_psbt_partial' else set())
         if not required<=set(p)<=allowed or not re.fullmatch('[0-9a-f]{64}',p['request_id']) or p['chain'] not in NETWORK:raise ValueError('Invalid transaction request.')
         psbt_text(p['psbt'])
+        from policy_refresh import validate_output_policies
+        validate_output_policies(p.get('output_policies',[]))
         if kind=='broadcast_transaction':
             if not re.fullmatch('[0-9a-f]{64}',p['txid']):raise ValueError('Invalid expected transaction ID.')
         else:

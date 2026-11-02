@@ -1,6 +1,22 @@
-# Agent V2 Development Build 22 validation
+# Agent V2 Development Build 23 validation
 
-Final regression/focused results are in the accompanying Build22 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+Final regression/focused results are in the accompanying Build23 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+
+## Build 23 archives and public policy renewal
+
+The complete Python regression run passed **329 tests** (505.649 seconds). After the final cancellation/PSBT-binding and denial-upgrade additions, **27 focused tests** passed (67.178 seconds), including the new regression cases. The real offscreen Qt/native framed-IPC suite passed **15 tests**. Seven JavaScript suites cover protected navigation, status, account refresh, logs, cancellation, tunnel-only use and the new archive approval controls. Additional optical/denial regression results accompany the exported test log.
+
+An isolated official Bitcoin Core 31 regtest fixture creates a **3-of-5 mandatory-height vault**, archives one signing account, and completes **two successive vault refreshes** with the archived key plus two other signing accounts. It verifies Core rejection before each unlock height, acceptance after expiry, resulting balances and exact scripts on new monitors, retention of old policy monitors, unchanged quorum/keys, PSBT output-policy bindings and re-encrypted restoration of both policy extensions. A new independently scanned, unfunded future policy must not trigger genesis history recovery; pruning configuration is never altered.
+
+The multi-wallet test stages two existing encrypted node wallets into one authenticated package, decrypts it, independently reviews both entries, restores locked RAM-only signing routes, and verifies full versus partial replacement coverage. Corruption/salvage and legacy single-role restore/signing remain in the regression suite. No queued or merely encrypted backup produces a physical readback receipt.
+
+A two-interpreter probe executes actual Agent and developing Dashboard Build 27 implementations, avoiding shared Python module-name collisions. It checks full-snapshot queue validation, delete/reoffer, locally signed queued/completion results, automatic destruction-task creation, own-key replacement proof after volatile restart, local physical-destruction confirmation, explicit withdrawal and supported capability names. It uses only temporary public fixture data and no live server.
+
+Denial tests verify that persistent sync and archive preferences stay separate and survive opening a new preference store; the new runtime socket does not collide with a running legacy helper. Signed policy-result deliveries are held when their builder request is cancelled. Combined-disc cancellation preserves unrelated selected wallet jobs.
+
+The generic legacy single-interpreter current-Dashboard transport probe cannot load modern Dashboard and Agent modules together because they share module filenames. This is a test-harness limitation, not a live connection failure; Build 23 uses the separate-interpreter production archive protocol probe above, and retains the isolated transport fixture in the full regression suite.
+
+No physical optical disc was written or read. Tests use fixture files, xorriso's file target, framed local sockets and isolated regtest coins. Hardware media capacity, supported burn speeds, USB-drive permissions, optical readback and full installed-system lifecycle must still be verified on the target laptop. These results are functional checks, not an independent security audit.
 
 ## Build 22 connection recovery
 
@@ -20,7 +36,7 @@ The suite retains real-Core public mempool paging and exact Dashboard projection
 
 ## Deployment limits
 
-The close tests mock OS protection evidence, but not the socket, JSON codec, production viewer request or worker close dispatch. An additional real PyQt6 offscreen QMainWindow test exercises the actual event: the window hides on success and remains visible on a busy refusal. It is stronger than the direct-call Build20 check and specifically covers the confirmed cause. The complete native Qt/systemd lifecycle still needs confirmation on wallet-laptop after installing Build22. No physical disc was written and no production coins were used.
+The close tests mock OS protection evidence, but not the socket, JSON codec, production viewer request or worker close dispatch. An additional real PyQt6 offscreen QMainWindow test exercises the actual event: the window hides on success and remains visible on a busy refusal. It is stronger than the direct-call Build20 check and specifically covers the confirmed cause. The complete native Qt/systemd lifecycle still needs confirmation on wallet-laptop after installing Build23. No physical disc was written and no production coins were used.
 
 The user confirmed that the documented guarded ui.close command closed the currently stuck wallet-laptop viewer. No forced service kill, root RAM deletion or private-operation replay was used.
 

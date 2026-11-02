@@ -31,7 +31,7 @@ def blocked(state,p):
 
 def held_item(state,item):
     payload=item['payload'];message=payload.get('message',{})
-    return digest(item) in state.get('cancelled_exports',{}) or payload.get('request_hash') in state.get('cancelled_requests',{}) or isinstance(message,dict) and message.get('proposal_hash') in state.get('cancelled_setups',{})
+    return digest(item) in state.get('cancelled_exports',{}) or payload.get('request_hash') in state.get('cancelled_requests',{}) or isinstance(message,dict) and (message.get('proposal_hash') in state.get('cancelled_setups',{}) or message.get('request_hash') in state.get('cancelled_requests',{}))
 
 def metadata(value):
     if isinstance(value,dict):return {k:metadata(v) for k,v in value.items()}
@@ -189,8 +189,7 @@ class Cancellations:
                 self.setup.sessions.pop(operation,None)
             burner=self.setup.burner
             ids={job for job,(operation,role) in self.setup.disc_sessions.items() if operation in sessions}
-            burner.pending=[job for job in burner.pending if job[0] not in ids]
-            if burner.job and burner.job['id'] in ids:burner.job=None
+            burner.cancel_members(ids)
             for ident in ids:
                 self.setup.disc_sessions.pop(ident,None)
                 path=burner.root/ident

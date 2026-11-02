@@ -34,8 +34,16 @@ def decrypt_file(source,target,password):
         except Exception:Path(target).unlink(missing_ok=True);raise ValueError('Backup passphrase or authentication check failed.') from None
     key=None;password=None
 
+def require_space(root,amount):
+    if shutil.disk_usage(root).free<amount:raise ValueError('Protected RAM has insufficient free space for this operation. Finish or unload other work first; no disk fallback is allowed.')
+
 def pack(root,wallets,recovery,password):
-    root=Path(root);disc=root/'disc';disc.mkdir(mode=0o700,parents=True,exist_ok=True);plain=root/'recovery.zip'
+    if recovery.get('version')==2:
+        from archive_format import validate
+        validate(recovery)
+        if set(wallets)!={e['id'] for e in recovery['entries']}:raise ValueError('Archive files differ from the reviewed wallet set.')
+    if sum(Path(v).stat().st_size for v in wallets.values())>480*1024*1024:raise ValueError('Selected wallets exceed the bounded RAM archive size. Choose fewer wallets for this disc.')
+    root=Path(root);root.mkdir(mode=0o700,parents=True,exist_ok=True);require_space(root,2*sum(Path(v).stat().st_size for v in wallets.values())+256*1024*1024);disc=root/'disc';disc.mkdir(mode=0o700,parents=True,exist_ok=True);plain=root/'recovery.zip'
     with zipfile.ZipFile(plain,'w',zipfile.ZIP_STORED) as z:
         z.writestr('policy.json',json.dumps(recovery,sort_keys=True,indent=2))
         for ident,path in wallets.items():
@@ -43,6 +51,8 @@ def pack(root,wallets,recovery,password):
             z.write(path,'wallets/'+ident+'.dat')
     try:encrypt_file(plain,disc/'recovery.wallaby',password)
     finally:plain.unlink(missing_ok=True)
+    with (disc/'recovery.wallaby').open('rb') as stream:archive_id=hashlib.file_digest(stream,'sha256').hexdigest()
+    (disc/'ARCHIVE-ID.txt').write_text('Wallaby archive '+archive_id+'\nLabel every physical copy with this archive ID. Compare it in Disc Operations before confirming destruction.\n')
     (disc/'README.txt').write_text('Wallaby encrypted recovery package v1\nAES-256-GCM; scrypt N=131072,r=8,p=1.\nContains encrypted Core signing wallets plus the complete public receive/change policy and authenticated cosigner contributions.\nKeep your backup and Core wallet passphrases separately.\nUse the accompanying recovery.py only in a protected volatile environment.\n')
     (disc/'REDUNDANCY.txt').write_text('Wallaby repeats this exact encrypted recovery package in independently checksummed, sector-aligned raw-track slots after this small ISO filesystem. Disc Operations scans copies and skips unreadable/damaged ones. No giant RAM image or directory listing is needed. The filesystem copy also remains readable by standard tools.\n')
     # Independent, inspectable decryption utility; it refuses an ordinary disk output.
@@ -167,18 +177,51 @@ def write_stream(device,source,total,progress,speed='slowest'):
         raise
 
 class Burner:
-    def __init__(self,root,on_complete):self.root=Path(root);self.root.mkdir(mode=0o700,parents=True,exist_ok=True);self.on_complete=on_complete;self.job=None;self.lock=threading.Lock();self.pending=[];self.thread=None
+    def __init__(self,root,on_complete):self.root=Path(root);self.root.mkdir(mode=0o700,parents=True,exist_ok=True);self.on_complete=on_complete;self.job=None;self.lock=threading.Lock();self.pending=[];self.thread=None;self.selected=None;self.replacement_resolver=None;self.completed_sets=[]
     def state(self):
         if self.job and self.job['phase']=='complete' and time.time()-self.job['finished']>5:
             self.job=None
             if self.pending:self.authorise(*self.pending.pop(0))
-        return {k:v for k,v in (self.job or {}).items() if k not in ('recovery','wallets') and not k.startswith('_')}
+        result={k:v for k,v in (self.job or {}).items() if k not in ('recovery','wallets') and not k.startswith('_')}
+        rows=(self.job.get('_members') or [(self.job['id'],self.job['wallets'],self.job['recovery'])]) if self.job else []
+        rows+=self.pending
+        result['completed_sets']=list(self.completed_sets)
+        result['queue']=[{'id':i,'name':r.get('name',r.get('proposal',{}).get('name','Wallet')),'policy_hash':r['policy_hash'],'selected':i in (self.selected if self.selected is not None else [self.job['id']] if self.job else [])} for i,w,r in rows]
+        return result
     def authorise(self,job_id,wallets,recovery):
         if self.job:raise ValueError('Finish the current disc session first.')
+        self.selected=None
         self.job={'id':job_id,'phase':'authorised','policy_hash':recovery['policy_hash'],'wallets':wallets,'recovery':recovery,'disc_count':1,'discs_verified':0,'speed':'slowest','message':'Authorised locally. Choose the number of discs and write speed. Defaults: one disc, slowest supported speed.'}
     def queue(self,job_id,wallets,recovery):
         if self.job:self.pending.append((job_id,wallets,recovery))
         else:self.authorise(job_id,wallets,recovery)
+    def select(self,ids):
+        if not self.job or self.job['phase']!='authorised' or self.job.get('_prepared'):raise ValueError('Select wallets before preparing the first disc.')
+        available={self.job['id']}|{i for i,w,r in self.pending}
+        if not isinstance(ids,list) or not 1<=len(ids)<=15 or len(set(ids))!=len(ids) or not set(ids)<=available:raise ValueError('Choose 1 to 15 approved archive rows.')
+        self.selected=list(ids);return {'ok':True}
+    def combine(self):
+        if self.job.get('_members'):return
+        if self.selected is None and self.job['recovery'].get('kind')=='node_wallet':self.selected=[self.job['id']]
+        if self.job.get('_prepared') or self.selected is None:return
+        rows=[(self.job['id'],self.job['wallets'],self.job['recovery'])]+self.pending
+        chosen=[v for v in rows if v[0] in self.selected]
+        from archive_format import bundle
+        replacements=self.replacement_resolver(chosen) if self.replacement_resolver else []
+        wallets,recovery=bundle(chosen,replacements)
+        self.pending=[v for v in rows if v[0] not in self.selected]
+        self.job=None;self.authorise(chosen[0][0],wallets,recovery);self.job['_members']=chosen;self.selected=[v[0] for v in chosen]
+    def cancel_members(self,ids):
+        if self.thread and self.thread.is_alive():raise ValueError('Wait for optical writing and verification to finish before cancelling archive members.')
+        self.pending=[r for r in self.pending if r[0] not in ids]
+        if not self.job:return
+        members=self.job.get('_members') or [(self.job['id'],self.job['wallets'],self.job['recovery'])]
+        if not any(r[0] in ids for r in members):return
+        keep=[r for r in members if r[0] not in ids];directory=self.root/self.job['id']
+        if directory.exists():shutil.rmtree(directory)
+        self.job=None;self.selected=None
+        waiting=keep+self.pending;self.pending=[]
+        for r in waiting:self.queue(*r)
     def validate_options(self,device,confirmed,disc_count=1,speed='slowest'):
         if not self.job or self.job['phase'] not in ('authorised','awaiting_disc','error','uncertain') or confirmed is not True:raise ValueError('Authorise and confirm a fresh blank M-Disc before writing.')
         if type(disc_count) is not int or not 1<=disc_count<=99:raise ValueError('Choose between 1 and 99 separate discs.')
@@ -190,6 +233,7 @@ class Burner:
     def start(self,device,confirmed,password=None,disc_count=1,speed='slowest'):
         with self.lock:
             self.validate_options(device,confirmed,disc_count,speed)
+            self.combine()
             job=self.job;job['_options']=(disc_count,speed);job.update(disc_count=disc_count,speed=speed,phase='preparing',message='Preparing disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+' in protected RAM.')
             def work():
                 nonlocal password
@@ -198,6 +242,7 @@ class Burner:
                     directory=self.root/job['id'];directory.mkdir(mode=0o700,exist_ok=True);disc=directory/'disc';iso=directory/'disc.iso'
                     if not job.get('_prepared'):
                         disc=pack(directory,job['wallets'],job['recovery'],password);password=None;image(disc,iso);job['_prepared']=True
+                        with (disc/'recovery.wallaby').open('rb') as stream:job['archive_id']=hashlib.file_digest(stream,'sha256').hexdigest()
                     password=None
                     details=media(device)
                     if speed!='slowest' and speed not in details['speeds']:raise ValueError('The inserted medium no longer supports the chosen speed. No write was started.')
@@ -212,7 +257,9 @@ class Burner:
                     job['discs_verified']+=1;job.setdefault('verified_discs',[]).append({'disc':job['discs_verified'],'sha256':sha,'bytes':layout['total_bytes']})
                     if job['discs_verified']<disc_count:
                         job.update(phase='awaiting_disc',message='Disc '+str(job['discs_verified'])+' verified. Remove it, insert a fresh blank disc, then explicitly continue. The remaining recovery material stays in protected RAM.');return
-                    all_verified=True;job['phase']='completing';self.on_complete(job['id'],sha)
+                    all_verified=True;job['phase']='completing'
+                    for member in job.get('_members') or [(job['id'],None,None)]:self.on_complete(member[0],sha)
+                    self.completed_sets.append({'archive_id':job.get('archive_id'),'discs_verified':job['discs_verified'],'image_sha256':sha,'wallet_names':[r.get('name',r.get('proposal',{}).get('name','Wallet')) for i,w,r in job.get('_members') or [(job['id'],None,job['recovery'])]]});self.completed_sets=self.completed_sets[-32:]
                     import shutil
                     shutil.rmtree(directory);job.update(phase='complete',message='Success! All '+str(disc_count)+' requested disc(s) passed complete direct read-back verification.',finished=time.time())
                 except Exception as error:

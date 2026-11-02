@@ -30,8 +30,9 @@ class Exchange:
                 if old:saved.setdefault('legacy_exports',{})[key]=saved['outbox'].pop(key)
         state=self.store.read()
         from cancellation import held_item,blocked
-        items=[{'id':key,**row} for key,row in state['outbox'].items() if not held_item(state,row)][:8]
-        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement','wallet_retirement_v2','wallet_retirement_cancel_v1','builder_cancellation_v1']}
+        ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1)
+        items=[{'id':key,**row} for key,row in ordered if not held_item(state,row)][:8]
+        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement','wallet_retirement_v2','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_policy_refresh_v1']}
         address=local_ipv6()
         if address:body['node_info']={'ipv6':address}
         try:r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)
@@ -55,7 +56,7 @@ class Exchange:
                 if LOCAL_RETIREMENT is None:raise ValueError('Protected retirement handler is unavailable.')
                 LOCAL_RETIREMENT.cancel_remote(p['request_hash'])
         for p in proposals:
-            if p['kind']=='wallet_sync_queue':self.store.receive(p)
+            if p['kind'] in ('wallet_sync_queue','wallet_archive_queue'):self.store.receive(p)
         for p in proposals:
             if p['kind'] in ('builder_cancel','wallet_retire_cancel') or blocked(self.store.read(),p):continue
             if p['kind']=='wallet_transfer_preview':
@@ -78,7 +79,7 @@ class Exchange:
                 public=' '.join(key.read_text().split()[:2]);self.store.queue('wallet_setup_identity',sign(self.store,{'version':1,'challenge':p['challenge'],'public_key':public,'fingerprint':fingerprint(public),'hostname':socket.gethostname()}))
             elif p['kind']=='node_identity':
                 if address:self.store.queue('node_identity',{'ipv6':address})
-            elif p['kind']!='wallet_sync_queue':self.store.receive(p)
+            elif p['kind'] not in ('wallet_sync_queue','wallet_archive_queue'):self.store.receive(p)
         saved=self.store.read()
         if not saved.get('sync_batch') and not saved.get('active_transfer'):
             from configuration import Config,discover_cookie
@@ -106,4 +107,4 @@ class Exchange:
                 if self.store is None:
                     stop.wait(30);continue
                 with self.store.edit() as s:s['sync']='Dashboard exchange failed validation or is unavailable. Queued data retained; retry in 30 seconds.'
-            stop.wait(30)
+            stop.wait(2)

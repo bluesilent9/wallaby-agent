@@ -20,7 +20,7 @@ def validate(data):
     records=data['wallets']
     if not isinstance(records,dict) or len(records)>128:raise ValueError('Denial list is full; remove an entry before adding another.')
     for key,row in records.items():
-        if not isinstance(key,str) or not HEX.fullmatch(key) or not isinstance(row,dict) or set(row)!={'policy_id','wallet_name'} or row['policy_id']!=key:raise ValueError('Only disabled wallet identifiers and display names may be persisted.')
+        if not isinstance(key,str) or not HEX.fullmatch(key) or not isinstance(row,dict) or set(row) not in ({'policy_id','wallet_name'},{'policy_id','wallet_name','purpose'}) or row.get('purpose','archive')!='archive' or row['policy_id']!=key:raise ValueError('Only disabled wallet identifiers and display names may be persisted.')
         label(row['wallet_name'])
     if len(json.dumps(data,allow_nan=False).encode())>LIMIT:raise ValueError('Denial list exceeds its storage limit.')
     return copy.deepcopy(data)
@@ -31,14 +31,17 @@ def display(p):
     return label(value)
 
 def project(state,revision):
-    return validate({'version':1,'revision':revision,'wallets':copy.deepcopy(state.get('sync_exclusions',{}))})
+    return validate({'version':1,'revision':revision,'wallets':copy.deepcopy(state.get('sync_exclusions',{}))|copy.deepcopy(state.get('archive_exclusions',{}))})
 
 def overlay(state,data):
     data=validate(data)
-    state['sync_exclusions']=data['wallets'];state['sync_preferences_revision']=data['revision']
+    state['sync_exclusions']={k:v for k,v in data['wallets'].items() if v.get('purpose')!='archive'};state['archive_exclusions']={k:v for k,v in data['wallets'].items() if v.get('purpose')=='archive'};state['sync_preferences_revision']=data['revision']
     from sync_preferences import policy_id
     for key,row in list(state.get('pending',{}).items()):
         p=row['proposal']
+        if row['state']=='pending' and p['kind']=='archive_wallet':
+            from archive_requests import permission_id
+            if permission_id(p) in state['archive_exclusions']:state['pending'].pop(key);continue
         if row['state']=='pending' and p['kind']=='wallet_transfer' and p['direction']=='receive' and policy_id(p) in data['wallets']:
             state['pending'].pop(key);state.get('sync_choices',{}).pop(key,None);state.get('transfer_previews',{}).pop(key,None)
 
@@ -104,7 +107,7 @@ def receive(sock,n):
         chunks.append(chunk);n-=len(chunk)
     return b''.join(chunks)
 
-def socket_path():return Path('/run/wallaby-agent-denials')/str(os.getuid())/'denials.sock'
+def socket_path(legacy=False):return Path('/run/wallaby-agent-denials' if legacy else '/run/wallaby-agent-denials-v2')/str(os.getuid())/'denials.sock'
 
 class Client:
     def __init__(self,path=None):self.path=Path(path or socket_path())
@@ -143,7 +146,8 @@ class Handler(socketserver.BaseRequestHandler):
         except OSError:pass
 
 def main():
-    path=socket_path();info=path.parent.stat()
+    import sys
+    path=socket_path(legacy=sys.argv[1:]==['--legacy-socket']);info=path.parent.stat()
     if path.parent.is_symlink() or info.st_uid!=os.getuid() or stat.S_IMODE(info.st_mode)!=0o700:raise SystemExit('Unsafe denial service runtime directory.')
     path.unlink(missing_ok=True)
     with Server(path,FileStore(Path('/var/lib/wallaby-agent-denials')/str(os.getuid()))) as server:

@@ -40,6 +40,15 @@ def public_vault(v):
     return v
 
 def validate_proposal(p):
+    if isinstance(p,dict) and p.get('kind')=='wallet_archive_queue':
+        from archive_requests import validate_queue
+        return validate_queue(p)
+    if isinstance(p,dict) and p.get('kind') in ('archive_wallet','destroy_disc'):
+        from archive_requests import validate_task
+        return validate_task(p)
+    if isinstance(p,dict) and p.get('kind')=='wallet_policy_refresh':
+        from policy_refresh import validate
+        return validate(p)
     if isinstance(p,dict) and p.get('kind')=='builder_cancel':
         from cancellation import validate
         return validate(p)

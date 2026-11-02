@@ -57,7 +57,7 @@ class LogTests(unittest.TestCase):
   with patch('activity_log.handoff',side_effect=ValueError('RAM retained')),patch('secure_bridge.subprocess.run') as run,self.assertRaises(ValueError):_stop_service()
   run.assert_not_called()
  def test_old_worker_without_logs_can_close_but_current_cannot_skip(self):
-  for version,allowed in [('2.0.0~dev18',True),('2.0.0~dev22',False)]:
+  for version,allowed in [('2.0.0~dev18',True),('2.0.0~dev23',False)]:
    with patch('secure_bridge.call',side_effect=[WorkspaceFailure('worker_rejected','Unsupported protected action.'),{'worker_version':version}]):
     if allowed:handoff()
     else:
@@ -69,7 +69,7 @@ class LogTests(unittest.TestCase):
 
 class CancellationTests(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name);self.store=Store(self.root/'state');self.core=Mock();self.core.call.return_value={'result':[]};self.ops=SimpleNamespace(prepared={});self.setup=SimpleNamespace(sessions={},disc_sessions={},reviews={},burner=SimpleNamespace(thread=None,pending=[],job=None,root=self.root/'jobs'));self.c=Cancellations(self.core,self.store,self.setup,self.ops)
+  self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name);self.store=Store(self.root/'state');self.core=Mock();self.core.call.return_value={'result':[]};self.ops=SimpleNamespace(prepared={});self.setup=SimpleNamespace(sessions={},disc_sessions={},reviews={},burner=__import__('disc_backup').Burner(self.root/'jobs',lambda *a:None));self.c=Cancellations(self.core,self.store,self.setup,self.ops)
  def test_strict_wire_and_hash(self):
   p=cancel();self.assertEqual(validate(p),p)
   for change in [{'backup_option':False},{'require_local_authorisation':False},{'operations':['../wallet']},{'request_hashes':['a'*32]},{'path':'/home/secret'},{'request_id':'0'*64}]:

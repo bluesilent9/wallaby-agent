@@ -2,11 +2,19 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 22
+# Wallaby Agent V2 — Development Build 23
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 22 DEB](dist/wallaby-agent_2.0.0~dev22_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 23 DEB](dist/wallaby-agent_2.0.0~dev23_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 23 adds **multi-wallet disc archives and vault-policy refresh**, matching Dashboard V1 Build 27. Approve existing node-wallet archive requests in **Authorise**, select up to 15 approved wallets in **Disc Operations**, and burn them together. The defaults remain one physical disc and the slowest supported speed. Every disc is filled with redundant encrypted copies and completely read back before completion is reported. Older single-role archives remain readable.
+
+Dashboard owns archive/destruction request lifetime. Delete locally to dismiss a request temporarily, or disable an archive wallet in the persistent Denial list; enabling it later allows the Dashboard to offer it again. Only the Agent user can confirm physical destruction. A replacement must retain **every wallet, earlier policy and label from the old disc** before it qualifies for a destruction reminder. Label discs with the archive ID recorded on them and shown in Disc Operations.
+
+A refreshed vault retains the same keys and signature threshold, requires a strictly later mandatory height, and keeps its old public policy monitors. Authorise independently derives addresses and checks the local UTXO set before installing a separate public monitor. Funding/signing remains a separate local approval; declared vault outputs are checked against their exact descriptor, address, amount and locally approved policy before signing or broadcasting. Loaded archives can incorporate approved public policy revisions and then be queued for a replacement disc. Pruning settings remain unchanged; a new, unfunded future policy does not require a historical blockchain download. See [Build 23 integration and limits](DASHBOARD_BUILD27_ARCHIVES.md).
+
+The updated Denial helper starts alongside a new protected worker without restarting an older worker holding unfinished work. Services and its IPv6 tunnels remain usable without Bitcoin Core. Connection recovery and native close protections from Builds 21–22 remain in place.
 
 Build 22 automatically recovers an established node connection for **15 seconds**. The entire protected window is greyed and inert while fresh authenticated sessions are attempted; a successful connection restores it. If recovery expires, the tracked window closes, only the node service switches off, and Services displays whether the failure was **Agent ↔ Dashboard** or **Agent ↔ Bitcoin Core**. Active wallet work, archives and queued results retain protected RAM for explicit resumption; idle workspaces hand off diagnostics and clear RAM normally. [Recovery and investigation](AGENT_BUILD22_RECOVERY.md).
 

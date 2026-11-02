@@ -100,7 +100,7 @@ class WalletSetup:
         elif set(pins)=={r['id'] for r in p['cosigners']}:
             if any(pins[r['id']]!=fingerprint(r['agent_key']) for r in p['cosigners']):raise ValueError('An independently entered Agent fingerprint does not match.')
         else:raise ValueError('Verify each distinct producing Agent in this exact wallet setup.')
-        if any(session['phase']!='complete' for session in self.sessions.values()):raise ValueError('Finish the current wallet setup and its physical backups before starting another wallet.')
+        if any(session['phase'] not in ('complete','awaiting_disc') for session in self.sessions.values()):raise ValueError('Finish the current wallet setup and its physical backups before starting another wallet.')
         binding=digest(p);self.check_cancel(binding)
         if binding in self.sessions:raise ValueError('This setup already generated keys. No secret generation was repeated.')
         # Before generating anything, reserve this immutable session and mark attempted.
@@ -172,6 +172,8 @@ class WalletSetup:
         session['phase']='awaiting_disc' if disc else 'complete'
         self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'session_id':p['proposal']['session_id'],'proposal_hash':fresh['proposal_hash'],'policy_hash':fresh['policy_hash'],'status':'policy_approved','backup':'pending' if disc else 'not_required'}))
         self.store.queue('wallet_setup_inventory',sign(self.store,{'version':1,'session_id':p['proposal']['session_id'],'policy_hash':fresh['policy_hash'],'chain':p['proposal']['chain'],'monitor_wallet':monitor,'signing_wallets':local,'receive_descriptor':fresh['receive_descriptor'],'change_descriptor':fresh['change_descriptor']}))
+        with self.store.edit() as saved:
+            if saved.get('setup_active')==fresh['proposal_hash']:saved.pop('setup_active',None)
         if disc:
             session['discs_remaining']=set(disc)
             for ident,path in sorted(disc.items()):
@@ -180,6 +182,9 @@ class WalletSetup:
         else:self.finish_session(session)
         return {'message':'Exact policy approved and public monitor installed.'+(' Disc Operations is now available. Private-only disc keys remain in protected RAM.' if disc else ' Encrypted local signing wallets installed.'),'burn_authorised':bool(disc)}
     def burn_complete(self,ident,sha):
+        if ident not in self.disc_sessions:
+            if not getattr(self,'external_burn_complete',None):raise ValueError('Unknown external archive completion.')
+            return self.external_burn_complete(ident,sha)
         binding,cosigner=self.disc_sessions[ident];session=self.sessions[binding];review=session['review']
         self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'session_id':session['proposal']['session_id'],'proposal_hash':binding,'policy_hash':review['policy_hash'],'status':'backup_verified','cosigner_file':cosigner,'image_sha256':sha}))
         session['discs_remaining'].remove(cosigner)
@@ -187,7 +192,8 @@ class WalletSetup:
     def finish_session(self,session):
         if session.get('core'):session['core'].close();shutil.rmtree(session['core'].root)
         session['phase']='complete'
-        with self.store.edit() as saved:saved.pop('setup_active',None)
+        with self.store.edit() as saved:
+            if saved.get('setup_active')==digest(session['proposal']):saved.pop('setup_active',None)
     def decline(self,key):
         p=self.store.read()['pending'][key]['proposal'];binding=digest(p if p['kind']=='wallet_setup' else p['proposal']);self.check_cancel(binding);session=self.sessions.get(binding)
         if session:

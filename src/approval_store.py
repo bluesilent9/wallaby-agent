@@ -51,6 +51,9 @@ class Store:
     def receive(self,proposal):
         from vault_policy import validate_proposal
         p=validate_proposal(proposal)
+        if p['kind']=='wallet_archive_queue':
+            from archive_requests import snapshot
+            snapshot(self,p);return True
         if p['kind']=='wallet_sync_queue':
             from sync_queue import apply_snapshot
             apply_snapshot(self,p['revision'],p['requests']);return True

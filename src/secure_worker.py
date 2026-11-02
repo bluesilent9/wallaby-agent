@@ -40,7 +40,7 @@ class Workspace:
         self.store=Store(root()/ 'state');self.store.identity_root=Config().root
         # Never replay the legacy non-volatile approvals.json into a new workspace.
         # Only the schema-limited denial store survives workspace shutdown.
-        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.window_required=False;self.closing=False;self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.cancellations=None;self.archives=None;self.messages=None;self.environment={}
+        self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.window_required=False;self.closing=False;self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.cancellations=None;self.archives=None;self.messages=None;self.environment={};self.archive_ops=None;self.refresh_ops=None
     def configure(self,environment):
         for key,value in environment.items():
             if key not in ENV or not isinstance(value,str) or len(value)>4096 or any(ord(c)<32 for c in value):raise ValueError('Invalid local display environment.')
@@ -56,6 +56,9 @@ class Workspace:
             self.archives=Archives(self.ops.core,self.store,self.binary(),enforce)
             import node_client
             node_client.LOCAL_ROUTER=self.archives
+            from archive_operations import Operations
+            from policy_refresh import Refresh
+            self.archive_ops=Operations(self.ops.core,self.store,self.setup,self.archives,enforce);self.refresh_ops=Refresh(self.ops.core,self.store,self.archives)
             self.messages=Messages(self.ops.core,self.store,lambda prompt:secret_dialog(prompt,self.environment))
             from cancellation import Cancellations
             self.cancellations=Cancellations(self.ops.core,self.store,self.setup,self.ops,self.environment)
@@ -71,11 +74,11 @@ class Workspace:
                     if f.read(4)==b'\x7fELF':return path
         return '/usr/bin/bitcoind'
     def busy(self):
-        s=self.store.read();return bool(self.archives and (self.archives.reading) or s.get('history_jobs') or any(v.get('proposal',{}).get('kind')=='builder_cancel' for v in s['pending'].values()) or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
+        s=self.store.read();return bool(getattr(self,'archive_ops',None) and self.archive_ops.busy() or any(v['proposal']['kind']=='destroy_disc' for v in s['pending'].values()) or self.archives and (self.archives.reading) or s.get('history_jobs') or any(v.get('proposal',{}).get('kind')=='builder_cancel' for v in s['pending'].values()) or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
     def state(self):
         saved=self.store.read()
         connected=self.node_status['color']=='green'
-        return {'recovery':self.recovery_state(),'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn') and not v.get('cancel_requested')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
+        return {'recovery':self.recovery_state(),'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':v['state'],'wallet_name':v['proposal'].get('wallet',v['proposal'].get('public_wallet',{}).get('wallet_name',v['proposal'].get('name',v['proposal'].get('proposal',{}).get('name','')))),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn') and not v.get('cancel_requested')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.setup.burner.state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'archive_exclusions':list(saved.get('archive_exclusions',{}).values()),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
     def service_status(self):
         saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'recovery':self.recovery_state(),'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'worker_version':VERSION,'worker_protocol':PROTOCOL,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or self.archives.loaded or self.archives.staged or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
         self._service_snapshot=dict(result);return result
@@ -272,6 +275,8 @@ class Workspace:
                 Exchange(args[0],args[1],self.store).once();return {'ok':True}
             if method=='authorise.review':
                 kind=self.store.read()['pending'][args[0]]['proposal']['kind']
+                if kind in ('archive_wallet','destroy_disc'):return self.archive_ops.review(args[0])
+                if kind=='wallet_policy_refresh':return self.refresh_ops.review(args[0])
                 if kind=='wallet_retire':return self.retirement.review(args[0])
                 if kind=='builder_cancel':return self.cancellations.review(args[0])
                 if kind.startswith('wallet_setup'):return self.setup.review(args[0])
@@ -286,6 +291,9 @@ class Workspace:
             if method=='authorise.forget':self.store.forget(*args);return {'ok':True}
             if method=='authorise.approve':
                 kind=self.store.read()['pending'][args[0]]['proposal']['kind']
+                if kind=='archive_wallet':return self.archive_ops.approve(args[0])
+                if kind=='wallet_policy_refresh':return self.refresh_ops.approve(args[0])
+                if kind=='destroy_disc':raise ValueError('Confirm physical destruction on the local destruction checklist.')
                 if kind=='wallet_retire':return self.retirement.approve(args[0])
                 if kind=='wallet_setup_policy':return self.setup.approve_policy(args[0])
                 return self.ops.approve_sync(args[0])
@@ -295,6 +303,15 @@ class Workspace:
             if method in ('disc.read','disc.load','disc.unload','message.wallets','message.prepare','message.sign'):
                 if self.node_status['color']!='green':raise ValueError('The node connection is recovering. Protected operations are paused; no operation was started.')
                 if saved.get('setup_active') or saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):raise ValueError('Finish the current wallet setup, transfer or history operation first.')
+            if method=='archive.delete' or method=='archive.disable':
+                from archive_requests import delete
+                return delete(self.store,args[0],method=='archive.disable')
+            if method=='archive.enable':
+                with self.store.edit() as saved:saved.setdefault('archive_exclusions',{}).pop(args[0],None)
+                return {'ok':True}
+            if method=='archive.destroyed':return self.archive_ops.destroyed(*args)
+            if method=='disc.selection':return self.setup.burner.select(*args)
+            if method=='disc.refresh':return self.archive_ops.queue_loaded(*args)
             if method=='disc.read':
                 if self.archives.reading:raise ValueError('An optical read is already active.')
                 password=secret_dialog('Disc-backup passphrase · decrypt the selected recovery package (not your Core wallet passphrase)',self.environment)
@@ -307,6 +324,8 @@ class Workspace:
                 threading.Thread(target=read_disc,daemon=True).start();return {'message':'Disc reading started. Damaged copies will be skipped automatically.'}
             if method=='disc.load':return self.archives.load(*args)
             if method=='disc.unload':
+                record=self.archives.loaded.get(args[0])
+                if record and any(j.get('source_archive')==record.get('archive_id') and j['phase']!='complete' for j in self.archive_ops.jobs.values()):raise ValueError("Finish this archive's queued replacement before unloading its signing account.")
                 if self.archives.reading:raise ValueError('Wait for the current optical read to finish.')
                 self.ops.prepared.clear();self.messages.prepared.clear();return self.archives.unload(*args)
             if method=='message.wallets':return self.messages.wallets()

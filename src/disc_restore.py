@@ -15,7 +15,7 @@ from vendor.embit.networks import NETWORKS
 
 class Archives:
     def __init__(self,core,store,binary,enforce):
-        self.core=core;self.store=store;self.binary=binary;self.enforce=enforce;self.loaded={};self.staged={};self.error='';self.message='';self.reading=False;self.lock=threading.RLock();self.local=threading.local()
+        self.core=core;self.store=store;self.binary=binary;self.enforce=enforce;self.loaded={};self.staged={};self.error='';self.message='';self.reading=False;self.lock=threading.RLock();self.local=threading.local();self.catalogs={}
     def route(self,core,ident,method,params,wallet,timeout):
         if core.config!=self.core.config or getattr(self.local,'bypass',False):return None
         with self.lock:
@@ -25,7 +25,9 @@ class Archives:
                     if method not in ('walletprocesspsbt','walletpassphrase','walletlock'):
                         from agent_rpc import request
                         request(method,params,wallet)
-                    return record['node'].core.call(ident,method,params,record['routes'][wallet],timeout)
+                    result=record['node'].core.call(ident,method,params,record['routes'][wallet],timeout)
+                    if method=='getwalletinfo' and isinstance(result.get('result'),dict):result['result'].update(wallaby_storage='disc',wallaby_archive_id=record.get('archive_id'),wallaby_policy_hash=record['recovery']['policy_hash'])
+                    return result
             if method in ('listwallets','listwalletdir') and wallet is None:
                 self.local.bypass=True
                 try:r=core.call(ident,method,params,None,timeout)
@@ -37,7 +39,7 @@ class Archives:
                 return r
         return None
     def state(self):
-        with self.lock:return {'reading':self.reading,'message':self.message,'error':self.error,'staged':[r['review'] for r in self.staged.values()],'loaded':[{'id':k,'name':r['recovery']['proposal']['name'],'policy_hash':r['recovery']['policy_hash'],'wallets':r['keys'],'monitor':r['monitor'],'storage':'Protected RAM only'} for k,r in self.loaded.items()]}
+        with self.lock:return {'reading':self.reading,'message':self.message,'error':self.error,'staged':[r['review'] for r in self.staged.values()],'loaded':[{'id':k,'name':r['recovery']['proposal']['name'],'policy_hash':r['recovery']['policy_hash'],'wallets':r['keys'],'monitor':r['monitor'],'storage':'Protected RAM only','archive_id':r.get('archive_id')} for k,r in self.loaded.items()]}
     def inspect(self,device,password):
         self.enforce()
         if not isinstance(device,str) or not re.fullmatch('/dev/sr[0-9]{1,2}',device):raise ValueError('Choose a local optical drive.')
@@ -69,34 +71,66 @@ class Archives:
         except Exception:shutil.rmtree(folder);raise
     def inspect_package(self,encrypted,password,folder=None):
         self.enforce();folder=Path(folder or encrypted.parent);plain=folder/'recovery.zip'
-        decrypt_file(encrypted,plain,password);password=None
+        with open(encrypted,'rb') as stream:archive_id=hashlib.file_digest(stream,'sha256').hexdigest()
+        from disc_backup import require_space
+        require_space(folder,2*Path(encrypted).stat().st_size+256*1024*1024)
+        decrypt_file(encrypted,plain,password);password=None;prepared=[]
         try:
             with zipfile.ZipFile(plain) as z:
                 infos=z.infolist();names=[i.filename for i in infos]
-                if len(set(names))!=len(names) or len(names)!=2 or 'policy.json' not in names or sum(i.file_size for i in infos)>MAX_PACKAGE or any(i.flag_bits&1 for i in infos):raise ValueError('Invalid or oversized recovery archive.')
-                if z.getinfo('policy.json').file_size>256*1024:raise ValueError('Recovery policy exceeds safe limits.')
-                recovery=json.loads(z.read('policy.json'));p=recovery['proposal'];roles={r['id']:r for r in p['cosigners']};contributions=[]
-                for envelope in recovery['contributions']:
-                    ident=envelope.get('message',{}).get('cosigner_id')
-                    if ident not in roles:raise ValueError('Unknown recovered cosigner.')
-                    contributions.append(verify(self.store,envelope,roles[ident]['agent_key']))
-                descs=policy(p,contributions,allow_expired=True)
-                expected=digest({'proposal':p,'receive_descriptor':descs[0],'change_descriptor':descs[1],'contributions':recovery['contributions']})
-                if descs!=[recovery['receive_descriptor'],recovery['change_descriptor']] or expected!=recovery['policy_hash']:raise ValueError('Recovered complete policy differs from its signed contributions or policy code.')
-                if rpc(self.core,'getblockchaininfo')['chain']!=p['chain']:raise ValueError('Disc network does not match the connected node.')
-                role=recovery.get('physical_cosigner_file');matches=[r for r in p['cosigners'] if r['storage']=='disc' and hashlib.sha256(r['id'].encode()).hexdigest()==role]
-                wallet_name='wallets/'+str(role)+'.dat'
-                if len(matches)!=1 or set(names)!={'policy.json',wallet_name} or recovery.get('local_cosigners')!=[matches[0]['id']]:raise ValueError('Disc must contain exactly its assigned physical signing role.')
-                wallet=folder/'encrypted-wallet.dat'
-                with z.open(wallet_name) as inp,open(wallet,'wb') as out:
-                    os.chmod(wallet,0o600);shutil.copyfileobj(inp,out,1024*1024)
-            ident=secrets.token_hex(16);samples=[{'branch':branch,'address':Descriptor.from_string(descs[i]).derive(0).script_pubkey().address(NETWORKS[p['chain']])} for i,branch in enumerate(('Receiving','Change'))]
-            review={'id':ident,'name':p['name'],'threshold':p['threshold'],'total':len(p['cosigners']),'height':p['height'],'chain':p['chain'],'cosigner':matches[0]['name'],'cosigner_id':matches[0]['id'],'policy_hash':expected,'receive_descriptor':descs[0],'change_descriptor':descs[1],'samples':samples}
+                if len(set(names))!=len(names) or not 2<=len(names)<=16 or 'policy.json' not in names or sum(i.file_size for i in infos)>MAX_PACKAGE or any(i.flag_bits&1 for i in infos):raise ValueError('Invalid or oversized recovery archive.')
+                if z.getinfo('policy.json').file_size>4*1024*1024:raise ValueError('Recovery policy exceeds safe limits.')
+                recovery=json.loads(z.read('policy.json'))
+                if recovery.get('version')==2:
+                    from archive_format import validate
+                    validate(recovery);entries=recovery['entries']
+                    if set(names)!={'policy.json'}|{'wallets/'+e['id']+'.dat' for e in entries}:raise ValueError('Archive files differ from the authenticated wallet set.')
+                else:
+                    role=recovery.get('physical_cosigner_file');entries=[{'id':role,'kind':'setup_role','recovery':recovery}]
+                    if set(names)!={'policy.json','wallets/'+str(role)+'.dat'}:raise ValueError('Legacy disc must contain exactly its assigned physical role.')
+                if len(self.staged)+len(self.loaded)+len(entries)>15:raise ValueError('Unload or discard archives before reading this wallet set.')
+                for entry in entries:
+                    target=folder/str(entry['id']);target.mkdir(mode=0o700)
+                    prepared.append(self.stage_entry(entry['recovery'],z,'wallets/'+entry['id']+'.dat',target,archive_id))
+            from archive_format import identity
             with self.lock:
-                if len(self.staged)+len(self.loaded)>=15:raise ValueError('Unload or discard an archive before loading another.')
-                self.staged[ident]={'review':review,'recovery':recovery,'folder':folder,'wallet':wallet,'role':matches[0]}
-            return review
+                self.catalogs[archive_id]={identity(r['recovery']):copy.deepcopy(r['recovery']) for ident,r in prepared}
+                for ident,row in prepared:self.staged[ident]=row
+            return prepared[0][1]['review'] if recovery.get('version')==1 else {'archive_id':archive_id,'entries':[r['review'] for ident,r in prepared]}
+        except Exception:
+            for ident,row in prepared:shutil.rmtree(row['folder'],ignore_errors=True)
+            raise
         finally:plain.unlink(missing_ok=True)
+    def stage_entry(self,recovery,z,wallet_name,folder,archive_id):
+        from archive_format import entry_kind,validate_node
+        generic=entry_kind(recovery)=='node_wallet'
+        if generic:
+            validate_node(recovery);p={'name':recovery['name'],'chain':recovery['chain'],'threshold':1,'cosigners':[{}],'height':None};expected=recovery['policy_hash'];descs=[r['desc'] for r in recovery['public_wallet']['descriptors']];role={'id':'node-wallet','name':recovery['name']}
+        else:
+            p=recovery['proposal'];roles={r['id']:r for r in p['cosigners']};contributions=[]
+            for envelope in recovery['contributions']:
+                ident=envelope.get('message',{}).get('cosigner_id')
+                if ident not in roles:raise ValueError('Unknown recovered cosigner.')
+                contributions.append(verify(self.store,envelope,roles[ident]['agent_key']))
+            descs=policy(p,contributions,allow_expired=True);expected=digest({'proposal':p,'receive_descriptor':descs[0],'change_descriptor':descs[1],'contributions':recovery['contributions']})
+            if descs!=[recovery['receive_descriptor'],recovery['change_descriptor']] or expected!=recovery['policy_hash']:raise ValueError('Recovered complete policy differs from its signed contributions or policy code.')
+            matches=[r for r in p['cosigners'] if r['storage']=='disc' and hashlib.sha256(r['id'].encode()).hexdigest()==recovery.get('physical_cosigner_file')]
+            if len(matches)!=1 or recovery.get('local_cosigners')!=[matches[0]['id']]:raise ValueError('Invalid physical signing role.')
+            role=matches[0]
+        if rpc(self.core,'getblockchaininfo')['chain']!=p['chain']:raise ValueError('Disc network does not match the connected node.')
+        from policy_refresh import validate_extensions
+        effective=validate_extensions(recovery)
+        effective_height=__import__('wallet_setup_signing').restricted(effective[0])['height'] if effective and __import__('wallet_setup_signing').restricted(effective[0]) else p['height']
+        wallet=folder/'encrypted-wallet.dat'
+        with z.open(wallet_name) as inp,open(wallet,'wb') as out:
+            os.chmod(wallet,0o600);shutil.copyfileobj(inp,out,1024*1024)
+        ident=secrets.token_hex(16);samples=[]
+        for i,desc in enumerate((effective or descs)[:2]):
+            try:
+                d=Descriptor.from_string(desc);sample=d.derive(0) if d.is_wildcard else d;samples.append({'branch':'Receiving' if i==0 else 'Change','address':sample.script_pubkey().address(NETWORKS[p['chain']])})
+            except Exception:pass
+        review={'id':ident,'name':p['name'],'threshold':p['threshold'],'total':len(p['cosigners']),'height':effective_height,'effective_policy_hash':digest(recovery.get('policy_extensions',[])),'chain':p['chain'],'cosigner':role['name'],'cosigner_id':role['id'],'policy_hash':expected,'receive_descriptor':descs[0],'change_descriptor':descs[1] if len(descs)>1 else descs[0],'samples':samples,'archive_id':archive_id,'additional_policies':recovery.get('policy_extensions',[])}
+        return ident,{'review':review,'recovery':recovery,'folder':folder,'wallet':wallet,'role':role,'archive_id':archive_id,'generic':generic}
     def load(self,ident,confirmed):
         self.enforce()
         if confirmed is not True:raise ValueError('Compare the policy code and addresses against your trusted wallet record before loading.')
@@ -104,20 +138,35 @@ class Archives:
             r=self.staged.get(ident)
             if not r:raise ValueError('Read and review the disc first.')
             if any(v['recovery']['policy_hash']==r['recovery']['policy_hash'] and v['role']['id']==r['role']['id'] for v in self.loaded.values()):raise ValueError('That exact physical signing key is already loaded.')
-            node=MemoryCore(r['folder']/'node',r['recovery']['proposal']['chain'],self.binary)
+            from disc_backup import require_space
+            require_space(r['folder'],2*r['wallet'].stat().st_size+128*1024*1024)
+            node=MemoryCore(r['folder']/'node',r['review']['chain'],self.binary)
             try:
                 c=node.core;rpc(c,'restorewallet',{'wallet_name':'archive-key','backup_file':str(r['wallet']),'load_on_startup':False})
                 info=rpc(c,'getwalletinfo',[],'archive-key')
                 if not info.get('private_keys_enabled') or 'unlocked_until' not in info or info['unlocked_until']!=0:raise ValueError('The archived signing wallet must be encrypted, locked and private-key enabled.')
-                contribution=next(e['message'] for e in r['recovery']['contributions'] if e['message']['cosigner_id']==r['role']['id'])
-                wanted={'wallet_name':'archive-key','descriptors':[{'desc':'wpkh('+contribution[k]+')#'+checksum('wpkh('+contribution[k]+')')} for k in ('receive_key','change_key')]}
-                if not descriptors(wanted)<=descriptors(rpc(c,'listdescriptors',[False],'archive-key')):raise ValueError('Archived private wallet public account does not match the approved physical role.')
+                if r.get('generic'):
+                    wanted=r['recovery']['public_wallet']
+                else:
+                    contribution=next(e['message'] for e in r['recovery']['contributions'] if e['message']['cosigner_id']==r['role']['id'])
+                    wanted={'wallet_name':'archive-key','descriptors':[{'desc':'wpkh('+contribution[k]+')#'+checksum('wpkh('+contribution[k]+')')} for k in ('receive_key','change_key')]}
+                if not descriptors(wanted)<=descriptors(rpc(c,'listdescriptors',[False],'archive-key')):raise ValueError('Archived private wallet public account does not match the approved recovery policy.')
                 rpc(c,'createwallet',{'wallet_name':'archive-policy','disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':False})
-                requests=[{'desc':r['recovery'][k],'timestamp':'now','active':True,'internal':bool(i),'range':[0,999]} for i,k in enumerate(('receive_descriptor','change_descriptor'))]
+                if r.get('generic'):
+                    requests=[{k:v for k,v in row.items() if k in ('desc','timestamp','active','internal','range','next_index')} for row in r['recovery'].get('public_policies',r['recovery']['public_wallet'])['descriptors']]
+                    for original,row in zip(r['recovery'].get('public_policies',r['recovery']['public_wallet'])['descriptors'],requests):
+                        row['timestamp']='now'
+                        if 'next' in original:row['next_index']=original['next']
+                else:requests=[{'desc':r['recovery'][k],'timestamp':'now','active':True,'internal':bool(i),'range':[0,999]} for i,k in enumerate(('receive_descriptor','change_descriptor'))]
+                for ext in r['recovery'].get('policy_extensions',[]):
+                    requests.extend({'desc':desc,'timestamp':'now','active':False,'internal':bool(i),'range':[0,999]} for i,desc in enumerate((ext['receive_descriptor'],ext['change_descriptor'])))
                 result=rpc(c,'importdescriptors',[requests],'archive-policy')
                 if any(not x.get('success') for x in result):raise ValueError('Could not load the complete public archive policy in RAM.')
+                if r.get('generic') and r['recovery'].get('policy_labels'):
+                    from wallet_labels import apply_labels
+                    apply_labels(c,'archive-policy',r['recovery']['policy_labels'],write=True)
                 # Explicit local restore approval, never a remotely asserted ready bit.
-                address=rpc(c,'deriveaddresses',[r['recovery']['receive_descriptor'],[0,0]])[0];rpc(c,'setlabel',[address,'Wallaby setup ready:'+r['recovery']['policy_hash']],'archive-policy')
+                first=r['review']['receive_descriptor'];address=rpc(c,'deriveaddresses',[first,[0,0]] if '*' in first else [first])[0];None if r.get('generic') else rpc(c,'setlabel',[address,'Wallaby setup ready:'+r['recovery']['policy_hash']],'archive-policy')
                 label='Disc '+r['recovery']['policy_hash'][:12]+' '+r['role']['id'];monitor=label+' policy';routes={label:'archive-key',monitor:'archive-policy'}
                 r.update(node=node,routes=routes,keys=[label],monitor=monitor);self.loaded[ident]=r;self.staged.pop(ident)
             except Exception:node.close();raise

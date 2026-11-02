@@ -10,6 +10,8 @@ def unsigned(core,psbt):
     return d
 
 def intents(ops,p,review):
+    from policy_refresh import verify_output_policies
+    verify_output_policies(ops,p,review)
     final=rpc(ops.core,'decodepsbt',[p['psbt']])['tx'];required_fee=0;used=set();outputs=Counter((o['scriptPubKey']['hex'],sats(o['value'])) for o in final['vout'])
     declared=list(p.get('vault_intents',[]))
     final_points={(i['txid'],i['vout']) for i in review['inputs']}
