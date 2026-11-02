@@ -2,11 +2,17 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 23
+# Wallaby Agent V2 — Development Build 24
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-[Build 23 DEB](dist/wallaby-agent_2.0.0~dev23_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 24 DEB](dist/wallaby-agent_2.0.0~dev24_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+
+Build 24 matches **Dashboard V1 Build 28** for grouped **Extinct** synchronisation. Each sender/receiver pair gets one watch-only request containing the retired wallets; expand it to see names, addresses and funds from the sender's signed local-Core preview. Historical watch imports left in several old Core containers can be independently combined into the public preview without moving private keys. The receiver creates or extends its one `Wallaby Extinct` archive, retaining old addresses and labels; conflicting local labels block the import.
+
+For upgrades after disabling the old per-wallet requests, Authorise offers **Clear obsolete Extinct denials** once exact old child-policy matches can be established from the new signed preview. This is one local action; it preserves unrelated denials and a deliberately disabled whole Extinct container. A single-child exact-policy match is also supported. Clearing denials never authorises a transfer. Dashboard's new complete queue withdraws old unattempted requests; actual or uncertain transfer outcomes remain protected. [Upgrade and integration notes](DASHBOARD_BUILD28_SYNC.md).
+
+Failed public exchanges now back off for the promised **30 seconds** instead of retrying every two seconds. Safe diagnostics identify the endpoint, phase, fixed proposal kind, HTTP/protocol category and retry delay, without recording raw responses, credentials or wallet payloads. Successful exchange polling stays at two seconds. The Dashboard's Ownership/history-discovery fix is on the Dashboard side; this Agent build does not weaken read-only RPC or treat missing history as zero balances.
 
 Build 23 adds **multi-wallet disc archives and vault-policy refresh**, matching Dashboard V1 Build 27. Approve existing node-wallet archive requests in **Authorise**, select up to 15 approved wallets in **Disc Operations**, and burn them together. The defaults remain one physical disc and the slowest supported speed. Every disc is filled with redundant encrypted copies and completely read back before completion is reported. Older single-role archives remain readable.
 

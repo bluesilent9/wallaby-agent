@@ -53,10 +53,11 @@ def rows(store):
         if p['kind']!='wallet_transfer' or row.get('withdrawn'):continue
         choice=s.get('sync_choices',{}).get(key,{'selected':False,'watch_only':not p['source_has_private_keys']})
         preview=s.get('transfer_previews',{}).get(key,{}).get('preview',{})
+        from extinct_sync import grouped,children
         own=socket.gethostname();name=preview.get('public_wallet',{}).get('wallet_name') if p['direction']=='send' else p['public_wallet']['wallet_name']
         result.append({'id':key,'peer_id':p['peer']['node_id'],'direction':p['direction'],'sender':own if p['direction']=='send' else p['peer']['hostname'],'receiver':own if p['direction']=='receive' else p['peer']['hostname'],
                        'sender_ipv6':p.get('node_ipv6') if p['direction']=='send' else p['peer']['ipv6'],'receiver_ipv6':p.get('node_ipv6') if p['direction']=='receive' else p['peer']['ipv6'],
-                       'wallet_name':name or 'Verify with local node','name_verified':p['direction']=='send' and bool(name),'state':row['state'],'watch_only_locked':not p['source_has_private_keys'],**choice})
+                       'wallet_name':name or 'Verify with local node','name_verified':p['direction']=='send' and bool(name),'state':row['state'],'watch_only_locked':not p['source_has_private_keys'],'extinct_group':grouped(p['public_wallet']),'extinct_children':children(preview) if preview else [],**choice})
     return sorted(result,key=lambda r:(r['wallet_name'].casefold(),r['sender'],r['receiver'],r['id']))
 
 

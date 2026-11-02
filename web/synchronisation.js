@@ -20,7 +20,12 @@ function renderSync(t){
   const row=el('tr',{class:r.id===t.id?'selected-row':'','aria-selected':String(r.id===t.id)}),select=checkBox('Send '+r.wallet_name,r.selected,t.busy||r.state!=='pending',selected=>api('synchronisation/selection',{id:r.id,selected,watch_only:r.watch_only})),watch=checkBox('Watch only '+r.wallet_name,r.watch_only,t.busy||r.watch_only_locked||r.state!=='pending',watch_only=>api('synchronisation/selection',{id:r.id,selected:r.selected,watch_only}));
   select.addEventListener('click',e=>e.stopPropagation());watch.addEventListener('click',e=>e.stopPropagation());
   const review=button(r.wallet_name,'row-review',async()=>{await api('synchronisation/review',{id:r.id});transferSignature='';});review.disabled=t.busy;
-  row.append(el('td',{},select),el('td',{},r.sender),el('td',{},r.receiver),el('td',{},review,el('small',{},r.direction==='send'?(r.name_verified?'Name verified by local Core':'Waiting for local verification'):'Name supplied by Dashboard'),r.state!=='pending'?el('small',{},r.state==='recovery_required'?'Received — history recovery required':r.state):null),el('td',{},watch,r.watch_only_locked?el('small',{},'Source is watch-only'):null));
+  const children=r.extinct_group?el('details',{class:'extinct-children'},
+    el('summary',{},'Retired wallets ('+(r.extinct_children||[]).length+')'),
+    ...(r.extinct_children||[]).map(c=>el('div',{},el('strong',{},c.name),el('small',{},c.addresses.length+' address(es) · '+pipe(c.amount_sats)))),
+    el('p',{class:'hint'},r.name_verified?'Children verified from local Core labels.':'Children from the sender’s signed preview; compare its code and identity.')):null;
+  row.append(el('td',{},select),el('td',{},r.sender),el('td',{},r.receiver),el('td',{},review,children,el('small',{},r.direction==='send'?(r.name_verified?'Name verified by local Core':'Waiting for local verification'):'Name supplied by Dashboard'),r.state!=='pending'?el('small',{},r.state==='recovery_required'?'Received — history recovery required':r.state):null),el('td',{},watch,r.watch_only_locked?el('small',{},'Source is watch-only'):null));
+  children?.addEventListener('click',e=>e.stopPropagation());
   row.addEventListener('click',()=>{if(!t.busy)run(async()=>{await api('synchronisation/review',{id:r.id});transferSignature='';});});body.append(row);
  }
  table.append(body);list.append(table);if(!rows.length)list.append(el('p',{},'No wallet synchronisation requests.'));
@@ -36,6 +41,7 @@ function renderSync(t){
 function renderWallet(t){
  const p=t.proposal,receive=p.direction==='receive',setup=t.setup,box=el('section',{class:'server-card result-card'},el('h3',{},receive?'Receiving wallet details':'Sending wallet details'),el('p',{},'Wallet: '+(t.details?.public_wallet?.wallet_name||p.public_wallet.wallet_name)),el('p',{class:'hint'},'Wallet names are labels. Compare the public descriptors and signed preview code with the other computer using a channel independent of Dashboard.'));
  if(t.preview_error)box.append(el('p',{class:'warning'},t.preview_error));
+ const group=(t.rows||[]).find(r=>r.id===t.id);if(group?.extinct_group){box.append(el('h3',{},'Retired wallets inside this Extinct archive'));for(const c of group.extinct_children||[])box.append(el('article',{class:'public-fact'},el('strong',{},c.name),el('p',{},c.addresses.length+' address(es) · '+pipe(c.amount_sats)),...c.addresses.map(a=>el('code',{},a))));}
  const descriptors=t.details?.public_wallet?.descriptors||p.public_wallet.descriptors,details=el('details',{},el('summary',{},'Public descriptors ('+descriptors.length+')'));
  for(const d of descriptors)details.append(el('pre',{class:'policy-code'},d.desc),el('p',{},'History timestamp: '+d.timestamp+(d.internal?' · Change branch':' · Receiving branch')));box.append(details);
  if(t.preview_proof?.preview_hash){box.append(el('h3',{},'Independent verification'),el('p',{},'Compare this complete preview code on both computers:'),el('pre',{class:'policy-code'},t.preview_proof.preview_hash),el('p',{},'Sending Agent identity fingerprint — compare directly on the sender:'),el('pre',{class:'policy-code'},t.preview_proof.fingerprint));}

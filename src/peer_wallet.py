@@ -78,6 +78,10 @@ def readiness(p):
 
 def source_wallet(core,p,require_encrypted=False):
     wanted=descriptors(p['public_wallet']);matches=[]
+    from extinct_sync import grouped,ARCHIVE
+    if grouped(p['public_wallet']) and not p['source_has_private_keys'] and ARCHIVE in rpc(core,'listwallets'):
+        raw=rpc(core,'listdescriptors',[False],ARCHIVE);info=rpc(core,'getwalletinfo',[],ARCHIVE)
+        if wanted<=descriptors(raw) and not info.get('private_keys_enabled') and not info.get('scanning'):return ARCHIVE
     for name in rpc(core,'listwallets'):
         try:
             raw=rpc(core,'listdescriptors',[False],name)
@@ -91,9 +95,14 @@ def source_wallet(core,p,require_encrypted=False):
     if require_encrypted and info.get('private_keys_enabled') and ('unlocked_until' not in info or info['unlocked_until']!=0):raise ValueError('Lock this encrypted wallet in Bitcoin Core before sending. Unencrypted private-key wallets cannot be transferred; encrypt and back up the wallet in Core first.')
     return matches[0]
 
-def wallet_details(core,p,store=None):
+def wallet_details(core,p,store=None,local_source=None):
     """Funded address facts originate at Core, transferred peer-to-peer, never asserted by Dashboard."""
-    name=source_wallet(core,p);names=[name];vaults=[]
+    if local_source is None and __import__('extinct_sync').grouped(p['public_wallet']):return __import__('extinct_sync').local_details(core,p,store)
+    name=local_source if local_source is not None else source_wallet(core,p)
+    if local_source is not None:
+        raw=rpc(core,'listdescriptors',[False],name);info=rpc(core,'getwalletinfo',[],name)
+        if info.get('private_keys_enabled') or p['source_has_private_keys'] or info.get('scanning') or not descriptors(p['public_wallet'])<=descriptors(raw):raise ValueError('Local historical source differs from the reviewed public addresses.')
+    names=[name];vaults=[]
     if p.get('transfer_version')==2:
         from wallet_ops import verify_vault
         from vault_policy import public_vault
@@ -138,9 +147,10 @@ def wallet_details(core,p,store=None):
             wanted=descriptors(p['public_wallet']);raw['descriptors']=[r for r in raw['descriptors'] if descriptors({'wallet_name':name,'descriptors':[r]})<=wanted]
             addresses={fixed_address(r['desc']) for r in raw['descriptors']};rows=[row for row in rows if row['address'] in addresses]
         labels=read_labels(core,name,raw,rows)
-        if address_only(raw):
+        if address_only(raw) and not __import__('extinct_sync').grouped(p['public_wallet']):
             groups={r['label'].split(' | LOST:',1)[0].strip() for r in labels if r['label']}
             if len(groups)==1:raw['wallet_name']=next(iter(groups))
+    if __import__('extinct_sync').grouped(p['public_wallet']):raw['wallet_name']='Wallaby Extinct'
     result={'public_wallet':raw,'funded_outputs':rows,'chain':rpc(core,'getblockchaininfo')['chain']}
     if p.get('transfer_version')==2:result.update(vaults=vaults,address_labels=labels)
     return result
@@ -265,29 +275,11 @@ class Transfer:
             if watch:
                 header=frame_read(stream)
                 if header!={'operation':'public_wallet'}:raise ValueError('Watch-only transfer cannot contain a wallet file.')
-                from wallet_recovery import history_missing,earliest,require,verify_history
-                name='Wallaby Watch '+p['transfer_id'][:24]
-                if any(w['name']==name for w in rpc(self.core,'listwalletdir')['wallets']):raise ValueError('A wallet with this transfer identity already exists. Inspect Core before retrying.')
-                missing=history_missing(self.core,earliest(details))
-                require(self.store,key,name,details) # Persist the history job before the first wallet mutation.
-                with self.store.edit() as state:state['pending'][key]['state']='attempted'
-                rpc(self.core,'createwallet',{'wallet_name':name,'disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':True})
-                requests=[]
-                for item in details['public_wallet']['descriptors']:
-                    request={k:v for k,v in item.items() if k in ('desc','timestamp','active','internal','range','next_index')}
-                    if 'next' in item:request['next_index']=item['next']
-                    if missing:
-                        from wallet_recovery import staging_timestamp
-                        request['timestamp']=staging_timestamp(self.core)
-                    requests.append(request)
-                imported=rpc(self.core,'importdescriptors',{'requests':requests},name,timeout=600)
-                if not imported or not all(r.get('success') for r in imported):raise ValueError('Core did not import all public descriptors. Inspect the new watch wallet; no operation will be replayed.')
-                info=rpc(self.core,'getwalletinfo',[],name)
-                if info.get('private_keys_enabled'):raise ValueError('Watch-only wallet unexpectedly permits private keys.')
-                from wallet_labels import apply_labels
-                apply_labels(self.core,name,details.get('address_labels',[]),write=True)
+                from wallet_recovery import verify_history
+                from extinct_sync import import_watch
+                name,missing,details=import_watch(self.core,self.store,key,p,details)
                 if missing:
-                    require(self.store,key,name,details);self.pending_recovery(key)
+                    self.pending_recovery(key)
                     frame_write(stream,{'status':'recovery_required','transfer_id':p['transfer_id']});frame_read(stream);return
                 verify_history(self.core,name,details,self.store)
                 actual=descriptors(rpc(self.core,'listdescriptors',[False],name))
@@ -360,9 +352,10 @@ class Transfer:
             details=wallet_details(self.core,p,self.store)
             if not same_facts(details,{k:payload['preview'][k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels') if k in payload['preview']}):raise ValueError('Wallet history changed. Review the current sending details again before sending.')
             validate_details(details)
-            name=source_wallet(self.core,p);self.details=details
+            self.details=details
             choice=self.store.read().get('sync_batch',{}).get('options',{}).get(key,{})
             watch=not p['source_has_private_keys'] or choice.get('watch_only',False)
+            name=None if watch else source_wallet(self.core,p)
             with tempfile.TemporaryDirectory(prefix='send-',dir=work_dir(self.core)) as d:
                 root=Path(d);backup=root/'wallet.dat';known=root/'known_hosts';ask=self.store.root/('askpass-'+secrets.token_hex(6)+'.sock');process=None;auth=None;errors=bytearray()
                 try:

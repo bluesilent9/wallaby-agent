@@ -18,10 +18,19 @@ def decode(raw):
     return json.loads(raw,parse_float=Decimal,object_pairs_hook=pairs,parse_constant=lambda x:(_ for _ in ()).throw(ValueError('Invalid number.')))
 
 class HTTPFailure(Exception):
-    def __init__(self,status):self.status=status;super().__init__('HTTP request failed (%d).'%status)
+    def __init__(self,status,safe_reason=None):self.status=status;self.safe_reason=safe_reason;super().__init__('HTTP request failed (%d).'%status)
+
+def exchange_http_reason(data):
+    """Only exact public protocol errors may cross into diagnostic messages."""
+    try:value=decode(data)
+    except (ValueError,UnicodeError):return None
+    if not isinstance(value,dict):return None
+    message=value.get('error')
+    if isinstance(message,str) and re.fullmatch(r'Unsupported Agent capabilities: [a-z0-9_]{1,64}(?:, [a-z0-9_]{1,64}){0,15}\. Dashboard V1 Build [0-9]{1,5}; Agent [0-9A-Za-z.+~_-]{1,64}\.',message):return 'capabilities'
+    return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1',response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev23'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev24'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -30,7 +39,7 @@ def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1',res
         conn.request('GET' if raw is None else 'POST',path,raw,headers)
         response=conn.getresponse();data=response.read(response_limit+1)
         if len(data)>response_limit:raise PublicDataFailure('response_limit','The local/public HTTP response exceeds the configured transport size limit.',{'boundary':'local_core_http' if auth else 'dashboard_http','limit_bytes':response_limit,'observed_bytes_at_least':len(data)})
-        if response.status!=200:raise HTTPFailure(response.status)
+        if response.status!=200:raise HTTPFailure(response.status,exchange_http_reason(data) if path=='/agent/v2/exchange' else None)
         try:return decode(data)
         except (ValueError,UnicodeError):raise PublicDataFailure('response_json','The service returned invalid JSON data.') from None
     finally:

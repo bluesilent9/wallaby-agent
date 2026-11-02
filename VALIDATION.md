@@ -1,6 +1,18 @@
-# Agent V2 Development Build 23 validation
+# Agent V2 Development Build 24 validation
 
-Final regression/focused results are in the accompanying Build23 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+Final regression/focused results are in the accompanying Build24 test log. Package verification compares installed source/web/document bytes and records SHA-256. No production wallets, installed services, SSH/firewall or pruning settings were changed by automated tests.
+
+## Build 24 reported faults and upgrade cleanup
+
+The supplied November 2 logs confirmed repeated Agent exchange rejection/validation failures alongside successful public node registration, and Dashboard history reconstruction issuing unsuccessful historical transaction lookups. The Agent retry loop used two seconds even after reporting 30 seconds; it now uses the actual failure delay. It reports safe categories and fixed processing phases rather than raw remote error text. The Ownership gating/history publication correction belongs to Dashboard Build 28.
+
+Real isolated Core tests send a two-child historical archive through the actual framed peer receiver into one private-key-disabled `Wallaby Extinct` wallet. They verify labels and descriptors, safely extend an existing archive with retained local addresses, refuse label conflicts before mutation, and combine older fragmented watch-only sources into one independently verified preview. An outstanding older archive-history job blocks extension until that recovery is resolved.
+
+The persistent-denial test opens a new Store to simulate reboot, retains old child denials plus an unrelated intentional denial, receives the grouped signed preview, and removes only exact superseded child hashes after local approval. A second new Store confirms persistence. A single-child exact-policy denial can be re-enabled; a deliberate whole-container denial stays. Attempted wallet mutations are never erased merely because a Dashboard queue changes.
+
+Eight JavaScript suites passed, including one-row/multiple-child display, locked watch-only choice and the local obsolete-denial cleanup control. The real offscreen Qt/window-close and framed-IPC suite passed 15 tests. The separate-interpreter production Dashboard Build 28/Agent Build 24 probe passes grouped queue construction, strict Agent validation, signed sender labels, Dashboard signature/binding verification and receiver acceptance. No production nodes, services, wallets, firewall rules or pruning settings were changed.
+
+The first full regression run found two test-fixture errors from reusing an isolated Core wallet directory. The fixture now uses fresh temporary nodes per test; targeted reruns passed. The clean full regression run passed **339 tests** (628.603 seconds); the final grouped transfer/upgrade regression run passed **17 tests** (68.024 seconds), including all new denial migration tests. Additional current-source workspace/denial boundaries are recorded in the accompanying Build24 test log. Physical disc and complete target-machine GUI/privilege lifecycle testing remain outstanding.
 
 ## Build 23 archives and public policy renewal
 
