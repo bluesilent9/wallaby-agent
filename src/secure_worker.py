@@ -44,7 +44,11 @@ class Workspace:
     def configure(self,environment):
         for key,value in environment.items():
             if key not in ENV or not isinstance(value,str) or len(value)>4096 or any(ord(c)<32 for c in value):raise ValueError('Invalid local display environment.')
-        self.environment=dict(environment)
+        # Protected HTTP/background callers inherit the system service environment,
+        # which lacks the desktop display supplied when the viewer was opened.
+        # Keep that authenticated local context; only validated nonempty updates
+        # replace it. Never admit arbitrary process/environment variables.
+        self.environment.update({key:value for key,value in environment.items() if value})
         c=Config().values;c['cookie']=c['cookie'] or discover_cookie()
         if self.ops is None or any(self.ops.core.config.get(k)!=c[k] for k in ('cookie','rpc_port')):
             if self.ops and (self.busy() or self.archives and (self.archives.loaded or self.archives.staged)):raise ValueError('Finish protected wallet work before changing the Core connection.')
@@ -453,8 +457,8 @@ class Handler(socketserver.BaseRequestHandler):
                 event(method,'Local action completed · elapsed_ms='+str(round((time.monotonic()-started)*1000)))
         except Exception as e:
             from activity_log import event
-            from diagnostics import action_code
-            event(method,'Local action refused or uncertain · '+action_code(e)+' · '+type(e).__name__+' · elapsed_ms='+str(round((time.monotonic()-started)*1000)))
+            from diagnostics import action_code,action_detail
+            event(method,'Local action refused or uncertain · '+action_code(e)+' · '+type(e).__name__+' · '+action_detail(e)+' · elapsed_ms='+str(round((time.monotonic()-started)*1000)))
             reply={'error':str(e) if isinstance(e,ValueError) else 'Protected operation stopped or is uncertain. Inspect local state; it was not automatically repeated.'}
         raw=json.dumps(reply,allow_nan=False).encode();self.request.sendall(struct.pack('!I',len(raw))+raw)
 

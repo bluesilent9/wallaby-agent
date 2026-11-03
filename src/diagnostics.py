@@ -1,6 +1,14 @@
 """Actionable, bounded diagnostics; never expose credentials or raw server responses."""
 import http.client
 import socket
+import re
+
+
+class LocalActionFailure(ValueError):
+    """Locally authored, public diagnostic text; never constructed from RPC output."""
+    def __init__(self,code,message):
+        self.code=code
+        super().__init__(message)
 
 
 class ConnectionFailure(ConnectionError):
@@ -77,10 +85,80 @@ def ssh_failure(lines, port, exit_code=None):
 
 def action_code(error):
     """Classify known local refusals without recording arbitrary exception text."""
-    if isinstance(error,ConnectionFailure):return error.code
+    if isinstance(error,(ConnectionFailure,LocalActionFailure)):return error.code
     from secure_bridge import WorkspaceFailure
     if isinstance(error,WorkspaceFailure):return error.code
     text=str(error)
+    if core_refusal(text):return 'core_rpc_refused'
     for prefix,code in (('Dashboard requested cancellation.', 'builder_cancellation_pending'),('Choose Delete and Cancel', 'builder_cancellation_choice_required'),('This build is cancelled.', 'builder_cancellation_pending'),('Close request expired;', 'close_admission_expired'),('Finish the active protected operation', 'local_action_busy'),('Finish active wallet work,', 'unfinished_wallet_work'),('The protected workspace is closing.', 'workspace_closing')):
         if text.startswith(prefix):return code
     return 'local_action_refused'
+
+
+LOCAL_SETUP_MESSAGES=frozenset({
+    'A locally generated contribution was replaced.',
+    'An independently entered Agent fingerprint does not match.',
+    'An installed setup wallet no longer matches its locally recorded public policy. No cancellation cleanup was performed.',
+    'An unfinished monitor changed since creation. Inspect locally; it was retained.',
+    'Approve this exact participation proposal locally before reviewing its complete policy. A RAM workspace restart requires a fresh setup session.',
+    'Authorisation queue is full; cancellation receipt was not sent.',
+    'Backup destination selection cancelled. Original artifacts remain intact.',
+    'Cancellation binding differs.',
+    'Cancellation cleanup is incomplete or uncertain. Retained artifacts were not replayed; inspect this protected workspace before a fresh local recovery action.',
+    'Cancellation was already attempted; reconcile the local outcome before retrying.',
+    'Choose Delete and Cancel or Backup and Cancel locally.',
+    'Complete policy changed. Review again.',
+    'Core could not install the approved public policy.',
+    'Core did not confirm a ranged public policy.',
+    'Core did not return one public BIP84 key per branch.',
+    'Dashboard policy differs from the independently constructed threshold, keys, branches or mandatory height. There is no editable or alternative spending path.',
+    'Dashboard requested cancellation. Review Delete and Cancel or Backup and Cancel on Authorise before continuing.',
+    'Duplicate cancellation export binding.',
+    'Enter a non-empty passphrase, up to 1024 characters.',
+    'Finish the current wallet setup and its physical backups before starting another wallet.',
+    'Independent address derivation differs from Core.',
+    'Install kdialog or zenity for the local backup folder chooser.',
+    'Install kdialog or zenity. Secrets are never requested through the browser.',
+    'Invalid builder cancellation.',
+    'Invalid cancellation export bindings.',
+    'Invalid cancellation identity.',
+    'Invalid cancellation targets.',
+    'Local artifacts or broadcast status changed. Review the cancellation again.',
+    'Local secret entry cancelled. No operation was authorised.',
+    'Local state changed while backing up. Originals were retained; review again before cleanup.',
+    'New signing wallet must be encrypted and locked.',
+    'Only an unfinished setup before policy installation can be discarded. Reconcile any attempted installation locally.',
+    'Passphrases did not match.',
+    'Persistent signer failed encrypted/locked verification.',
+    'Protected Core has not finished closing. Keep the RAM workspace running; it was not killed.',
+    'Protected Core network differs.',
+    'Review and independently verify every distinct producing Agent.',
+    'Review the complete public policy again.',
+    'Review this cancellation again before deleting or backing up artifacts.',
+    'Setup already attempted. Inspect local outcome; nothing was replayed.',
+    'Temporary keys retained.',
+    'The cancellation export differs from its locally held PSBT. No artifacts were removed.',
+    'The cancellation transaction identity differs from local Core.',
+    'The proposed network differs from this local node.',
+    'The setup monitor already exists; no existing wallet was claimed.',
+    'The setup signing-wallet name already exists; no existing wallet was claimed or overwritten.',
+    'This setup already generated keys. No secret generation was repeated.',
+    'Unknown cosigner contribution.',
+    'Unknown external archive completion.',
+    'Unsupported local recovery metadata; originals retained.',
+    'Use at least 12 characters for the cancellation backup passphrase.',
+    'Use at least 12 characters for the encrypted signing wallet.',
+    'Verify each distinct producing Agent in this exact wallet setup.',
+    'Wait for the active optical write/read-back to finish. No active writer was killed.',
+    'Wallet installation was attempted. Reconcile the local outcome before discarding anything.',
+})
+
+def core_refusal(message):
+    return bool(re.fullmatch(r'Bitcoin Core rejected [a-z0-9_]{1,64} \(code (?:-?[0-9]{1,8}|None)\). Check wallet readiness, encryption and node synchronisation\.',message))
+
+def action_detail(error):
+    """Only trusted authored errors or exact known messages, never raw exception text."""
+    if isinstance(error,LocalActionFailure):return str(error)
+    if type(error) is ValueError and (str(error) in LOCAL_SETUP_MESSAGES or core_refusal(str(error))):return str(error)
+    if isinstance(error,OSError):return "Operating system refused the operation; errno="+str(error.errno)
+    return "No safe error text is available; raw exception contents were withheld."

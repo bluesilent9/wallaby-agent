@@ -1,6 +1,7 @@
 """Bounded diagnostic events. Protected logs stay in RAM until explicit safe closure.
 
-Never pass RPC parameters, results, proposals, secrets or exception text here.
+Never pass RPC parameters, results, proposals, secrets or unclassified exception text here.
+Known local error explanations must pass diagnostics.action_detail first.
 Redaction is defence in depth; callers record fixed action/category names only.
 """
 import contextlib,datetime as dt,fcntl,json,os,re,secrets,stat,threading,time

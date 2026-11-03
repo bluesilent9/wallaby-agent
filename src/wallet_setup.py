@@ -9,6 +9,7 @@ from setup_policy import proposal,policy
 from vendor.embit.networks import NETWORKS
 from vendor.embit.descriptor import Descriptor
 from disc_backup import Burner
+from diagnostics import LocalActionFailure
 
 
 def secret_dialog(prompt,environment,confirm=False):
@@ -30,11 +31,14 @@ class MemoryCore:
     def __init__(self,root,chain,binary='/usr/bin/bitcoind'):
         from node_client import Core
         self.root=Path(root);self.root.mkdir(mode=0o700,parents=True);self.process=None
-        if not Path(binary).is_file() or not os.access(binary,os.X_OK):raise ValueError('Install a native Bitcoin Core bitcoind executable. A confined Snap process cannot be silently substituted for the protected RAM node.')
+        if not Path(binary).is_file() or not os.access(binary,os.X_OK):raise LocalActionFailure('core_executable_missing','A usable Bitcoin Core bitcoind executable is required for protected wallet creation. Install a compatible native executable; no disk fallback was used.')
         with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
-        args=[binary,'-datadir='+str(self.root),'-conf=/dev/null','-settings=0','-server=1','-listen=0','-connect=0','-dnsseed=0','-discover=0','-networkactive=0','-debuglogfile=0','-printtoconsole=0','-dbcache=16','-par=1','-rpcport='+str(port)]
+        args=[binary,'-datadir='+str(self.root),'-conf=/dev/null','-settings=0','-server=1','-listen=0','-connect=0','-dnsseed=0','-discover=0','-networkactive=0','-debuglogfile=0','-printtoconsole=1','-dbcache=16','-par=1','-rpcport='+str(port)]
         if chain!='main':args.append('-'+{'test':'testnet','signet':'signet','regtest':'regtest'}[chain])
-        self.process=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        from core_startup import StartupOutput
+        try:self.process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+        except OSError as error:raise LocalActionFailure('core_execute_failed','The offline Core executable could not be launched; operating system errno='+str(error.errno)+'. No wallet keys were created.') from None
+        self.startup_output=StartupOutput(self.process.stdout)
         network={'main':'','test':'testnet3','signet':'signet','regtest':'regtest'}[chain]
         self.core=Core({'cookie':str(self.root/network/'.cookie'),'rpc_port':port})
         for _ in range(200):
@@ -43,13 +47,17 @@ class MemoryCore:
                 if info['chain']!=chain:raise ValueError('Protected Core network differs.')
                 break
             except Exception:
-                if self.process.poll() is not None:raise ValueError('Protected RAM Core failed to start. Inspect its installation; no disk fallback is permitted.') from None
+                if self.process.poll() is not None:raise self.startup_output.failure(self.process.returncode) from None
                 time.sleep(.05)
-        else:self.close();raise ValueError('Protected RAM Core RPC did not become ready.')
+        else:
+            self.close();raise LocalActionFailure('core_startup_rpc_timeout','The offline Core process did not make its loopback RPC ready within 10 seconds. No wallet keys were created.')
+        self.startup_output.clear()
     def close(self):
         if self.process and self.process.poll() is None:
             try:rpc(self.core,'stop');self.process.wait(timeout=60)
             except Exception:raise ValueError('Protected Core has not finished closing. Keep the RAM workspace running; it was not killed.') from None
+        if hasattr(self,'startup_output'):
+            self.startup_output.thread.join(1);self.startup_output.clear()
 
 class WalletSetup:
     def __init__(self,core,store,environment=None,enforce=None,binary='/usr/bin/bitcoind'):
@@ -109,19 +117,23 @@ class WalletSetup:
         # Before generating anything, reserve this immutable session and mark attempted.
         with self.store.edit() as s:s['pending'][key]['state']='attempted';s['setup_active']=binding
         session={'proposal':p,'installed_wallets':{},'contributions':[],'wallets':{},'core':None,'phase':'generating','pins':dict(pins)};self.sessions[binding]=session
+        stage='offline_core_start'
         try:
             local=[r for r in p['cosigners'] if r['agent_key']==own['public_key']]
             if local:session['core']=MemoryCore(self.store.root/'setup-cores'/binding,p['chain'],self.binary)
             for role in local:
                 self.check_cancel(binding)
                 name='key_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20]
+                stage='passphrase_entry'
                 password=secret_dialog('Create encrypted Bitcoin Core signing wallet '+name+' · role '+role['id']+'\nThis creates keys only; it does not fund the wallet.',self.environment,confirm=True)
                 if len(password)<12:raise ValueError('Use at least 12 characters for the encrypted signing wallet.')
                 name='key_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20];c=session['core'].core
                 self.check_cancel(binding)
+                stage='encrypted_wallet_creation'
                 try:rpc(c,'createwallet',{'wallet_name':name,'passphrase':password,'descriptors':True,'load_on_startup':False})
                 finally:password=None
                 if rpc(c,'getwalletinfo',[],name).get('unlocked_until')!=0:raise ValueError('New signing wallet must be encrypted and locked.')
+                stage='public_contribution'
                 rows=rpc(c,'listdescriptors',[False],name)['descriptors'];branch={}
                 for internal in (False,True):
                     match=[r['desc'].split('#')[0][5:-1] for r in rows if r.get('active') and r.get('internal',False)==internal and r['desc'].startswith('wpkh(')]
@@ -134,7 +146,12 @@ class WalletSetup:
             session['phase']='contributed';self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'session_id':p['session_id'],'proposal_hash':binding,'status':'participating'}))
             with self.store.edit() as s:s['pending'].pop(key,None);s['completed'][key]={'kind':'wallet_setup','at':time.time()}
             return {'message':'Participation complete · wallet creation moves no Bitcoin. Public contributions queued. Private keys remain in encrypted wallets inside protected RAM. Keep this workspace running until the complete policy is approved and all assigned backups are verified.'}
-        except Exception:session['phase']='error';raise
+        except Exception as error:
+            session['phase']='error'
+            from activity_log import event
+            from diagnostics import action_code,action_detail
+            event('setup.failure','stage='+stage+' · '+action_code(error)+' · '+action_detail(error))
+            raise
     def approve_policy(self,key):
         self.enforce();old=self.reviews.get(key)
         if not old or time.time()-old[1]>600:raise ValueError('Review the complete public policy again.')
