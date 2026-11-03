@@ -66,7 +66,7 @@ class RealRenames(unittest.TestCase):
  def approve_node(self,p):
   snapshot(self.store,queue([p]));k=digest(p)
   with patch('wallet_deletion.bases',return_value=[self.base]):review=self.renames.review(k)
-  with patch('wallet_deletion.bases',return_value=[self.base]),patch('wallet_rename.rename',side_effect=lambda source,new:move({'source':source,'new_name':new},[self.base])):result=self.renames.approve(k)
+  with patch('wallet_deletion.bases',return_value=[self.base]),patch('wallet_rename.rename',side_effect=lambda source,new,**kw:move({'source':source,'new_name':new},[self.base],**kw)):result=self.renames.approve(k)
   return k,review,result
  def test_encrypted_private_wallet_is_renamed_without_copy_unlock_or_policy_change(self):
   rpc(self.core,'createwallet',{'wallet_name':'Treasury','passphrase':'fixture wallet password'});address=rpc(self.core,'getnewaddress',['Trusted owner'],'Treasury');rpc(self.core,'createwallet',{'wallet_name':'Miner'});mining=rpc(self.core,'getnewaddress',[],'Miner');rpc(self.core,'generatetoaddress',[101,mining]);rpc(self.core,'sendtoaddress',[address,'0.1'],'Miner');rpc(self.core,'generatetoaddress',[1,mining]);raw=rpc(self.core,'listdescriptors',[False],'Treasury');db=self.base/'Treasury/wallet.dat';inode=db.stat().st_ino
@@ -115,11 +115,11 @@ class RealRenames(unittest.TestCase):
   def fail_load(core,method,*args,**kwargs):
    if method=='loadwallet':raise ValueError('Fixture load refusal')
    return original(core,method,*args,**kwargs)
-  with patch('wallet_deletion.bases',return_value=[self.base]),patch('wallet_rename.rename',side_effect=lambda source,new:move({'source':source,'new_name':new},[self.base])) as rename,patch('rename_requests.rpc',side_effect=fail_load):
-   with self.assertRaisesRegex(ValueError,'incomplete or uncertain'):self.renames.approve(k)
-   self.assertEqual(rename.call_count,1)
+  with patch('wallet_deletion.bases',return_value=[self.base]),patch('wallet_rename.rename',side_effect=lambda source,new,**kw:move({'source':source,'new_name':new},[self.base],**kw)) as rename,patch('rename_requests.rpc',side_effect=fail_load):
+   with self.assertRaisesRegex(ValueError,'Review and reconcile'):self.renames.approve(k)
+   self.assertEqual(rename.call_count,2)
    with self.assertRaises(ValueError):self.renames.approve(k)
-   self.assertEqual(rename.call_count,1)
+   self.assertEqual(rename.call_count,2)
   self.assertFalse((self.base/'Before failure').exists());self.assertTrue((self.base/'After failure').exists());self.assertEqual(self.store.read()['pending'][k]['state'],'attempted');proof=next(r['payload']['message'] for r in self.store.read()['outbox'].values() if r['kind']=='wallet_rename_result');self.assertTrue(proof['outcome_uncertain']);self.assertNotIn(k,self.store.read()['completed'])
 
  def test_replacement_keeps_every_other_wallet_on_a_multiwallet_disc(self):

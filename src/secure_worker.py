@@ -60,7 +60,7 @@ class Workspace:
             from policy_refresh import Refresh
             self.archive_ops=Operations(self.ops.core,self.store,self.setup,self.archives,enforce);self.refresh_ops=Refresh(self.ops.core,self.store,self.archives)
             from rename_requests import Renames
-            self.renames=Renames(self.ops.core,self.store,self.archives,self.archive_ops,self.rename_guard)
+            self.renames=Renames(self.ops.core,self.store,self.archives,self.archive_ops,self.rename_guard,self.rename_reconcile_guard)
             from local_wallets import LocalWallets
             self.local_wallets=LocalWallets(self.ops.core,self.rename_guard)
             self.messages=Messages(self.ops.core,self.store,lambda prompt:secret_dialog(prompt,self.environment))
@@ -81,8 +81,11 @@ class Workspace:
     def rename_guard(self):
         enforce()
         if self.busy() or self.archives.reading or self.ops.prepared:raise ValueError('Finish active wallet work, prepared signing reviews and archive staging before renaming a wallet.')
-    def busy(self):
-        s=self.store.read();return bool(getattr(self,'archive_ops',None) and self.archive_ops.busy() or any(v['proposal']['kind'] in ('destroy_disc','archive_cancel') for v in s['pending'].values()) or self.archives and (self.archives.reading) or s.get('history_jobs') or any(r['proposal']['kind']=='wallet_rename' and r['state']!='pending' for r in s['pending'].values()) or any(v.get('proposal',{}).get('kind')=='builder_cancel' for v in s['pending'].values()) or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
+    def rename_reconcile_guard(self,key):
+        enforce()
+        if self.busy(ignore_rename=key) or self.archives.reading or self.ops.prepared:raise ValueError('Finish other active wallet work before reconciling this rename.')
+    def busy(self,ignore_rename=None):
+        s=self.store.read();return bool(getattr(self,'archive_ops',None) and self.archive_ops.busy() or any(v['proposal']['kind'] in ('destroy_disc','archive_cancel') for v in s['pending'].values()) or self.archives and (self.archives.reading) or s.get('history_jobs') or any(k!=ignore_rename and r['proposal']['kind']=='wallet_rename' and r['state']!='pending' for k,r in s['pending'].items()) or any(v.get('proposal',{}).get('kind')=='builder_cancel' for v in s['pending'].values()) or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
     def burn_state(self):
         result=self.setup.burner.state();jobs=getattr(getattr(self,'archive_ops',None),'jobs',{})
         for row in result.get('queue',[]):row['archive_request']=bool(jobs.get(row['id'],{}).get('request') and jobs[row['id']]['phase']=='queued')
@@ -91,10 +94,10 @@ class Workspace:
         if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
         saved=self.store.read()
         connected=self.node_status['color']=='green'
-        return {'recovery':self.recovery_state(),'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':('staged' if getattr(self,'archive_ops',None) and self.archive_ops.jobs.get(k,{}).get('phase')=='queued' else v['state']),'wallet_name':__import__('approval_store').title(v['proposal']),'direction':v['proposal'].get('direction')} for k,v in saved['pending'].items() if not v.get('withdrawn') and not v.get('cancel_requested')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.burn_state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'obsolete_sync_denials':__import__('extinct_sync').obsolete_denials(self.store),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
+        return {'recovery':self.recovery_state(),'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':('staged' if getattr(self,'archive_ops',None) and self.archive_ops.jobs.get(k,{}).get('phase')=='queued' else v['state']),'wallet_name':__import__('approval_store').title(v['proposal']),'direction':v['proposal'].get('direction'),'rename_stage':v.get('rename_stage'),'rename_error_code':v.get('rename_error_code')} for k,v in saved['pending'].items() if (not v.get('withdrawn') or v['proposal']['kind']=='wallet_rename' and v['state']=='attempted') and not v.get('cancel_requested')],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.burn_state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'obsolete_sync_denials':__import__('extinct_sync').obsolete_denials(self.store),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase']} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
     def service_status(self):
         if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
-        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn'));result={'recovery':self.recovery_state(),'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'worker_version':VERSION,'worker_protocol':PROTOCOL,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or ((self.archives.loaded or self.archives.staged) and not getattr(self,'closing',False)) or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
+        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if not row.get('withdrawn') or row['proposal']['kind']=='wallet_rename' and row['state']=='attempted');result={'recovery':self.recovery_state(),'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'worker_version':VERSION,'worker_protocol':PROTOCOL,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or ((self.archives.loaded or self.archives.staged) and not getattr(self,'closing',False)) or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
         self._service_snapshot=dict(result);return result
     def recovery_state(self):
         return self.recovery.snapshot() if hasattr(self,'recovery') else {}
@@ -263,7 +266,7 @@ class Workspace:
                 raise ValueError('Node connection recovery is in progress. Protected operations are paused; no operation was started.')
             if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
             saved=self.store.read()
-            changing=method in ('wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm')
+            changing=method in ('rename.approve','rename.reconcile','wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm')
             if changing and args:
                 from cancellation import blocked
                 candidate=saved['pending'].get(args[0],{}).get('proposal') or getattr(self.ops,'prepared',{}).get(args[0])
@@ -315,6 +318,7 @@ class Workspace:
                 if self.node_status['color']!='green':raise ValueError('Reconnect the node interface before managing local wallets.')
                 action=method.split('.')[1]
                 return getattr(self.local_wallets,'listing' if action=='list' else action)(*args)
+            if method=='rename.reconcile':return self.renames.reconcile(*args)
             if method=='rename.approve':return self.renames.approve(*args)
             if method in ('authorise.history','retirement.approve'):
                 from retirement_phases import require_current

@@ -141,3 +141,8 @@ Archiving has no persistent Disable control. Local request deletion reports sign
 ## Build 31 extensions
 
 See [AGENT_BUILD31_CANCELLATION.md](AGENT_BUILD31_CANCELLATION.md) for wallet_archive_cancel_v1, exact archive_cancel tasks, signed cleanup outcomes, cross-Agent physical-disc verification and local-only advisory vault unlock estimates. Existing queue envelope version and read-only Dashboard RPC restrictions are unchanged. No Dashboard time forecast is trusted for signing.
+
+
+## Build 32 local rename recovery
+
+The Dashboard wallet_rename_v1 protocol is unchanged. Build 32 fixes the local rename-helper mount policy, performs an authenticated helper preflight before unloading and exposes a locally authorised reconciliation action. Error receipts may include fixed stage/error_code, original_wallet_restored and reconciled fields. An unresolved attempt still reports attempted=true/outcome_uncertain=true; a verified restored original reports error with attempted=false/outcome_uncertain=false. A verified already-moved wallet reports complete with the actual expected new_wallet. No online message authorises retries, rollback renames or file overwrites. See AGENT_BUILD32_RENAME.md.
