@@ -11,6 +11,8 @@ class PublicExecution(test_build38.IdleDiscReads):
   self.w.setup.sessions['setup']['phase']='contributed'
   with self.w.store.edit() as s:s['setup_active']='setup'
   self.assertTrue(self.w.busy());self.assertFalse(self.w.busy(public_reads=True))
+  from test_build8 import paired
+  self.w.ops.core.call.side_effect=lambda ident,method,params,wallet=None,timeout=30: {'result':paired()['public_wallet'] if method=='listdescriptors' else {'walletname':wallet} if method=='getwalletinfo' else {'chain':'regtest'}}
   client=NodeClient({},1,threading.Event(),lambda *args:None);self.addCleanup(lambda:client.pool.shutdown(wait=True));sent=[]
   client.post=lambda path,body: {'execute':True} if path=='ack' else sent.append(body)
   for method,wallet in [('getblockchaininfo',None),('listwallets',None),('getwalletinfo','Existing wallet'),('listdescriptors','Existing wallet')]:

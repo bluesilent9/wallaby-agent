@@ -23,6 +23,8 @@ class BatchTransfer(Transfer):
             row=saved['pending'].get(key)
             if not row or row.get('withdrawn') or row['state']!='pending' or row['proposal']['direction']!=direction:raise ValueError('Selected requests changed. Review them again.')
             p=row['proposal']
+            from managed_accounts import guard
+            guard(self.core,p,self.store)
             if p.get('transfer_version')!=2:raise ValueError('Multiple and watch-only transfers require the documented Build 8 queue/transfer protocol from Dashboard.')
             payload=saved.get('transfer_previews',{}).get(key)
             if not payload:raise ValueError('Each selected wallet needs its signed initial public preview before authorisation.')

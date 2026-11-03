@@ -77,6 +77,8 @@ def readiness(p):
             'network_note':'The receiving SSH server must permit this local account and password authentication. Never enable root login. If UFW is active, its IPv6 support must be enabled (IPV6=yes in /etc/default/ufw). On the receiving modem, allow incoming IPv6 TCP 22 to this computer from the sending IPv6 address. IPv6 normally needs a firewall exception, not IPv4 port forwarding. The Agent cannot reliably inspect your modem or distinguish a modem block from a host firewall or routing failure. System SSH remains controlled by you; closing this transfer closes its direct connection and the Agent receiving socket, not an existing SSH server.'}
 
 def source_wallet(core,p,require_encrypted=False):
+    from managed_accounts import guard
+    guard(core,p)
     wanted=descriptors(p['public_wallet']);matches=[]
     from extinct_sync import grouped,ARCHIVE
     if grouped(p['public_wallet']) and not p['source_has_private_keys'] and ARCHIVE in rpc(core,'listwallets'):
@@ -90,6 +92,7 @@ def source_wallet(core,p,require_encrypted=False):
             if actual==wanted or (not p['source_has_private_keys'] and address_only(p['public_wallet']) and wanted<=actual):matches.append(name)
         except ValueError:continue
     if len(matches)!=1:raise ValueError('The local public descriptors must identify exactly one loaded source wallet. Load the wallet and resolve duplicate replicas first.')
+    guard(core,p,actual_name=matches[0])
     info=rpc(core,'getwalletinfo',[],matches[0])
     if info.get('private_keys_enabled')!=p['source_has_private_keys'] or info.get('scanning'):raise ValueError('Source wallet key capability changed or its scan is incomplete.')
     if require_encrypted and info.get('private_keys_enabled') and ('unlocked_until' not in info or info['unlocked_until']!=0):raise ValueError('Lock this encrypted wallet in Bitcoin Core before sending. Unencrypted private-key wallets cannot be transferred; encrypt and back up the wallet in Core first.')
@@ -191,6 +194,8 @@ class Transfer:
         if key!=current or not row:raise ValueError('This is not the active synchronisation request.')
         if row['state']!='pending':return self.state()
         p=row['proposal']
+        from managed_accounts import guard
+        guard(self.core,p,self.store)
         if p['direction']=='send':
             if p.get('preview_challenge'):
                 from wallet_preview import prepare
@@ -202,6 +207,8 @@ class Transfer:
         with self.lock:
             current,row=active(self.store)
             if key!=current or not row or row['proposal']['direction']!='receive':raise ValueError('Review the active receiving request.')
+            from managed_accounts import guard
+            guard(self.core,row['proposal'],self.store)
             from wallet_preview import verify_bound
             payload=self.store.read().get('transfer_previews',{}).get(key)
             if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('The initial node-verified wallet preview is missing. Dashboard Build 8 needs the documented preview protocol update; receiving is disabled until then.')
@@ -256,6 +263,8 @@ class Transfer:
                 if len(matches)!=1:raise ValueError('This wallet was not locally authorised in the selected batch.')
                 key,row=matches[0];p=row['proposal']
                 with self.store.edit() as state:state['active_transfer']=key
+            from managed_accounts import guard
+            guard(self.core,p,self.store)
             if header.get('operation')!='manifest' or header.get('transfer_id')!=p['transfer_id'] or ipv6(header.get('peer_ipv6'))!=ipv6(p['peer']['ipv6']):raise ValueError('Transfer or authenticated SSH source address differs from the approved request.')
             details=header.get('details');wanted=descriptors(p['public_wallet'])
             if not isinstance(details,dict) or descriptors(details.get('public_wallet'))!=wanted or details.get('chain')!=rpc(self.core,'getblockchaininfo')['chain']:raise ValueError('Direct peer public wallet does not match the approved descriptors/network.')

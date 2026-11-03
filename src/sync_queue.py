@@ -52,7 +52,16 @@ def apply_snapshot(store,revision,requests,session=None):
                     s['pending'].pop(key);s.get('sync_choices',{}).pop(key,None)
         s['sync_snapshot_requests']=requests
         from sync_preferences import policy_id
+        from managed_accounts import blocked,REASON
+        s['sync_guarded']={}
         for key,p in rows.items():
+            if blocked(s,p):
+                previous_row=s['pending'].get(key)
+                if key!=s.get('active_transfer') and (not previous_row or previous_row['state']=='pending'):
+                    s['pending'].pop(key,None);s.get('sync_choices',{}).pop(key,None);s.get('transfer_previews',{}).pop(key,None)
+                    s['sync_guarded'][key]={'wallet_name':p['public_wallet']['wallet_name'],'reason':REASON}
+                    item={'kind':'wallet_transfer_result','payload':{'request_hash':key,'status':'error','message':REASON}};s['outbox'][digest(item)]=item
+                    continue
             if p['direction']=='receive' and policy_id(p) in s.get('sync_exclusions',{}):continue
             if key not in s['pending'] and key not in s['completed']:
                 if len(s['pending'])>=MAX_ITEMS:raise ValueError('Authorisation queue is full.')

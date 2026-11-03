@@ -54,7 +54,7 @@ class Workspace:
             if self.ops and (self.busy() or self.archives and (self.archives.loaded or self.archives.staged)):raise ValueError('Finish protected wallet work before changing the Core connection.')
             if self.node_stop:self.node_stop.set()
             if self.transfer:self.transfer.close()
-            self.ops=WalletOps(Core(c),self.store);self.transfer=BatchTransfer(self.ops.core,self.store);self.retirement=Retirement(self.ops.core,self.store);self.setup=WalletSetup(self.ops.core,self.store,self.environment,enforce,self.binary())
+            self.ops=WalletOps(Core(c),self.store);self.ops.core.managed_store=self.store;self.transfer=BatchTransfer(self.ops.core,self.store);self.retirement=Retirement(self.ops.core,self.store);self.setup=WalletSetup(self.ops.core,self.store,self.environment,enforce,self.binary())
             from disc_restore import Archives
             from message_signing import Messages
             self.archives=Archives(self.ops.core,self.store,self.binary(),enforce)
@@ -113,7 +113,14 @@ class Workspace:
         try:
             enforce()
             if self.closing or self.busy(public_reads=True):return busy
-            return self.ops.core.call(ident,name,validated,wallet,timeout)
+            result=self.ops.core.call(ident,name,validated,wallet,timeout)
+            if name=='getwalletinfo' and isinstance(result.get('result'),dict):
+                from managed_accounts import classify
+                raw=self.ops.core.call(ident+'-managed' if isinstance(ident,str) else ident,'listdescriptors',[False],wallet,timeout)
+                if isinstance(raw.get('result'),dict):
+                    metadata=classify(self.store.read(),wallet,raw['result'])
+                    if metadata:result['result']['wallaby_managed']=metadata
+            return result
         finally:self.lock.release()
     def burn_state(self):
         result=self.setup.burner.state();jobs=getattr(getattr(self,'archive_ops',None),'jobs',{})
