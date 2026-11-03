@@ -2,9 +2,13 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 37
+# Wallaby Agent V2 — Development Build 38
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
+
+Build 38 reorganises **Authorise** into a searchable request queue, a separate review pane, setup progress and local wallet cards, with collapsed denial lists last. Native confirmation prompts explicitly ask you to retype the passphrase. Disc Operations explains how to add an unrelated wallet backup through Dashboard and names each queued signer role. Public read-only queries remain available while a setup waits for discs or an archive is staged.
+
+Build 38 also fixes cancellation cleanup on Snap wallet directories: explicit helper write exceptions and a preflight run before any wallet is unloaded. An uncertain wallet cancellation offers **Reconcile cleanup**, which verifies surviving wallets against the original live setup and restores a fresh review; deletion is never automatically replayed. [Changes, recovery and validation](AGENT_BUILD38_CLEANUP.md).
 
 Build 37 shows the assigned **role name and wallet name** in native passphrase-entry and confirmation dialogues. Internal signer IDs remain secondary details. [Changes and validation](AGENT_BUILD37_ROLE_NAMES.md).
 
@@ -23,7 +27,7 @@ Disc Operations is divided into **Read a Disc**, **Review and Load Wallets**, **
 Archive requests can accumulate before burning. Authorise each request, then select up to 15 independent wallets together in **Disc Operations**. Only selected wallets complete after every requested disc passes read-back; unselected wallets remain queued. **Review staged archive** lets you delete an unused request and its RAM capture. Agent reports signed `complete` or `deleted` results to Dashboard; archiving has no Disable option or denial list. Wallet synchronisation retains its separate persistent denial list. **Use Dashboard Build 37 or later for signed deletion results and Notifications/Wallets notices:** [handoff](DASHBOARD_ARCHIVE_RESULTS_BUILD30.md).
 
 
-[Build 37 DEB](dist/wallaby-agent_2.0.0~dev37_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 38 DEB](dist/wallaby-agent_2.0.0~dev38_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
 
 Build 31 adds Dashboard V1 Build 40 archive cancellation: unused captures can be withdrawn; an active disc finishes writing/read-back, and any written or partial discs require local destruction confirmation. Shared discs preserve unrelated wallets on a read-back-verified replacement first. Discs from another Agent require the matching actual disc and independent creator fingerprint comparison. [Build 31 details](AGENT_BUILD31_CANCELLATION.md).
 

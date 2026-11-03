@@ -146,6 +146,37 @@ class Cancellations:
         if row['state']!='pending':raise ValueError('Cancellation was already attempted; reconcile the local outcome before retrying.')
         p=validate(row['proposal']);facts=self._facts(p);self.reviews[key]=(digest(facts),time.time())
         return {'kind':'builder_cancel','id':key,'cancellation':facts}
+    def reconcile(self,key,confirmed):
+        """Explicit local recovery: reload tracked survivors, then require fresh consent.
+
+        This does not repeat deletion or infer ownership from a generated name.
+        The live setup supplies the exact wallet names and public policies.
+        """
+        row=self.store.read()['pending'].get(key)
+        if confirmed is not True or not row or row['state']!='attempted':raise ValueError('Confirm reconciliation of this attempted cancellation locally.')
+        p=validate(row['proposal'])
+        if p['builder']!='wallet':raise ValueError('Inspect the attempted transaction cancellation locally; no transaction operation was repeated.')
+        sessions=[self.setup.sessions.get(operation) for operation in p['operations']]
+        if not sessions or any(session is None for session in sessions):raise ValueError('The original setup session is unavailable. No wallet was guessed or deleted.')
+        burner=self.setup.burner
+        if burner.thread and burner.thread.is_alive():raise ValueError('Wait for the active optical write/read-back to finish.')
+        loaded=set(rpc(self.core,'listwallets'));present={w['name'] for w in rpc(self.core,'listwalletdir')['wallets']}
+        for session in sessions:
+            for name in session.get('installed_wallets',{}):
+                if name in present and name not in loaded:
+                    rpc(self.core,'loadwallet',{'filename':name,'load_on_startup':False});loaded.add(name)
+        facts=self._facts(p) # Revalidates every surviving wallet against the retained public policy.
+        if facts['active_disc_write']:raise ValueError('Wait for the active optical write/read-back to finish.')
+        from wallet_deletion import target,delete
+        for item in self._data(p)[5]:
+            if not item['temporary']:delete(target(item['core'],item['name']),check_only=True)
+        with self.store.edit() as state:
+            if state['pending'][key]['state']!='attempted':raise ValueError('Cancellation state changed; inspect the current request.')
+            state['pending'][key]['state']='pending'
+        from activity_log import event
+        event('builder.cleanup','Local reconciliation verified surviving policies and helper access. Fresh review required; no deletion replayed.')
+        self.reviews.pop(key,None)
+        return {'message':'Surviving setup wallets reconciled. Review cancellation again before choosing cleanup. No wallet was deleted.'}
     def _directory(self):
         env={**os.environ,**self.environment}
         if shutil.which('kdialog'):command=['/usr/bin/kdialog','--title','Wallaby cancellation backup','--getexistingdirectory',str(Path.home())]
@@ -175,12 +206,17 @@ class Cancellations:
         # Backup failure never authorises deletion. Recheck after the file dialogue.
         if digest(self._facts(p))!=review[0]:raise ValueError('Local state changed while backing up. Originals were retained; review again before cleanup.')
         _,keys,proposals,psbts,txids,wallets,sessions=self._data(p)
+        from wallet_deletion import target,delete
+        planned=[(item,target(item['core'],item['name'])) for item in wallets if not item['temporary']]
+        # Verify the helper's actual mount view before unloading any Core wallet.
+        for item,metadata in planned:delete(metadata,check_only=True)
         with self.store.edit() as state:state['pending'][key]['state']='attempted'
+        stage='unload'
         try:
-            from wallet_deletion import target,delete
-            planned=[(item,target(item['core'],item['name'])) for item in wallets if not item['temporary']]
             for item,metadata in planned:rpc(item['core'],'unloadwallet',{'wallet_name':item['name'],'load_on_startup':False})
+            stage='delete'
             for item,metadata in planned:delete(metadata)
+            stage='ram_cleanup'
             for operation in sessions:
                 session=self.setup.sessions[operation]
                 if session.get('core'):
@@ -209,4 +245,9 @@ class Cancellations:
                 state['pending'].pop(key,None);state['completed'][key]={'kind':'builder_cancel','at':time.time()}
             self.reviews.pop(key,None)
             return {'message':'Local builder artifacts '+('backed up in an encrypted recovery bundle and ' if backup else '')+'cancelled. Broadcast transactions remain on the network.','backup':backup}
-        except Exception:raise ValueError('Cancellation cleanup is incomplete or uncertain. Retained artifacts were not replayed; inspect this protected workspace before a fresh local recovery action.') from None
+        except Exception as error:
+            from activity_log import event
+            code=getattr(error,'errno',None)
+            code=str(code) if type(code) is int else 'unclassified'
+            event('builder.cleanup','Cleanup incomplete; stage='+stage+'; errno='+code+'; originals or remaining artifacts retained. Local reconciliation required.')
+            raise ValueError('Cancellation cleanup is incomplete or uncertain. Retained artifacts were not replayed; inspect this protected workspace before a fresh local recovery action.') from None

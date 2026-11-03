@@ -65,6 +65,23 @@ class ThreeAgentVault(unittest.TestCase):
     self.assertEqual(agents[0].sessions[key]['phase'],'awaiting_disc')
     self.assertEqual([a.sessions[key]['phase'] for a in agents[1:]],['complete','complete'])
     self.assertEqual([len(rpc(n.core,'listwallets')) for n in nodes],[1,3,2])
+    # Add an unrelated Dashboard archive while this producer waits for discs.
+    from archive_operations import Operations
+    from types import SimpleNamespace
+    rpc(nodes[0].core,'createwallet',{'wallet_name':'Independent backup','passphrase':'fixture-backup-passphrase'})
+    raw=rpc(nodes[0].core,'listdescriptors',[False],'Independent backup')
+    request={'kind':'archive_wallet','version':1,'nonce':'d'*64,'wallet':'Independent backup','public_wallet':raw,'related_policies':[],'require_local_authorisation':True};request['request_id']=digest(request);archive_id=digest(request)
+    archives=Operations(nodes[0].core,agents[0].store,agents[0],SimpleNamespace(loaded={},catalogs={}),lambda:None)
+    agents[0].store.receive(request);archives.review(archive_id);archives.approve(archive_id)
+    burner=agents[0].burner;roles=list(agents[0].disc_sessions)
+    self.assertEqual([row.get('signer_name') for row in burner.state()['queue'][:2]],['Archive alpha','Archive beta'])
+    self.assertEqual(len(burner.pending),2) # Second role plus unrelated wallet.
+    burner.select(roles)
+    with self.assertRaisesRegex(ValueError,'one signing role'):burner.combine()
+    burner.select([roles[0],archive_id]);burner.combine()
+    self.assertEqual(len(burner.job['_members']),2);self.assertEqual([row[0] for row in burner.pending],[roles[1]])
+    self.assertEqual(rpc(nodes[0].core,'getwalletinfo',[],'Independent backup')['unlocked_until'],0)
+
    finally:
     for agent in agents:
      for session in agent.sessions.values():

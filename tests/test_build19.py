@@ -169,7 +169,7 @@ class RealCoreCancellation(unittest.TestCase):
  def test_installed_group_and_disc_session_cancelled_without_unrelated_deletion(self):
   from wallet_deletion import remove
   rpc(self.core,'createwallet',{'wallet_name':'Unrelated'});p=self.setup_wallet(True);binding=digest(p);session=self.setup.sessions[binding];names=set(session['installed_wallets']);self.assertEqual(len(names),3);key=self.c.receive(cancel('wallet',[binding],[binding]));self.c.review(key)
-  with patch('wallet_deletion.delete',side_effect=lambda request:remove(request,[Path(request['path']).parent])):self.c.confirm(key,'delete')
+  with patch('wallet_deletion.delete',side_effect=lambda request,**options:remove(request,[Path(request['path']).parent],**options)):self.c.confirm(key,'delete')
   self.assertFalse(names&set(rpc(self.core,'listwallets')));self.assertIn('Unrelated',rpc(self.core,'listwallets'));self.assertFalse(self.setup.burner.pending);self.assertFalse(self.store.read().get('approved_wallets'));self.assertNotIn('setup_active',self.store.read())
 
 class ContractAndRPCTests(unittest.TestCase):

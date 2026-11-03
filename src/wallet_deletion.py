@@ -24,7 +24,7 @@ def target(core,name,allow_extinct=False):
     if info.st_uid!=os.getuid() or not stat.S_ISREG(db.st_mode) or db.st_uid!=os.getuid() or db.st_nlink!=1:raise ValueError('Unsafe wallet directory or database ownership.')
     return {'path':str(path),'directory':[info.st_dev,info.st_ino],'database':[db.st_dev,db.st_ino]}
 
-def remove(request,allowed=None,allow_extinct=False):
+def remove(request,allowed=None,allow_extinct=False,check_only=False):
     if not isinstance(request,dict) or set(request)!={'path','directory','database'}:raise ValueError('Invalid deletion request.')
     path=Path(request['path'])
     if not path.is_absolute() or (path.name in ('.','..') or path.name=='Wallaby Extinct' and not allow_extinct) or path.parent not in (bases() if allowed is None else allowed):raise ValueError('Wallet directory is outside the supported Core wallet locations.')
@@ -44,6 +44,9 @@ def remove(request,allowed=None,allow_extinct=False):
         database=os.open('wallet.dat',os.O_RDWR|os.O_NOFOLLOW,dir_fd=directory)
         db=os.fstat(database)
         if [db.st_dev,db.st_ino]!=request['database']:raise ValueError('Wallet database changed since authorisation.')
+        if check_only:
+            if os.fstatvfs(parent).f_flag & os.ST_RDONLY or not os.access(path.parent,os.W_OK,effective_ids=True) or not os.access(path,os.W_OK,effective_ids=True):raise PermissionError('Wallet deletion helper cannot write to the approved wallet directory.')
+            return {'ready':True}
         # Core SQLite holds an exclusive POSIX lock while loaded. Whole-file
         # locking conflicts with it, including SQLite's high-offset lock bytes.
         fcntl.lockf(database,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -61,8 +64,10 @@ def remove(request,allowed=None,allow_extinct=False):
 
 def socket_path():return Path('/run/wallaby-agent-retirement')/str(os.getuid())/'delete.sock'
 
-def delete(request,manual=False):
-    raw=json.dumps({'local_user_delete':request} if manual else request).encode()
+def delete(request,manual=False,check_only=False):
+    payload={'local_user_delete':request} if manual else request
+    if check_only:payload={'preflight':request,'manual':bool(manual)}
+    raw=json.dumps(payload).encode()
     if len(raw)>4096:raise ValueError('Deletion metadata exceeds its limit.')
     try:
         with socket.socket(socket.AF_UNIX) as sock:
@@ -72,6 +77,9 @@ def delete(request,manual=False):
             sock.sendall(struct.pack('!I',len(raw))+raw);size=int.from_bytes(receive(sock,4),'big')
             if not 0<size<=4096:raise ValueError('Invalid retirement response.')
             reply=json.loads(receive(sock,size))
+            if check_only:
+                if reply!={'ready':True}:raise ValueError('Wallet deletion helper preflight failed. No wallet was unloaded. Restart the workspace after upgrading or inspect local permissions.')
+                return reply
             if reply!={'deleted':True}:raise ValueError('Wallet deletion was not confirmed. The archive is retained; inspect the local retirement service. No automatic retry was made.')
             try:os.lstat(request['path'])
             except FileNotFoundError:return reply
@@ -98,7 +106,8 @@ class Handler(socketserver.BaseRequestHandler):
                     if sent<len(packet):self.request.sendall(packet[sent:])
                 finally:os.close(fd)
                 return
-            if isinstance(request,dict) and set(request)=={'local_user_delete'}:reply=remove(request['local_user_delete'],allow_extinct=True)
+            if isinstance(request,dict) and set(request)=={'preflight','manual'} and type(request['manual']) is bool:reply=remove(request['preflight'],allow_extinct=request['manual'],check_only=True)
+            elif isinstance(request,dict) and set(request)=={'local_user_delete'}:reply=remove(request['local_user_delete'],allow_extinct=True)
             else:reply=remove(request)
         except Exception:reply={'deleted':False}
         try:

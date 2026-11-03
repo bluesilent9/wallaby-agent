@@ -16,19 +16,21 @@ def runtime_parent(path):
         os.fchmod(fd,0o755)
     finally:os.close(fd)
 
-def rename_paths(uid,home,unit_root=Path('/run/systemd/system')):
+def wallet_paths(uid,home,unit_root=Path('/run/systemd/system'),service='renames'):
     """Root-owned, per-user exceptions for supported wallet roots only.
 
     Keep ProtectHome=read-only. An explicit nested wallet path overrides that
     mount instead of trying to make the parent /home directory writable.
     """
+    if service not in ('renames','retirement'):raise SystemExit('Unsupported wallet helper.')
     home=Path(home)
     if not home.is_absolute() or any(ord(c)<32 or ord(c)==127 for c in str(home)):raise SystemExit('Invalid account home directory.')
     runtime_parent(unit_root)
-    folder=unit_root/('wallaby-agent-renames@'+str(uid)+'.service.d');runtime_parent(folder)
+    folder=unit_root/('wallaby-agent-'+service+'@'+str(uid)+'.service.d');runtime_parent(folder)
     file=folder/'30-wallet-paths.conf'
     if file.is_symlink() or file.exists() and (file.stat().st_uid!=0 or file.stat().st_nlink!=1):raise SystemExit('Unsafe rename service configuration.')
-    lines=['[Service]','ReadWritePaths=']
+    lines=['[Service]']
+    if service=='renames':lines.append('ReadWritePaths=') # Retirement also serves locally selected encrypted exports.
     for base in (home/'.bitcoin',home/'snap/bitcoin-core/common/.bitcoin'):
         for network in ('','testnet3','testnet4','signet','regtest'):
             value='-'+str(base/network/'wallets')
@@ -38,6 +40,12 @@ def rename_paths(uid,home,unit_root=Path('/run/systemd/system')):
     try:
         os.write(fd,('\n'.join(lines)+'\n').encode());os.fchmod(fd,0o644);os.fsync(fd)
     finally:os.close(fd)
+
+def rename_paths(uid,home,unit_root=Path('/run/systemd/system')):
+    wallet_paths(uid,home,unit_root,'renames')
+
+def retirement_paths(uid,home,unit_root=Path('/run/systemd/system')):
+    wallet_paths(uid,home,unit_root,'retirement')
 
 def main():
     if os.geteuid()!=0 or len(sys.argv)!=2 or not sys.argv[1].isdecimal():raise SystemExit('Local administrator authorisation required.')
@@ -59,6 +67,7 @@ def main():
     if unit.is_symlink():raise SystemExit('Unsafe existing mount unit.')
     unit.write_text(text);unit.chmod(0o644)
     rename_paths(uid,account.pw_dir)
+    retirement_paths(uid,account.pw_dir)
     subprocess.run(['/usr/bin/systemctl','daemon-reload'],check=True)
     subprocess.run(['/usr/bin/systemctl','start','wallaby-agent-snap-ram@'+str(uid)+'.service'],check=True)
     subprocess.run(['/usr/bin/systemctl','start','wallaby-agent-secure@'+str(uid)+'.service'],check=True)

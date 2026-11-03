@@ -88,8 +88,19 @@ class Workspace:
     def rename_reconcile_guard(self,key):
         enforce()
         if self.busy(ignore_rename=key) or self.archives.reading or self.ops.prepared:raise ValueError('Finish other active wallet work before reconciling this rename.')
-    def busy(self,ignore_rename=None):
-        s=self.store.read();return bool(getattr(self,'archive_ops',None) and self.archive_ops.busy() or any(v['proposal']['kind'] in ('destroy_disc','archive_cancel') for v in s['pending'].values()) or self.archives and (self.archives.reading) or s.get('history_jobs') or any(k!=ignore_rename and r['proposal']['kind']=='wallet_rename' and r['state']!='pending' for k,r in s['pending'].items()) or any(v.get('proposal',{}).get('kind')=='builder_cancel' for v in s['pending'].values()) or getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or self.setup and any(v['phase']!='complete' for v in self.setup.sessions.values()))
+    def busy(self,ignore_rename=None,public_reads=False):
+        s=self.store.read();archives=getattr(self,'archive_ops',None)
+        archive_busy=bool(archives and (any(v['phase'] not in ('queued','complete') for v in archives.jobs.values()) if public_reads else archives.busy()))
+        sessions=getattr(self.setup,'sessions',{}) if self.setup else {}
+        setup_busy=any(v['phase'] not in (('complete','awaiting_disc') if public_reads else ('complete',)) for v in sessions.values())
+        burner=getattr(self.setup,'burner',None)
+        writing=bool(public_reads and burner and getattr(burner,'thread',None) and burner.thread.is_alive())
+        return bool(archive_busy or setup_busy or writing or public_reads and s.get('setup_active') or
+            any(v['proposal']['kind'] in ('destroy_disc','archive_cancel','builder_cancel') for v in s['pending'].values()) or
+            self.archives and self.archives.reading or s.get('history_jobs') or
+            any(k!=ignore_rename and row['proposal']['kind']=='wallet_rename' and row['state']!='pending' for k,row in s['pending'].items()) or
+            getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or
+            s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'))
     def burn_state(self):
         result=self.setup.burner.state();jobs=getattr(getattr(self,'archive_ops',None),'jobs',{})
         for row in result.get('queue',[]):row['archive_request']=bool(jobs.get(row['id'],{}).get('request') and jobs[row['id']]['phase']=='queued')
@@ -270,13 +281,13 @@ class Workspace:
                 raise ValueError('Node connection recovery is in progress. Protected operations are paused; no operation was started.')
             if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
             saved=self.store.read()
-            changing=method in ('rename.approve','rename.reconcile','wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm')
+            changing=method in ('rename.approve','rename.reconcile','wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm','cancel.reconcile')
             if changing and args:
                 from cancellation import blocked
                 candidate=saved['pending'].get(args[0],{}).get('proposal') or getattr(self.ops,'prepared',{}).get(args[0])
                 if candidate and blocked(saved,candidate):raise ValueError('This build is cancelled. Review its local cancellation on Authorise; no signing or wallet action was started.')
             if changing and (saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning')):raise ValueError('Finish the active transfer or history recovery first.')
-            if method in ('wallet.sign','setup.participate','authorise.approve','message.sign','cancel.confirm') and self.archives and self.archives.reading:raise ValueError('Wait for optical restoration to finish before signing or changing wallets.')
+            if method in ('wallet.sign','setup.participate','authorise.approve','message.sign','cancel.confirm','cancel.reconcile') and self.archives and self.archives.reading:raise ValueError('Wait for optical restoration to finish before signing or changing wallets.')
             if saved.get('setup_active') and method in ('wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','authorise.history','authorise.review'):
                 candidate=saved['pending'].get(args[0],{}).get('proposal',{}) if args else {}
                 if candidate.get('kind')!='builder_cancel' and (candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']):raise ValueError('Finish the current wallet setup and its physical backups first.')
@@ -300,7 +311,7 @@ class Workspace:
             if method=='core.public':
                 from agent_rpc import request
                 ident,name,params,wallet,timeout=args;validated,_=request(name,params,wallet)
-                if self.busy():return {'error':{'code':'synchronisation_busy','message':'A locally authorised wallet operation is active.'}}
+                if self.busy(public_reads=True):return {'error':{'code':'synchronisation_busy','message':'A locally authorised wallet operation is active.'}}
                 return self.ops.core.call(ident,name,validated,wallet,timeout)
             if method=='exchange':
                 from agent_exchange import Exchange
@@ -348,6 +359,7 @@ class Workspace:
                     return self.retirement.approve(args[0])
                 if kind=='wallet_setup_policy':return self.setup.approve_policy(args[0])
                 return self.ops.approve_sync(args[0])
+            if method=='cancel.reconcile':return self.cancellations.reconcile(*args)
             if method=='cancel.confirm':return self.cancellations.confirm(*args)
             if method=='setup.cancel':return self.setup.cancel(*args)
             if method=='setup.participate':return self.setup.approve_proposal(*args)

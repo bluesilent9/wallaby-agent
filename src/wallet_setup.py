@@ -14,17 +14,17 @@ from diagnostics import LocalActionFailure
 
 def secret_dialog(prompt,environment,confirm=False):
     env={**os.environ,**environment};env['QT_LOGGING_RULES']='*.debug=false;*.info=false'
-    def ask():
-        if shutil.which('kdialog'):command=['/usr/bin/kdialog','--title','Wallaby Agent · protected local authorisation','--password',prompt]
-        elif shutil.which('zenity'):command=['/usr/bin/zenity','--password','--title=Wallaby Agent · '+prompt]
+    def ask(message):
+        if shutil.which('kdialog'):command=['/usr/bin/kdialog','--title','Wallaby Agent · protected local authorisation','--password',message]
+        elif shutil.which('zenity'):command=['/usr/bin/zenity','--password','--title=Wallaby Agent · '+message]
         else:raise ValueError('Install kdialog or zenity. Secrets are never requested through the browser.')
         result=subprocess.run(command,capture_output=True,timeout=300,env=env)
         if result.returncode:raise ValueError('Local secret entry cancelled. No operation was authorised.')
         value=result.stdout.decode().rstrip('\n')
         if not value or len(value)>1024:raise ValueError('Enter a non-empty passphrase, up to 1024 characters.')
         return value
-    value=ask()
-    if confirm and ask()!=value:raise ValueError('Passphrases did not match.')
+    value=ask(prompt)
+    if confirm and ask('Retype the passphrase to confirm.\n'+prompt)!=value:raise ValueError('Passphrases did not match.')
     return value
 
 class MemoryCore:

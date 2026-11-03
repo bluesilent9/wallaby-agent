@@ -186,7 +186,12 @@ class Burner:
         rows=(self.job.get('_members') or [(self.job['id'],self.job['wallets'],self.job['recovery'])]) if self.job else []
         rows+=self.pending
         result['completed_sets']=list(self.completed_sets)
-        result['queue']=[{'id':i,'name':r.get('display_name',r.get('name',r.get('proposal',{}).get('name','Wallet'))),'policy_hash':r['policy_hash'],'selected':i in (self.selected if self.selected is not None else [self.job['id']] if self.job else [])} for i,w,r in rows]
+        result['queue']=[]
+        for i,w,r in rows:
+            row={'id':i,'name':r.get('display_name',r.get('name',r.get('proposal',{}).get('name','Wallet'))),'policy_hash':r['policy_hash'],'selected':i in (self.selected if self.selected is not None else [self.job['id']] if self.job else [])}
+            role=next((role for role in r.get('proposal',{}).get('cosigners',[]) if hashlib.sha256(role['id'].encode()).hexdigest()==r.get('physical_cosigner_file')),None)
+            if role:row.update(signer_name=role['name'],signer_id=role['id'])
+            result['queue'].append(row)
         return result
     def authorise(self,job_id,wallets,recovery):
         if self.job:raise ValueError('Finish the current disc session first.')
