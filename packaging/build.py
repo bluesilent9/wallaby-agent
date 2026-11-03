@@ -9,7 +9,7 @@ def put(path,text,mode=0o644):
  p=stage/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);p.chmod(mode)
 arch=subprocess.check_output(['dpkg','--print-architecture'],text=True).strip()
 put('DEBIAN/control',f'''Package: wallaby-agent
-Version: 2.0.0~dev34
+Version: 2.0.0~dev35
 Section: utils
 Priority: optional
 Architecture: {arch}
@@ -287,7 +287,7 @@ NoDisplay=true
 X-KDE-autostart-phase=2
 ''')
 put('usr/share/icons/hicolor/scalable/apps/wallaby-agent.svg',(root/'web/wallaby-agent.svg').read_text())
-for document in ('README.md','AGENT_BUILD28_SYNC.md','AGENT_BUILD29_SYNC.md','AGENT_BUILD30_EXTINCTION.md','DASHBOARD_ARCHIVE_RESULTS_BUILD30.md','AGENT_BUILD31_CANCELLATION.md','AGENT_BUILD32_RENAME.md','AGENT_BUILD33_CARDS.md','AGENT_BUILD34_REVIEWS.md','AGENT_BUILD27_LIFECYCLE.md','AGENT_BUILD26_SYNC.md','AGENT_PROTOCOL.md','APPROVAL_PROTOCOL.md','DASHBOARD_PREVIEW_UPDATE.md','DASHBOARD_BUILD8_UPDATE.md','DASHBOARD_BUILD9_UPDATE.md','DASHBOARD_BUILD10_UPDATE.md','DASHBOARD_BUILD11_UPDATE.md','DASHBOARD_BUILD12_UPDATE.md','DASHBOARD_BUILD14_DIAGNOSTICS.md','AGENT_BUILD15_STARTUP.md','AGENT_BUILD16_STARTUP.md','AGENT_BUILD17_LIFECYCLE.md','AGENT_BUILD18_LIFECYCLE.md','AGENT_BUILD19_LOGS.md','AGENT_BUILD20_CLOSE.md','AGENT_BUILD21_NATIVE_CLOSE.md','AGENT_BUILD22_RECOVERY.md','DASHBOARD_BUILD27_ARCHIVES.md','DASHBOARD_BUILD28_SYNC.md','DASHBOARD_RENAME_PROTOCOL.md','DASHBOARD_FEE_PAGING.md','DASHBOARD_BUILD20_CANCELLATION.md','DASHBOARD_BUILD18_RETIREMENT.md','DISC_FORMAT.md','VALIDATION.md'):
+for document in ('README.md','AGENT_BUILD28_SYNC.md','AGENT_BUILD29_SYNC.md','AGENT_BUILD30_EXTINCTION.md','DASHBOARD_ARCHIVE_RESULTS_BUILD30.md','AGENT_BUILD31_CANCELLATION.md','AGENT_BUILD32_RENAME.md','AGENT_BUILD33_CARDS.md','AGENT_BUILD34_REVIEWS.md','AGENT_BUILD35_CANCELLATION.md','AGENT_BUILD27_LIFECYCLE.md','AGENT_BUILD26_SYNC.md','AGENT_PROTOCOL.md','APPROVAL_PROTOCOL.md','DASHBOARD_PREVIEW_UPDATE.md','DASHBOARD_BUILD8_UPDATE.md','DASHBOARD_BUILD9_UPDATE.md','DASHBOARD_BUILD10_UPDATE.md','DASHBOARD_BUILD11_UPDATE.md','DASHBOARD_BUILD12_UPDATE.md','DASHBOARD_BUILD14_DIAGNOSTICS.md','AGENT_BUILD15_STARTUP.md','AGENT_BUILD16_STARTUP.md','AGENT_BUILD17_LIFECYCLE.md','AGENT_BUILD18_LIFECYCLE.md','AGENT_BUILD19_LOGS.md','AGENT_BUILD20_CLOSE.md','AGENT_BUILD21_NATIVE_CLOSE.md','AGENT_BUILD22_RECOVERY.md','DASHBOARD_BUILD27_ARCHIVES.md','DASHBOARD_BUILD28_SYNC.md','DASHBOARD_RENAME_PROTOCOL.md','DASHBOARD_FEE_PAGING.md','DASHBOARD_BUILD20_CANCELLATION.md','DASHBOARD_BUILD18_RETIREMENT.md','DISC_FORMAT.md','VALIDATION.md'):
  put('usr/share/doc/wallaby-agent/'+document,(root/document).read_text())
 put('usr/lib/wallaby-agent/configure-renames',(root/'packaging/configure_renames.py').read_text(),0o755)
 put('DEBIAN/postinst','''#!/bin/sh
@@ -298,6 +298,6 @@ if [ -d /sys/kernel/security/apparmor ] && command -v apparmor_parser >/dev/null
 if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q || true; fi
 exit 0
 ''',0o755)
-out=root/'dist'/f'wallaby-agent_2.0.0~dev34_{arch}.deb';out.parent.mkdir(exist_ok=True)
+out=root/'dist'/f'wallaby-agent_2.0.0~dev35_{arch}.deb';out.parent.mkdir(exist_ok=True)
 subprocess.run(['dpkg-deb','--root-owner-group','--build',str(stage),str(out)],check=True)
 print(out)

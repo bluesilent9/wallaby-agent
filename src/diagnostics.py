@@ -81,6 +81,6 @@ def action_code(error):
     from secure_bridge import WorkspaceFailure
     if isinstance(error,WorkspaceFailure):return error.code
     text=str(error)
-    for prefix,code in (('Close request expired;', 'close_admission_expired'),('Finish the active protected operation', 'local_action_busy'),('Finish active wallet work,', 'unfinished_wallet_work'),('The protected workspace is closing.', 'workspace_closing')):
+    for prefix,code in (('Dashboard requested cancellation.', 'builder_cancellation_pending'),('Choose Delete and Cancel', 'builder_cancellation_choice_required'),('This build is cancelled.', 'builder_cancellation_pending'),('Close request expired;', 'close_admission_expired'),('Finish the active protected operation', 'local_action_busy'),('Finish active wallet work,', 'unfinished_wallet_work'),('The protected workspace is closing.', 'workspace_closing')):
         if text.startswith(prefix):return code
     return 'local_action_refused'

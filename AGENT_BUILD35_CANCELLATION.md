@@ -1,0 +1,9 @@
+# Build 35: wallet-creation cancellation review handover
+
+A supplied diagnostic log confirms that a wallet-builder cancellation was received, but its earlier creation review remained on screen. Deny and close were refused because cancellation still required separate local consent. The user recovered the running session by reviewing the cancellation row above the stale details. The fix makes that transition visible in the open review.
+
+The protected interface now tracks the selected request and invalidates its review as soon as that request disappears or changes state. An incoming cancellation replaces the old controls with a clear cancellation notice and a **Review cancellation** button bound to the exact locally superseded request. A late creation-review reply cannot restore superseded controls. Cancellation rows appear first in the request list; unfinished setup cards route to their cancellation instead of offering the now-blocked discard action. Unrelated queue changes leave an active valid review intact. All denial sections remain at the bottom.
+
+The worker exposes the local replacement relationship only to the protected interface. Multiple independent cancellations keep their own request relationships; receipt of a later unrelated cancellation no longer relabels requests already held by an earlier one. Existing signing holds, review requirements, explicit deletion/backup consent, physical-disc guards, RAM retention and close restrictions remain in force. No operation is automatically approved or deleted. Diagnostic refusal categories now identify pending cancellation and required cancellation choice without recording arbitrary exception text or secret material.
+
+Validation is recorded in VALIDATION.md and the accompanying test export. Tests use isolated regtest wallets, never production wallets. No Dashboard protocol or build change is required for this fix. V2 Development Build 35 is not a Stable release.

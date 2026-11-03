@@ -55,11 +55,11 @@ class Cancellations:
             if p['builder']=='wallet':
                 for operation in p['operations']:s.setdefault('cancelled_setups',{})[operation]=key
             for original,row in s['pending'].items():
-                if original!=key and blocked(s,row['proposal']):
+                if original!=key and (original in p['request_hashes'] or p['builder']=='wallet' and binding(row['proposal']) in p['operations']):
                     row['cancel_requested']=key
                     if row['state']=='pending':row['state']='cancellation_requested'
         from activity_log import event
-        event('builder.cancellation','Received '+p['builder']+' builder cancellation; local approval required.')
+        event('builder.cancellation','Received '+p['builder']+' builder cancellation; local approval required. Creation/signing review superseded; use Review cancellation on Authorise. No artifacts deleted.')
         self.store.queue('builder_cancel_receipt',{'version':1,'cancellation_id':p['cancellation_id'],'request_hash':key,'status':'received'})
         return key
     def _data(self,p):
