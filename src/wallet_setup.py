@@ -123,9 +123,8 @@ class WalletSetup:
             if local:session['core']=MemoryCore(self.store.root/'setup-cores'/binding,p['chain'],self.binary)
             for role in local:
                 self.check_cancel(binding)
-                name='key_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20]
                 stage='passphrase_entry'
-                password=secret_dialog('Create encrypted Bitcoin Core signing wallet '+name+' · role '+role['id']+'\nThis creates keys only; it does not fund the wallet.',self.environment,confirm=True)
+                password=secret_dialog('Create a passphrase for signing role: '+role['name']+'\nWallet: '+p['name']+'\nSigner ID: '+role['id']+'\nThis creates encrypted signing keys only; it does not fund the wallet.',self.environment,confirm=True)
                 if len(password)<12:raise ValueError('Use at least 12 characters for the encrypted signing wallet.')
                 name='key_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20];c=session['core'].core
                 self.check_cancel(binding)

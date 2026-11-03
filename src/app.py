@@ -116,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
             from activity_log import DiagnosticLog
             try:return self.reply(200,DiagnosticLog().text().encode('utf-8'),'text/plain; charset=utf-8')
             except (OSError,ValueError):return self.reply(500,{'error':'Diagnostic log storage is unavailable. Check its ownership and permissions.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev36'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev37'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
@@ -311,7 +311,7 @@ class Server(ThreadingHTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev36'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev37'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -329,7 +329,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev36':
+    if installed!='2.0.0~dev37':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -339,7 +339,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev36') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev37') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

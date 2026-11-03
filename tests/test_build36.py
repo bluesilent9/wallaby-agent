@@ -47,12 +47,16 @@ class ThreeAgentVault(unittest.TestCase):
     for i in range(3):
      node=Regtest();nodes.append(node);agents.append(WalletSetup(node.core,Store(Path(d)/str(i)),binary=os.environ['WALLABY_TEST_BITCOIND']))
     identities=[a.own_identity() for a in agents]
-    roles=[{'id':'role-'+str(i),'name':'Signer '+str(i+1),'agent_key':identities[producer]['public_key'],'storage':'disc' if producer==0 else 'node'} for i,producer in enumerate([0,0,1,1,2])]
+    roles=[{'id':'role-'+str(i),'name':['Archive alpha','Archive beta','Node gamma','Node delta','Node epsilon'][i],'agent_key':identities[producer]['public_key'],'storage':'disc' if producer==0 else 'node'} for i,producer in enumerate([0,0,1,1,2])]
     p={'kind':'wallet_setup','version':1,'session_id':'b'*64,'chain':'regtest','name':'Three Agent vault fixture','threshold':3,'height':100,'expires_at':int(time.time())+3600,'cosigners':roles};key=digest(p)
     for agent in agents:
      agent.store.receive(p);agent.review(key)
-     with patch('wallet_setup.secret_dialog',return_value='fixture-encryption-passphrase'):
+     with patch('wallet_setup.secret_dialog',return_value='fixture-encryption-passphrase') as prompt:
       agent.approve_proposal(key,{v['fingerprint']:v['fingerprint'] for v in identities})
+     local_roles=[role for role in roles if role['agent_key']==agent.own_identity()['public_key']]
+     self.assertEqual(len(prompt.call_args_list),len(local_roles))
+     for call,role in zip(prompt.call_args_list,local_roles):
+      self.assertIn('signing role: '+role['name'],call.args[0]);self.assertIn('Wallet: '+p['name'],call.args[0]);self.assertIn('Signer ID: '+role['id'],call.args[0]);self.assertNotIn('key_',call.args[0]);self.assertTrue(call.kwargs['confirm'])
     contributions=[e for a in agents for e in a.sessions[key]['contributions']];self.assertEqual(len(contributions),5)
     descriptors=policy(p,[e['message'] for e in contributions]);final={'kind':'wallet_setup_policy','version':1,'proposal':p,'contributions':contributions,'receive_descriptor':descriptors[0],'change_descriptor':descriptors[1]}
     for agent in agents:
