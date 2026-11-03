@@ -1,3 +1,9 @@
+# Build 33 validation
+
+All **13 JavaScript interface suites** and every web JavaScript syntax check passed. The new integration test executes the shipped rename and local-card modules together. It covers automatic refresh after successful private/watch renames and reconciliation, exact new headings, balances/watch-only eye/sibling cards, the updated delete-review target, a superseded in-flight inventory response, refusal without a false rename, and unchanged disc-archive routing. **Seven startup-authorisation tests** passed. This change touches the interface plus version/package metadata; Bitcoin Core rename execution and Dashboard protocol are unchanged. Real-Core mutation regressions from Build 32 are baseline evidence, not rerun claims. Exact test logs and package byte/checksum verification accompany this export. The supplied installed-Agent log confirms the preceding Build 32 rename completed through verification before the stale cards were observed.
+
+## Earlier validation records
+
 # Build 32 validation
 
 The clean full regression passed **443 tests** in 686.354 seconds. The initial focused rename/close/recovery run passed **26 tests**; three further real Unix-socket/reload checks passed, as did the new real HTTP reconciliation endpoint and narrow path tests. After the final withdrawn-attempt visibility and installer metadata update, **five focused tests** passed. All **12 JavaScript suites** and web syntax checks passed. **Sixteen real Qt/offscreen/framed-socket close checks** passed in 8.073 seconds. The generated writable-path unit syntax was accepted by systemd-analyze verify (exit 0; unrelated host xfs CPUAccounting notices were emitted).

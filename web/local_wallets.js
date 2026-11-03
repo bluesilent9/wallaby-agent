@@ -1,5 +1,5 @@
 'use strict';
-let localWalletLoading=false;
+let localWalletLoading=false,localWalletReload=false;
 function localWalletIcon(kind){
  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),path=document.createElementNS('http://www.w3.org/2000/svg','path');
  for(const[k,v]of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true'}))svg.setAttribute(k,v);
@@ -11,12 +11,13 @@ async function confirmLocalWalletDeletion(wallet){
  dialog.addEventListener('cancel',()=>dialog.remove());document.body.append(dialog);dialog.showModal();no.focus();
 }
 window.loadLocalWallets=async function(){
- if(localWalletLoading)return;localWalletLoading=true;const list=$('#local-wallets-list');
- try{
+ if(localWalletLoading){localWalletReload=true;return;}localWalletLoading=true;const list=$('#local-wallets-list');
+ try{do{localWalletReload=false;try{
   const result=await api('authorise/local-wallets',{});
+  if(localWalletReload)continue;
   list.replaceChildren(...result.wallets.map((r,index)=>{const card=el('article',{class:'wallet-card local-wallet-card',style:'--wallet-hue:'+((index*137.508+160)%360)}),heading=el('h3',{},r.wallet);if(r.private_keys_enabled===false){const eye=el('span',{class:'wallet-eye',title:'Watch-only wallet','aria-label':'Watch-only wallet'},localWalletIcon('eye'));heading.append(eye);}const bin=button('','wallet-delete-bin',()=>confirmLocalWalletDeletion(r.wallet));bin.append(localWalletIcon('bin'));bin.setAttribute('aria-label','Delete local wallet '+r.wallet);bin.disabled=!r.deletable;bin.title=r.reason||'Delete this local wallet';card.append(heading,el('p',{},r.sats===null?'Balance unavailable':pipe(r.sats)),bin);if(r.reason)card.append(el('small',{class:'hint'},r.reason));return card;}));
   if(!result.wallets.length)list.append(el('p',{},'No wallets are currently loaded on this node.'));
- }catch(error){list.replaceChildren(el('p',{class:'warning',role:'status'},error.message));}finally{localWalletLoading=false;}
+ }catch(error){if(!localWalletReload)list.replaceChildren(el('p',{class:'warning',role:'status'},error.message));}}while(localWalletReload);}finally{localWalletLoading=false;}
 };
 $('#local-wallets-refresh').addEventListener('click',()=>run(window.loadLocalWallets));
 

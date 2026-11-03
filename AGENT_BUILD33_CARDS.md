@@ -1,0 +1,9 @@
+# Agent V2 Build 33: refresh local wallet cards after rename
+
+A successful persistent-wallet rename now reloads Authorise's Local wallets cards from local Core immediately. Reconciliation also refreshes them. Card headings, watch-only eye icons, exact balances and delete-review targets are rebuilt from the returned local inventory; the browser does not invent a new name or balance.
+
+If an earlier inventory request is already running, the loader queues a fresh read and discards the superseded response. At most one inventory read runs at a time. Rename refusal does not claim a successful refresh/rename. A disc archive rename still follows its existing Disc Operations route and does not trigger a persistent-wallet inventory request while its replacement is pending.
+
+This is an interface correction. Rename execution, inode/policy verification, filesystem exceptions, Dashboard protocol, signing authority and queue semantics are unchanged from Build 32. Pending Dashboard rename requests do not need cancellation for this upgrade. Close an idle protected/node session before installation, leave the Dashboard rename active, and reconnect afterward to receive the outstanding requests again.
+
+Validation: all 13 shipped JavaScript suites and all web syntax checks pass. A new integration fixture executes the shipped rename handlers and local-wallet renderer together, checking the exact Treasury (2022 - 2026) name, watch suffix/eye, unchanged sibling cards and balances, current delete-review target, stale in-flight inventory, failed rename, reconciliation and disc routing. Seven startup-authorisation tests pass. These interface tests use simulated local API responses; Build 32's real-Core rename validation remains baseline evidence and is not claimed as a new Build 33 installed rename test. Package source/web, metadata helpers, installed documentation and checksum are checked during export.
