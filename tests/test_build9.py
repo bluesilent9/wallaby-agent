@@ -54,7 +54,7 @@ class RealCoreBuild9(unittest.TestCase):
  def setUp(self):
     self.node=Regtest();self.addCleanup(self.node.close);self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.store=Store(Path(self.tmp.name)/'state');self.core=self.node.core
  def test_two_of_three_vault_setup_distinct_signatures_and_disc_role(self):
-    setup=WalletSetup(self.core,self.store,binary=BINARY);own=setup.own_identity();p={'kind':'wallet_setup','version':1,'session_id':'a'*64,'chain':'regtest','name':'Family threshold vault','threshold':2,'height':50,'expires_at':int(time.time())+3600,'cosigners':[{'id':str(i),'name':'Role '+str(i),'agent_key':own['public_key'],'storage':'disc' if i==2 else 'node'} for i in range(3)]};self.store.receive(p);key=digest(p)
+    setup=WalletSetup(self.core,self.store,binary=BINARY);own=setup.own_identity();p={'kind':'wallet_setup','version':1,'session_id':'a'*64,'chain':'regtest','name':'Family threshold vault','threshold':2,'height':50,'expires_at':int(time.time())+3600,'cosigners':[{'id':str(i),'name':'Role '+str(i),'agent_key':own['public_key'],'storage':'disc' if i==2 else 'node'} for i in range(3)]};self.store.receive(p);key=digest(p);initial=setup.review(key);self.assertEqual(initial['unlock_estimates'][0]['height'],50);self.assertIn('utc',initial['unlock_estimates'][0]);self.assertIn('local',initial['unlock_estimates'][0]);self.assertNotIn('unlock_estimates',initial['setup'])
     def cleanup():
         for session in setup.sessions.values():
             if session.get('core'):session['core'].close()
@@ -66,10 +66,11 @@ class RealCoreBuild9(unittest.TestCase):
     self.assertEqual(prompts.call_count,3)
     for call in prompts.call_args_list:self.assertIn('Create encrypted Bitcoin Core signing wallet key_',call.args[0])
     session=setup.sessions[digest(p)];contributions=session['contributions'];descs=policy(p,[e['message'] for e in contributions]);self.assertEqual(len(set(e['message']['receive_key'] for e in contributions)),3)
-    complete={'kind':'wallet_setup_policy','version':1,'proposal':p,'contributions':contributions,'receive_descriptor':descs[0],'change_descriptor':descs[1]};self.store.receive(complete);key=digest(complete);review=setup.review(key);self.assertEqual(len(review['setup']['samples']),6)
+    complete={'kind':'wallet_setup_policy','version':1,'proposal':p,'contributions':contributions,'receive_descriptor':descs[0],'change_descriptor':descs[1]};self.store.receive(complete);key=digest(complete);review=setup.review(key);self.assertEqual(len(review['setup']['samples']),6);self.assertEqual(review['unlock_estimates'][0]['height'],50);self.assertNotIn('unlock_estimates',setup.reviews[key][0])
     changed=copy.deepcopy(complete);changed['receive_descriptor']=descs[1];self.store.receive(changed)
     with self.assertRaises(ValueError):setup.review(digest(changed))
-    setup.approve_policy(key);self.assertTrue(setup.burner.state()['id']);record=next(iter(self.store.read()['approved_wallets'].values()));self.assertEqual(len(record['signing_wallets']),2);self.assertEqual(session['phase'],'awaiting_disc')
+    with patch('vault_time.estimates',return_value=[{'height':50,'utc':'Changed advisory date'}]):setup.approve_policy(key)
+    self.assertTrue(setup.burner.state()['id']);record=next(iter(self.store.read()['approved_wallets'].values()));self.assertEqual(len(record['signing_wallets']),2);self.assertEqual(session['phase'],'awaiting_disc')
     # The physical-only share has never been installed in the persistent node.
     self.assertEqual(len([n for n in rpc(self.core,'listwallets') if n.startswith('Wallaby key ')]),2)
     rpc(self.core,'createwallet',{'wallet_name':'Miner'});dest=rpc(self.core,'getnewaddress',[],'Miner');rpc(self.core,'generatetoaddress',[102,dest]);monitor=record['monitor_wallet'];address=rpc(self.core,'getnewaddress',[],monitor);rpc(self.core,'sendtoaddress',[address,'2'],'Miner');rpc(self.core,'generatetoaddress',[1,dest]);coin=rpc(self.core,'listunspent',[1],monitor)[0]

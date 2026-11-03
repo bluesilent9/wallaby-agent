@@ -35,3 +35,10 @@ class VaultTime(unittest.TestCase):
  def test_extreme_height_is_unavailable_instead_of_crashing_review(self):
   self.interval=3600
   self.assertEqual(self.run_estimate([499999999])[0]['status'],'unavailable')
+
+ def test_wrong_proposed_network_has_no_forecast(self):
+  with patch('vault_time.rpc',return_value={'chain':'regtest'}) as query:r=estimates(None,[100],self.now,expected_chain='main')
+  self.assertEqual(r[0]['status'],'unavailable');self.assertIn('network differs',r[0]['notice']);self.assertEqual(query.call_count,1)
+ def test_unlocked_wallet_has_no_time_query(self):
+  with patch('vault_time.rpc') as query:self.assertEqual(estimates(None,[None],expected_chain='main'),[])
+  query.assert_not_called()

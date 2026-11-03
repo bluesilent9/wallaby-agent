@@ -58,12 +58,15 @@ class WalletSetup:
         key=getattr(self.store,'identity_root',self.store.root)/'preview_identity.pub'
         if not key.exists():sign(self.store,{'purpose':'identity-initialisation','version':1})
         public=' '.join(key.read_text().split()[:2]);return {'public_key':public,'fingerprint':fingerprint(public)}
+    def unlock_estimates(self,facts):
+        from vault_time import estimates
+        return estimates(self.core,[facts['height']],expected_chain=facts['chain'])
     def review(self,key):
         p=self.store.read()['pending'][key]['proposal'];proposal(p)
         if p['kind']=='wallet_setup':
             own=self.own_identity();roles=[{**r,'fingerprint':fingerprint(r['agent_key']),'local':r['agent_key']==own['public_key']} for r in p['cosigners']]
             facts={'name':p['name'],'chain':p['chain'],'threshold':p['threshold'],'total':len(roles),'height':p['height'],'roles':roles,'proposal_hash':digest(p),'identity':own,'requires_disc':any(r['local'] and r['storage']=='disc' for r in roles),'no_bypass':True}
-            return {'kind':'wallet_setup','id':key,'setup':facts}
+            return {'kind':'wallet_setup','id':key,'setup':facts,'unlock_estimates':self.unlock_estimates(facts)}
         session=self.sessions.get(digest(p['proposal']))
         if not session:raise ValueError('Approve this exact participation proposal locally before reviewing its complete policy. A RAM workspace restart requires a fresh setup session.')
         messages=[];roles={r['id']:r for r in p['proposal']['cosigners']}
@@ -84,7 +87,7 @@ class WalletSetup:
                 if node!=[local]:raise ValueError('Independent address derivation differs from Core.')
                 samples.append({'branch':'Receive' if branch==0 else 'Change','index':index,'address':local})
         facts={'proposal_hash':digest(p['proposal']),'policy_hash':digest({'proposal':p['proposal'],'receive_descriptor':descs[0],'change_descriptor':descs[1],'contributions':p['contributions']}),'receive_descriptor':descs[0],'change_descriptor':descs[1],'samples':samples,'threshold':p['proposal']['threshold'],'total':len(roles),'height':p['proposal']['height'],'roles':[{**r,'fingerprint':fingerprint(r['agent_key']),'local':r['agent_key']==self.own_identity()['public_key']} for r in roles.values()],'name':p['proposal']['name'],'chain':p['proposal']['chain'],'requires_disc':any(r['agent_key']==self.own_identity()['public_key'] and r['storage']=='disc' for r in roles.values())}
-        self.reviews[key]=(facts,time.time());return {'kind':'wallet_setup_policy','id':key,'setup':facts}
+        self.reviews[key]=(facts,time.time());return {'kind':'wallet_setup_policy','id':key,'setup':facts,'unlock_estimates':self.unlock_estimates(facts)}
     def check_cancel(self,binding):
         if binding in self.store.read().get('cancelled_setups',{}):raise ValueError('Dashboard requested cancellation. Review Delete and Cancel or Backup and Cancel on Authorise before continuing.')
     def approve_proposal(self,key,pins):

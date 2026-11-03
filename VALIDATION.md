@@ -1,3 +1,9 @@
+# Build 34 validation
+
+17 focused Python tests passed, including real Bitcoin Core 31 initial/final 2-of-3 vault setup, policy refresh, changing advisory estimates during approval, estimator unavailable/wrong-network cases and startup authorisation. All 14 JavaScript suites and web syntax checks passed, including actual initial/final/refresh rendering and denial ordering/control regressions. The package export compares installed source, web, helpers and documentation with the source tree. No Dashboard protocol change is required.
+
+## Earlier validation records
+
 # Build 33 validation
 
 All **13 JavaScript interface suites** and every web JavaScript syntax check passed. The new integration test executes the shipped rename and local-card modules together. It covers automatic refresh after successful private/watch renames and reconciliation, exact new headings, balances/watch-only eye/sibling cards, the updated delete-review target, a superseded in-flight inventory response, refusal without a false rename, and unchanged disc-archive routing. **Seven startup-authorisation tests** passed. This change touches the interface plus version/package metadata; Bitcoin Core rename execution and Dashboard protocol are unchanged. Real-Core mutation regressions from Build 32 are baseline evidence, not rerun claims. Exact test logs and package byte/checksum verification accompany this export. The supplied installed-Agent log confirms the preceding Build 32 rename completed through verification before the stale cards were observed.

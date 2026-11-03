@@ -80,7 +80,9 @@ class Refresh:
             address=Script(bytes.fromhex(row['scriptPubKey'])).address(NETWORKS[p['chain']]);header=rpc(self.core,'getblockheader',[rpc(self.core,'getblockhash',[row['height']])])
             outputs.append({'address':address,'txid':row['txid'],'vout':row['vout'],'amount_sats':str(sats(row['amount'])),'time_received':header['time'],'blockheight':row['height'],'confirmations':actual['confirmations']})
         facts={'wallet':p['wallet'],'chain':p['chain'],'height':parsed['height'],'threshold':parsed['threshold'],'total':parsed['total'],'policy_hash':digest(transition(p)),'previous_descriptors':p['previous_descriptors'],'receive_descriptor':p['receive_descriptor'],'change_descriptor':p['change_descriptor'],'samples':samples,'funded_outputs':outputs,'scan_range':[0,999],'old_policies_retained':True}
-        self.reviews[key]=(copy.deepcopy(p),facts,time.monotonic());return {'kind':p['kind'],'id':key,'refresh':facts}
+        self.reviews[key]=(copy.deepcopy(p),facts,time.monotonic())
+        from vault_time import estimates
+        return {'kind':p['kind'],'id':key,'refresh':facts,'unlock_estimates':estimates(self.core,[facts['height']],expected_chain=facts['chain'])}
     def approve(self,key):
         reviewed=self.reviews.get(key)
         if not reviewed or time.monotonic()-reviewed[2]>600:raise ValueError('Review the refreshed public policy again.')

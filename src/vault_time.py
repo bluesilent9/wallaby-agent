@@ -5,12 +5,15 @@ from wallet_ops import rpc
 
 LOOKBACK = 157788  # Approximately three years at Bitcoin's target block interval.
 
-def estimates(core, heights, now=None):
+def estimates(core, heights, now=None, expected_chain=None):
     heights=sorted({h for h in heights if type(h) is int and 0<h<500000000})
     if not heights:return []
     now=time.time() if now is None else now
     try:
-        chain=rpc(core,'getblockchaininfo');tip=chain['blocks']
+        chain=rpc(core,'getblockchaininfo')
+        if expected_chain is not None and chain.get('chain')!=expected_chain:
+            return [{'height':h,'status':'unavailable','notice':'The proposed Bitcoin network differs from this local node; no unlock date is estimated.'} for h in heights]
+        tip=chain['blocks']
         if type(tip) is not int or tip<0:raise ValueError('Invalid tip.')
         header=rpc(core,'getblockheader',[rpc(core,'getblockhash',[tip])])
         latest=header['time']
