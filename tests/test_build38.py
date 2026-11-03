@@ -18,7 +18,7 @@ class IdleDiscReads(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'Finish active wallet'):self.w.begin_close()
   with self.assertRaises(ValueError):self.query('walletpassphrase')
  def test_generation_installation_capture_failure_reading_and_writing_still_block_queries(self):
-  for phase in ('generating','contributed','installing','error'):
+  for phase in ('generating','installing','error'):
    self.w.setup.sessions['setup']['phase']=phase;self.assertEqual(self.query()['error']['code'],'synchronisation_busy')
   self.w.setup.sessions['setup']['phase']='awaiting_disc'
   for phase in ('capturing','error','discarding'):
@@ -30,7 +30,7 @@ class IdleDiscReads(unittest.TestCase):
    with self.w.store.edit() as s:s['pending']={'task':{'proposal':{'kind':kind},'state':'pending'}}
    self.assertIn('error',self.query())
   with self.w.store.edit() as s:s['pending']={}
-  for key,value in [('setup_active','setup'),('active_transfer','transfer'),('sync_batch',{'ids':['a']}),('history_jobs',{'history':{}}),('recovery',{'state':'downloading'})]:
+  for key,value in [('setup_active','unknown-setup'),('active_transfer','transfer'),('sync_batch',{'ids':['a']}),('history_jobs',{'history':{}}),('recovery',{'state':'downloading'})]:
    with self.w.store.edit() as s:s[key]=value
    self.assertIn('error',self.query())
    with self.w.store.edit() as s:s.pop(key)

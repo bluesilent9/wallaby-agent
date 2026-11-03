@@ -60,6 +60,7 @@ class Workspace:
             self.archives=Archives(self.ops.core,self.store,self.binary(),enforce)
             import node_client
             node_client.LOCAL_ROUTER=self.archives
+            node_client.LOCAL_PUBLIC_RPC=self.public_rpc
             from archive_operations import Operations
             from policy_refresh import Refresh
             self.archive_ops=Operations(self.ops.core,self.store,self.setup,self.archives,enforce);self.refresh_ops=Refresh(self.ops.core,self.store,self.archives)
@@ -92,15 +93,28 @@ class Workspace:
         s=self.store.read();archives=getattr(self,'archive_ops',None)
         archive_busy=bool(archives and (any(v['phase'] not in ('queued','complete') for v in archives.jobs.values()) if public_reads else archives.busy()))
         sessions=getattr(self.setup,'sessions',{}) if self.setup else {}
-        setup_busy=any(v['phase'] not in (('complete','awaiting_disc') if public_reads else ('complete',)) for v in sessions.values())
+        setup_busy=any(v['phase'] not in (('complete','contributed','awaiting_disc') if public_reads else ('complete',)) for v in sessions.values())
         burner=getattr(self.setup,'burner',None)
         writing=bool(public_reads and burner and getattr(burner,'thread',None) and burner.thread.is_alive())
-        return bool(archive_busy or setup_busy or writing or public_reads and s.get('setup_active') or
+        active=s.get('setup_active')
+        setup_reserved=bool(active and (active not in sessions or sessions[active]['phase'] not in ('contributed','awaiting_disc','complete')))
+        return bool(archive_busy or setup_busy or writing or public_reads and setup_reserved or
             any(v['proposal']['kind'] in ('destroy_disc','archive_cancel','builder_cancel') for v in s['pending'].values()) or
             self.archives and self.archives.reading or s.get('history_jobs') or
             any(k!=ignore_rename and row['proposal']['kind']=='wallet_rename' and row['state']!='pending' for k,row in s['pending'].items()) or
             getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or
             s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'))
+    def public_rpc(self,ident,name,params,wallet,timeout):
+        """One read-only gate for terminal bridge and Dashboard execution threads."""
+        from agent_rpc import request
+        validated,_=request(name,params,wallet)
+        busy={'error':{'code':'synchronisation_busy','message':'A locally authorised wallet operation is active. Retry after it finishes.'}}
+        if not self.lock.acquire(blocking=False):return busy
+        try:
+            enforce()
+            if self.closing or self.busy(public_reads=True):return busy
+            return self.ops.core.call(ident,name,validated,wallet,timeout)
+        finally:self.lock.release()
     def burn_state(self):
         result=self.setup.burner.state();jobs=getattr(getattr(self,'archive_ops',None),'jobs',{})
         for row in result.get('queue',[]):row['archive_request']=bool(jobs.get(row['id'],{}).get('request') and jobs[row['id']]['phase']=='queued')
@@ -290,7 +304,8 @@ class Workspace:
             if method in ('wallet.sign','setup.participate','authorise.approve','message.sign','cancel.confirm','cancel.reconcile') and self.archives and self.archives.reading:raise ValueError('Wait for optical restoration to finish before signing or changing wallets.')
             if saved.get('setup_active') and method in ('wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','authorise.history','authorise.review'):
                 candidate=saved['pending'].get(args[0],{}).get('proposal',{}) if args else {}
-                if candidate.get('kind')!='builder_cancel' and (candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']):raise ValueError('Finish the current wallet setup and its physical backups first.')
+                independent_archive=candidate.get('kind')=='archive_wallet' and method in ('authorise.review','authorise.approve') and not self.busy(public_reads=True)
+                if not independent_archive and candidate.get('kind')!='builder_cancel' and (candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']):raise ValueError('Finish the current wallet setup and its physical backups first.')
             if method=='service_status':return self.service_status()
             if method=='ui.arm':
                 if hasattr(self,'recovery'):self.recovery.reset()
@@ -309,10 +324,7 @@ class Workspace:
             if method=='status':return self.state()
             if method=='core.health':self.ops.core.ready();return {'ok':True}
             if method=='core.public':
-                from agent_rpc import request
-                ident,name,params,wallet,timeout=args;validated,_=request(name,params,wallet)
-                if self.busy(public_reads=True):return {'error':{'code':'synchronisation_busy','message':'A locally authorised wallet operation is active.'}}
-                return self.ops.core.call(ident,name,validated,wallet,timeout)
+                return self.public_rpc(*args)
             if method=='exchange':
                 from agent_exchange import Exchange
                 if len(args)!=2 or type(args[0]) is not int or not 1<=args[0]<=65535 or not isinstance(args[1],str) or len(args[1])>4096:raise ValueError('Invalid exchange connection.')
