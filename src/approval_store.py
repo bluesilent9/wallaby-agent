@@ -15,6 +15,7 @@ def digest(value):
 def title(p):
     if p.get('kind')=='wallet_retire' and p.get('version')==3:
         return ('Preserve history: '+p['archive_label']+' → '+p['wallet']) if p['phase']=='preserve' else 'Delete empty copies: '+p['wallet']
+    if p.get('kind')=='archive_cancel':return 'Cancel archive: '+p['wallet']
     if p.get('kind')=='destroy_disc' and p.get('version')==2:return p['label']
     return p.get('wallet',p.get('public_wallet',{}).get('wallet_name',p.get('name',p.get('proposal',{}).get('name',''))))
 
@@ -80,6 +81,7 @@ class Store:
         return True
     def deny(self,key):
         with self.edit() as s:
+            if s['pending'][key]['proposal']['kind']=='archive_cancel':raise ValueError('Archive cancellation requires local disc cleanup confirmation.')
             if s['pending'][key]['proposal']['kind']=='builder_cancel':raise ValueError('Choose Delete and Cancel or Backup and Cancel locally.')
             if s['pending'][key]['proposal']['kind']=='wallet_retire' and s['pending'][key]['state']!='pending':raise ValueError('This extinction operation was attempted or has an uncertain outcome. Inspect Core and reconcile it; it cannot be relabelled as an unstarted denial.')
             if s.get('active_transfer')==key:raise ValueError('Cancel the active transfer on Synchronisation first.')

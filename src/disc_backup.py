@@ -232,7 +232,22 @@ class Burner:
         if key in {r[0] for r in members}:
             return self.job['phase']=='authorised' and not self.job.get('_prepared') and not self.job.get('discs_verified') and not self.job.get('_required_members')
         return any(r[0]==key for r in self.pending)
+    def verify_cancellation(self,job):
+        with self.lock:
+            if job is not self.job or self.thread and self.thread.is_alive() or not job.get('_write_started') or not job.get('_layout') or not job.get('_device'):raise ValueError('Wait for the writer to finish; this cancelled medium cannot be checked automatically yet.')
+            job['_cancel_pending']=True;job.update(phase='verifying',message='Checking the cancelled medium without writing anything. Keep the original disc inserted.')
+            def check():
+                try:
+                    from disc_archive import chunks
+                    directory=self.root/job['id'];checksum=hashlib.sha256()
+                    for part in chunks(directory/'disc.iso',directory/'disc/recovery.wallaby',job['_layout']):checksum.update(part)
+                    readback(job['_device'],job['_layout']['total_bytes'],checksum.hexdigest(),lambda count:job.update(verified_bytes=count));job['_verification_succeeded']=True
+                except Exception:job['_verification_succeeded']=False
+                finally:job['_verification_finished']=True;job.update(phase='cancel_cleanup',message='Cancelled-disc verification attempt finished. Complete the local cleanup checklist on Authorise.')
+            self.thread=threading.Thread(target=check,daemon=True);self.thread.start()
+            return {'message':'Read-only verification started. No additional disc is being written.'}
     def validate_options(self,device,confirmed,disc_count=1,speed='slowest'):
+        if self.job and self.job.get('_cancel_pending'):raise ValueError('This disc set was cancelled. Review its cleanup on Authorise; no further copy will be burned.')
         if not self.job or self.job['phase'] not in ('authorised','awaiting_disc','error','uncertain') or confirmed is not True:raise ValueError('Authorise and confirm a fresh blank M-Disc before writing.')
         if type(disc_count) is not int or not 1<=disc_count<=99:raise ValueError('Choose between 1 and 99 separate discs.')
         speed_value(speed)
@@ -261,10 +276,14 @@ class Burner:
                     from disc_archive import plan,chunks
                     layout=plan(iso,disc/'recovery.wallaby',capacity)
                     job.update(phase='burning',copies=layout['copies'],total_bytes=layout['total_bytes'],written_bytes=0,verified_bytes=0,message='Writing disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+' with '+str(layout['copies'])+' repeated recovery copies. Speed: '+('slowest supported' if speed=='slowest' else speed+'×')+'. Full read-back follows writing.')
-                    written=True;sha=write_stream(device,chunks(iso,disc/'recovery.wallaby',layout),layout['total_bytes'],lambda count:job.update(written_bytes=count),speed)
+                    job['_write_started']=True;job['_device']=device;job['_layout']=layout;job['_verification_finished']=False;job['_verification_succeeded']=False;job['_attempts']=job.get('_attempts',0)+1
+                    written=True;sha=write_stream(device,chunks(iso,disc/'recovery.wallaby',layout),layout['total_bytes'],lambda count:job.update(written_bytes=count),speed);job['_image_sha256']=sha
                     job.update(phase='verifying',message='Checking every recorded byte on disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+'.')
-                    readback(device,layout['total_bytes'],sha,lambda count:job.update(verified_bytes=count))
+                    try:readback(device,layout['total_bytes'],sha,lambda count:job.update(verified_bytes=count));job['_verification_succeeded']=True
+                    finally:job['_verification_finished']=True
                     job['discs_verified']+=1;job.setdefault('verified_discs',[]).append({'disc':job['discs_verified'],'sha256':sha,'bytes':layout['total_bytes']})
+                    if job.get('_cancel_pending'):
+                        job.update(phase='cancel_cleanup',message='Cancellation received. The current burn and read-back finished. Review disc cleanup on Authorise; no additional copy will be written.');return
                     if job['discs_verified']<disc_count:
                         job.update(phase='awaiting_disc',message='Disc '+str(job['discs_verified'])+' verified. Remove it, insert a fresh blank disc, then explicitly continue. The remaining recovery material stays in protected RAM.');return
                     all_verified=True;job['phase']='completing'
@@ -276,5 +295,19 @@ class Burner:
                     phase='completion_uncertain' if all_verified else 'uncertain' if written else 'error'
                     message=str(error) if isinstance(error,ValueError) else 'Disc work stopped. Inspect the local drive and outcome; no operation was repeated.'
                     job.update(phase=phase,message=message+(' All requested discs were verified; reconcile completion before doing anything else.' if all_verified else ' Keep the RAM workspace open. Any retry requires a fresh blank disc and your confirmation.'))
-                finally:password=None
+                finally:
+                    password=None
+                    if job.get('_cancel_pending') and job.get('_write_started') and job['phase']!='complete':
+                        if not job.get('_verification_finished'):
+                            job.update(phase='verifying',message='Cancellation received. Checking the medium after the writer stopped; an incomplete disc must still be destroyed locally.')
+                            try:
+                                expected=job.get('_image_sha256')
+                                if not job.get('_image_sha256'):
+                                    checksum=hashlib.sha256()
+                                    for part in chunks(iso,disc/'recovery.wallaby',job['_layout']):checksum.update(part)
+                                    expected=checksum.hexdigest()
+                                readback(device,job['_layout']['total_bytes'],expected,lambda count:job.update(verified_bytes=count));job['_verification_succeeded']=True
+                            except Exception:job['_verification_succeeded']=False
+                            finally:job['_verification_finished']=True
+                        job.update(phase='cancel_cleanup',message='The writer and verification attempt have finished. Review cancellation on Authorise and account for every written or partial disc. No further copy will be burned.')
             self.thread=threading.Thread(target=work,daemon=True);self.thread.start();return {'message':'Disc '+str(job['discs_verified']+1)+' preparation started. No additional disc will be written without a new local confirmation.'}

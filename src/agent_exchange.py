@@ -7,6 +7,7 @@ import time
 
 LOCAL_CANCELLATIONS=None
 LOCAL_RETIREMENT=None
+LOCAL_ARCHIVES=None
 from peer_wallet import local_ipv6,active
 from approval_store import Store
 from node_client import http_json,HTTPFailure
@@ -34,7 +35,7 @@ class Exchange:
         from cancellation import held_item,blocked
         ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1)
         items=[{'id':key,**row} for key,row in ordered if not held_item(state,row)][:8]
-        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_policy_refresh_v1','wallet_rename_v1']}
+        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_rename_v1']}
         address=local_ipv6()
         if address:body['node_info']={'ipv6':address}
         self.phase='http'
@@ -56,7 +57,7 @@ class Exchange:
         self.phase='proposal_validation'
         for p in r['proposals']:
             # Record only a fixed known kind, never remote strings or payloads.
-            known={'wallet_rename','wallet_rename_queue','builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc'}
+            known={'wallet_rename','wallet_rename_queue','builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc','archive_cancel'}
             self.proposal_kind=p.get('kind') if isinstance(p,dict) and p.get('kind') in known else 'unknown'
             if self.proposal_kind=='wallet_retire':
                 from retirement_phases import require_current
@@ -78,6 +79,7 @@ class Exchange:
                 from approval_store import digest
                 apply_snapshot(self.store,p['revision'],p['requests'],session=digest({'token':self.token}))
             elif p['kind'] in ('wallet_archive_queue','wallet_rename_queue'):self.store.receive(p)
+        if LOCAL_ARCHIVES is not None and LOCAL_ARCHIVES.store.path==self.store.path:LOCAL_ARCHIVES.cancellations.observe(mark_only=True)
         for p in proposals:
             self.proposal_kind=p['kind']
             if p['kind'] in ('builder_cancel','wallet_retire_cancel') or blocked(self.store.read(),p):continue

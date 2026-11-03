@@ -2,7 +2,7 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** The intended workflow keeps private keys in Core and does not export them to the Dashboard; that does not remove the risk of an unlocked wallet or a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 30
+# Wallaby Agent V2 — Development Build 31
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
@@ -11,9 +11,13 @@ Disc Operations is divided into **Read a Disc**, **Review and Load Wallets**, **
 Archive requests can accumulate before burning. Authorise each request, then select up to 15 independent wallets together in **Disc Operations**. Only selected wallets complete after every requested disc passes read-back; unselected wallets remain queued. **Review staged archive** lets you delete an unused request and its RAM capture. Agent reports signed `complete` or `deleted` results to Dashboard; archiving has no Disable option or denial list. Wallet synchronisation retains its separate persistent denial list. **Use Dashboard Build 37 or later for signed deletion results and Notifications/Wallets notices:** [handoff](DASHBOARD_ARCHIVE_RESULTS_BUILD30.md).
 
 
-[Build 30 DEB](dist/wallaby-agent_2.0.0~dev30_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 31 DEB](dist/wallaby-agent_2.0.0~dev31_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
 
-Build 30 pairs with **Dashboard V1 Build 34** for two-stage extinction. An existing Extinct wallet first preserves and verifies the complete public manifest; the Agent signs a receipt without deleting any originals. Separate local approvals then delete the exact empty private/watch copies. Cold nodes without an Extinct wallet never create one. Deletion requires fresh local history/zero-balance checks and independent comparison of the preserving Agent fingerprint. The former combined archive-and-delete action is blocked in the production exchange and protected UI.
+Build 31 adds Dashboard V1 Build 40 archive cancellation: unused captures can be withdrawn; an active disc finishes writing/read-back, and any written or partial discs require local destruction confirmation. Shared discs preserve unrelated wallets on a read-back-verified replacement first. Discs from another Agent require the matching actual disc and independent creator fingerprint comparison. [Build 31 details](AGENT_BUILD31_CANCELLATION.md).
+
+Vault signing reviews now show a rough unlock estimate in UTC and the Agent computer’s local time zone, calculated from local block-header timestamps (including on pruned nodes). This uses no online forecast and does not change the vault height or signing checks.
+
+The existing extinction process pairs with **Dashboard V1 Build 34 and later** for two-stage extinction. An existing Extinct wallet first preserves and verifies the complete public manifest; the Agent signs a receipt without deleting any originals. Separate local approvals then delete the exact empty private/watch copies. Cold nodes without an Extinct wallet never create one. Deletion requires fresh local history/zero-balance checks and independent comparison of the preserving Agent fingerprint. The former combined archive-and-delete action is blocked in the production exchange and protected UI.
 
 Old discs read later report authenticated public membership separately from burn read-back verification. A mixed disc offers a replacement containing its current accounts; shared signers needed by other policies remain included. Physical destruction cannot be recorded until local replacement read-back covers every current member. A retired-only disc needs no new disc but still requires signed preservation evidence and local physical confirmation. Private material stays in protected RAM, and extinction creates no additional private-key backup. Pruned history recovery keeps pruning unchanged. [Build 30 protocol and testing](AGENT_BUILD30_EXTINCTION.md).
 

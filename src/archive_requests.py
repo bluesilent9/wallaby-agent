@@ -12,6 +12,9 @@ def validate_task(p):
         text(p['wallet'],256);descriptors(p['public_wallet'])
         if p['public_wallet']['wallet_name']!=p['wallet'] or not isinstance(p['related_policies'],list) or len(p['related_policies'])>32:raise ValueError('Invalid archive wallet identity or related-policy list.')
         for raw in p['related_policies']:descriptors(raw)
+    elif p.get('kind')=='archive_cancel':
+        from archive_cancel import validate
+        return validate(p)
     elif p.get('kind')=='destroy_disc':
         if p.get('version')==2:
             from extinct_discs import validate
@@ -32,6 +35,8 @@ def validate_queue(p):
         validate_task(row)
         if row['request_id'] in seen:raise ValueError('Duplicate archive task.')
         seen.add(row['request_id'])
+    originals=[row['archive_request']['request_id'] for row in p['requests'] if row['kind']=='archive_cancel']
+    if len(set(originals))!=len(originals) or set(originals)&seen:raise ValueError('Archive snapshot contains duplicate cancellations or both a cancelled request and its active original.')
     return p
 
 def snapshot(store,p):
@@ -42,8 +47,10 @@ def snapshot(store,p):
             if p['revision']<previous['revision']:raise ValueError('Archive snapshot revision went backwards.')
             if p['revision']==previous['revision'] and digest(p)!=previous['hash']:raise ValueError('Archive snapshot changed without a revision.')
         active={digest(row):row for row in p['requests']}
+        unattempted={key for key,row in active.items() if row['kind']=='archive_cancel' and s['pending'].get(digest(row['archive_request']),{}).get('state')=='pending'}
         for key,row in list(s['pending'].items()):
-            if row['proposal']['kind'] in ('archive_wallet','destroy_disc') and key not in active:
+            if row['proposal']['kind'] in ('archive_wallet','destroy_disc','archive_cancel') and key not in active:
+                if row['proposal']['kind']=='archive_cancel':row['remote_withdrawn']=True;continue
                 if row['state']=='pending':s['pending'].pop(key)
                 else:row['withdrawn']=True # never delete authorised/in-flight RAM work
         s['archive_queue']={'queue_id':p['queue_id'],'revision':p['revision'],'hash':digest(p),'requests':copy.deepcopy(p['requests'])}
@@ -51,6 +58,7 @@ def snapshot(store,p):
             if key in s['completed'] or key in s['pending']:continue
             if len(s['pending'])>=128:raise ValueError('Local authorisation queue is full.')
             s['pending'][key]={'proposal':row,'state':'pending','received':__import__('time').time()}
+            if row['kind']=='archive_cancel':s['pending'][key]['source_unattempted']=key in unattempted
 
 def result(store,p,status,**extra):
     from setup_messages import sign

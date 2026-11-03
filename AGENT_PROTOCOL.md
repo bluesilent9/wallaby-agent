@@ -136,3 +136,8 @@ Results retain their request hash and add phase/manifest_hash to complete, denia
 ### Build 30 archive request deletion (Dashboard update required)
 
 Archiving has no persistent Disable control. Local request deletion reports signed `archive_queue_result` status `deleted` with the existing version/queue_id/request_id/signature binding. The exact request is terminal in protected RAM; a fresh nonce for the same wallet is permitted. Dashboard must acknowledge and terminally remove deleted tasks, deduplicate notification delivery, and implement the requested Notifications/Wallets read-state behavior. Completion/read-back receipts remain unchanged. See DASHBOARD_ARCHIVE_RESULTS_BUILD30.md.
+
+
+## Build 31 extensions
+
+See [AGENT_BUILD31_CANCELLATION.md](AGENT_BUILD31_CANCELLATION.md) for wallet_archive_cancel_v1, exact archive_cancel tasks, signed cleanup outcomes, cross-Agent physical-disc verification and local-only advisory vault unlock estimates. Existing queue envelope version and read-only Dashboard RPC restrictions are unchanged. No Dashboard time forecast is trusted for signing.

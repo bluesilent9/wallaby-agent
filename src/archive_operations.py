@@ -12,10 +12,13 @@ from archive_requests import validate_task,result
 class Operations:
     def __init__(self,core,store,setup,archives,enforce):
         self.core=core;self.store=store;self.setup=setup;self.archives=archives;self.enforce=enforce;self.reviews={};self.jobs={};self.verified_replacements={}
+        from archive_cancel import Cancellations
+        self.cancellations=Cancellations(self)
         setup.external_burn_complete=self.complete;setup.burner.replacement_resolver=self.replacements
     def regular(self,name):return not any(name in r['routes'] for r in self.archives.loaded.values())
     def review(self,key):
         p=validate_task(self.store.read()['pending'][key]['proposal'])
+        if p['kind']=='archive_cancel':return self.cancellations.review(key)
         job=self.jobs.get(key)
         if p['kind']=='archive_wallet' and job and job['phase']=='queued':
             return {'kind':'archive_wallet','id':key,'archive':{**job['facts'],'staged':True,'removable':self.setup.burner.removable(key)}}
@@ -24,7 +27,7 @@ class Operations:
                 from extinct_discs import review
                 return review(self,key)
             proof=self.destruction_proof(p)
-            return {'kind':'destroy_disc','id':key,'destruction':{'archive_id':p['archive_id'],'label':p['label'],'replacement_image_sha256':p['replacement_image_sha256'],'coverage':proof['members'],'physical_confirmation_only':True}}
+            return {'kind':'destroy_disc','id':key,'destruction':{'archive_id':p['archive_id'],'label':p['label'],'replacement_image_sha256':p['replacement_image_sha256'],'coverage':proof['members'],'physical_confirmation_only':True,'creator_confirmation_required':proof.get('creator_confirmation_required',False),'creator_fingerprint':proof.get('creator_fingerprint','')}}
         if not self.regular(p['wallet']):raise ValueError('Dashboard archival is only for persistent node wallets. Use the explicit loaded-disc refresh operation for an archive.')
         info=rpc(self.core,'getwalletinfo',[],p['wallet']);raw=rpc(self.core,'listdescriptors',[False],p['wallet'])
         if not info.get('private_keys_enabled') or info.get('scanning') or descriptors(raw)!=descriptors(p['public_wallet']):raise ValueError('A matching, fully loaded private-key wallet is required. Watch-only, extinct and disc-only sources cannot authorise archiving.')
@@ -119,12 +122,12 @@ class Operations:
             if not descriptors(old_raw)<=descriptors(new_raw):return False
             if not {digest(v) for v in old.get('policy_labels',[])}<={digest(v) for v in new.get('policy_labels',[])}:return False
         return True
-    def complete(self,key,image_sha256):
+    def complete(self,key,image_sha256,notify_cancel=True):
         row=self.jobs[key];job=self.setup.burner.job;container=job['recovery'];members=sorted(identity(r) for i,w,r in job.get('_members') or [(key,None,row['recovery'])])
         replacements=container.get('replaces',[])
         for old in replacements:self.verified_replacements[old]={'image_sha256':image_sha256,'members':members,'old_policies_retained':True,'readback_verified':True}
-        evidence={'members':__import__('archive_inventory').evidence(job),'archive_id':job.get('archive_id'),'disc_count':job['disc_count'],'readback_verified':True,'image_sha256':image_sha256,'archive_members':members,'replacements':[{ 'archive_id':old,**self.verified_replacements[old]} for old in replacements]}
-        if row['request']:result(self.store,row['request'],'complete',**evidence)
+        evidence={'members':__import__('archive_inventory').evidence(job),'archive_id':job.get('archive_id'),'disc_count':job['disc_count'],'attempted_disc_count':job.get('_attempts',job['disc_count']),'readback_verified':True,'image_sha256':image_sha256,'archive_members':members,'replacements':[{ 'archive_id':old,**self.verified_replacements[old]} for old in replacements]}
+        if row['request']:receipt=result(self.store,row['request'],'complete',**evidence)
         else:
             from setup_messages import sign
             self.store.queue('archive_inventory',sign(self.store,{'version':1,'event':'replacement_verified',**evidence}))
@@ -134,22 +137,31 @@ class Operations:
         row['phase']='complete'
         if row['folder']:shutil.rmtree(row['folder'])
         with self.store.edit() as s:
-            s['pending'].pop(key,None);s['completed'][key]={'kind':'archive_wallet','at':time.time()}
+            s['pending'].pop(key,None);s['completed'][key]={'kind':'archive_wallet','at':time.time(),**({'result':receipt} if row['request'] else {})}
+        if notify_cancel:self.cancellations.completed(image_sha256)
     def destruction_proof(self,p):
         local=self.verified_replacements.get(p['archive_id'])
         if not local and p.get('replacement_receipt'):
             from setup_messages import verify
-            own=self.setup.own_identity()['public_key'];message=verify(self.store,p['replacement_receipt'],own)
+            own=self.setup.own_identity()['public_key'];creator=p['replacement_receipt'].get('public_key');message=verify(self.store,p['replacement_receipt'],creator)
             if message.get('readback_verified') is True:
                 local=next((r for r in message.get('replacements',[]) if r.get('archive_id')==p['archive_id']),None)
-                if local:local={**local,'members':local.get('members',message.get('archive_members',[]))}
+                if local:
+                    local={**local,'members':local.get('members',message.get('archive_members',[]))}
+                    if creator!=own:
+                        from wallet_preview import fingerprint
+                        old=self.archives.catalogs.get(p['archive_id'],{});new=self.archives.catalogs.get(message.get('archive_id'),{})
+                        if not old or not new or not all(k in new and self.covers(new[k],v) for k,v in old.items()):raise ValueError('Read the original and replacement discs here and verify full coverage before accepting another Agent replacement proof.')
+                        local.update(creator_confirmation_required=True,creator_fingerprint=fingerprint(creator))
         if not local or local.get('image_sha256')!=p['replacement_image_sha256'] or local.get('old_policies_retained') is not True or local.get('readback_verified') is not True or not local.get('members'):raise ValueError('No locally verified full replacement covers this old disc. Do not destroy it.')
         return local
-    def destroyed(self,key,confirmed):
+    def destroyed(self,key,confirmed,creator_pin=None):
         self.enforce();p=validate_task(self.store.read()['pending'][key]['proposal'])
         if p.get('version')==2:raise ValueError('Use the extinct-disc checklist with the independently verified preserving Agent fingerprint.')
         if p['kind']!='destroy_disc' or confirmed is not True:raise ValueError('Confirm physical destruction locally before completing the task.')
-        self.destruction_proof(p);result(self.store,p,'complete',destruction_confirmed_locally=True,archive_id=p['archive_id'],image_sha256=p['replacement_image_sha256'])
+        proof=self.destruction_proof(p)
+        if proof.get('creator_confirmation_required') and creator_pin!=proof['creator_fingerprint']:raise ValueError('Independently compare the original replacement Agent fingerprint before recording destruction.')
+        result(self.store,p,'complete',destruction_confirmed_locally=True,archive_id=p['archive_id'],image_sha256=p['replacement_image_sha256'])
         with self.store.edit() as s:s['pending'].pop(key,None);s['completed'][key]={'kind':'destroy_disc','at':time.time()}
         return {'message':'Physical disc destruction recorded from your local confirmation.'}
     def busy(self):return any(v['phase']!='complete' for v in self.jobs.values())

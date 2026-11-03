@@ -120,14 +120,16 @@ class WalletOps:
             prev=previous['vout'][vin['vout']];value=sats(prev['value']);spk=prev['scriptPubKey'];address=spk.get('address','');local,change=owners(address)
             if wallet in local:own=True
             from wallet_setup_signing import matches
+            input_policies=[{'height':r['public']['height'],'threshold':1,'total':1} for r in local_vaults.values() if r['public']['address']==address]
             for policy in matches(self.core,self.store,address,shared_inventory):
+                if policy['height'] is not None:input_policies.append({k:policy[k] for k in ('height','threshold','total')})
                 if not policy['setup_ready']:raise ValueError('This wallet setup lacks independently verified policy or physical-backup completion. Dashboard cannot declare it ready without the signed proofs.')
                 if policy['height'] is not None and (tx['locktime']>=500000000 or tx['locktime']<policy['height'] or vin['sequence']==0xffffffff):raise ValueError('The final transaction bypasses or changes an approved mandatory vault height.')
             witness=scope.get('witness_utxo')
             if witness and (sats(witness['amount'])!=value or witness['scriptPubKey']['hex']!=spk['hex']):raise ValueError('PSBT witness input differs from the locally verified previous output.')
             nonwitness=scope.get('non_witness_utxo')
             if nonwitness and nonwitness.get('txid')!=vin['txid']:raise ValueError('PSBT previous transaction does not match its input.')
-            total+=value;inputs.append({'txid':vin['txid'],'vout':vin['vout'],'sats':str(value),'address':address,'wallets':local,'change':change,'sequence':vin['sequence']})
+            total+=value;inputs.append({'txid':vin['txid'],'vout':vin['vout'],'sats':str(value),'address':address,'wallets':local,'change':change,'sequence':vin['sequence'],**({'vault_policies':input_policies} if input_policies else {})})
         for row in tx['vout']:
             spk=row['scriptPubKey'];address=spk.get('address','');local,change=owners(address);amount=sats(row['value'])
             outputs.append({'n':row['n'],'sats':str(amount),'address':address or 'Script '+spk['hex'],'wallets':local,'change':change,'script':spk['hex']})
@@ -150,7 +152,8 @@ class WalletOps:
             final=rpc(self.core,'finalizepsbt',[p['psbt']])
             if not final.get('complete') or rpc(self.core,'decoderawtransaction',[final['hex']])['txid']!=p['txid']:raise ValueError('The completed PSBT does not match its requested transaction ID.')
         self.prepared[key]={**p,'wallet':wallet,'review':review,'created':time.time()}
-        return {'kind':p['kind'],'id':key,'review':review}
+        from vault_time import for_review
+        return {'kind':p['kind'],'id':key,'review':review,'unlock_estimates':for_review(self.core,review,p)}
     def approve_sync(self,key):
         with self.lock:
             with self.store.edit() as s:
