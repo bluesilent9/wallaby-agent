@@ -83,7 +83,7 @@ class NativePrompt(unittest.TestCase):
     import threading
     with tempfile.TemporaryDirectory() as tmp:
      worker=Workspace.__new__(Workspace);worker.lock=threading.RLock();worker.store=Store(tmp);worker.configure=lambda env:None;worker.environment={};worker.archives=None
-     worker.ops=SimpleNamespace(core=object(),prepared={'key':{'wallet':'local-route','display_name':'Untrusted Dashboard name','fee_review':{},'review':{'fee_review':{'requires_ack':False}}}},sign=Mock(return_value={'queued':True}))
+     worker.ops=SimpleNamespace(core=object(),prepared={'key':{'created':time.time(),'wallet':'local-route','display_name':'Untrusted Dashboard name','fee_review':{},'review':{'fee_review':{'requires_ack':False}}}},sign=Mock(return_value={'queued':True}))
      with patch('secure_worker.enforce'),patch('wallet_ops.rpc',return_value={'walletname':'Exact Core wallet','unlocked_until':0}),patch('secure_worker.secret_dialog',return_value='fixture-password') as prompt:
       worker.dispatch('wallet.sign',['key','partial',False],{})
       text=prompt.call_args.args[0];self.assertIn('Exact Core wallet',text);self.assertIn('local-route',text);self.assertIn('sign the reviewed transaction',text);self.assertNotIn('Untrusted Dashboard name',text)

@@ -12,6 +12,20 @@ from vendor.embit import script
 from vendor.embit.networks import NETWORKS
 from approval_store import Store,digest
 from vault_policy import public_vault,psbt_text
+from diagnostics import LocalActionFailure
+
+REVIEW_SECONDS=600
+
+def review_remaining(prepared):
+    if not prepared or "created" not in prepared:return 0
+    remaining=REVIEW_SECONDS-(time.time()-prepared["created"])
+    if "created_monotonic" in prepared:remaining=min(remaining,REVIEW_SECONDS-(time.monotonic()-prepared["created_monotonic"]))
+    return max(0,min(REVIEW_SECONDS,remaining))
+
+def require_current_review(prepared):
+    if review_remaining(prepared)<=0:
+        raise LocalActionFailure("transaction_review_expired","The ten-minute transaction review period has expired. No signature or broadcast was authorised. Review this transaction again, check its details, then sign within ten minutes.")
+    return prepared
 
 MAX_SATS=21000000*100000000
 
@@ -93,6 +107,8 @@ class WalletOps:
         local_vaults=self.store.read()['vaults']
         from wallet_setup_signing import inventory
         shared_inventory=inventory(self.core)
+        from wallet_traits import local_traits
+        trait_cache={}
         def owners(address):
             result=[];change=False
             if address:
@@ -133,10 +149,10 @@ class WalletOps:
             if witness and (sats(witness['amount'])!=value or witness['scriptPubKey']['hex']!=spk['hex']):raise ValueError('PSBT witness input differs from the locally verified previous output.')
             nonwitness=scope.get('non_witness_utxo')
             if nonwitness and nonwitness.get('txid')!=vin['txid']:raise ValueError('PSBT previous transaction does not match its input.')
-            total+=value;inputs.append({'txid':vin['txid'],'vout':vin['vout'],'sats':str(value),'address':address,'wallets':local,'change':change,'sequence':vin['sequence'],**({'vault_policies':input_policies} if input_policies else {})})
+            total+=value;inputs.append({'txid':vin['txid'],'vout':vin['vout'],'sats':str(value),'address':address,'wallets':local,'change':change,'sequence':vin['sequence'],'traits':local_traits(self.core,local,address,cache=trait_cache),**({'vault_policies':input_policies} if input_policies else {})})
         for row in tx['vout']:
             spk=row['scriptPubKey'];address=spk.get('address','');local,change=owners(address);amount=sats(row['value'])
-            outputs.append({'n':row['n'],'sats':str(amount),'address':address or 'Script '+spk['hex'],'wallets':local,'change':change,'script':spk['hex']})
+            outputs.append({'n':row['n'],'sats':str(amount),'address':address or 'Script '+spk['hex'],'wallets':local,'change':change,'script':spk['hex'],'traits':local_traits(self.core,local,address,cache=trait_cache)})
         fee=total-sum(int(o['sats']) for o in outputs)
         if (require_owned and not own) or fee<0 or fee>MAX_SATS:raise ValueError('No locally controlled signing input, or invalid transaction fee.')
         if 'fee' in decoded and sats(decoded['fee'])!=fee:raise ValueError('PSBT fee differs from the independently verified fee.')
@@ -155,9 +171,10 @@ class WalletOps:
         if p['kind']=='broadcast_transaction':
             final=rpc(self.core,'finalizepsbt',[p['psbt']])
             if not final.get('complete') or rpc(self.core,'decoderawtransaction',[final['hex']])['txid']!=p['txid']:raise ValueError('The completed PSBT does not match its requested transaction ID.')
-        self.prepared[key]={**p,'wallet':wallet,'review':review,'created':time.time()}
+        self.prepared[key]={**p,'wallet':wallet,'review':review,'created':time.time(),'created_monotonic':time.monotonic()}
         from vault_time import for_review
-        return {'kind':p['kind'],'id':key,'review':review,'unlock_estimates':for_review(self.core,review,p)}
+        estimates=for_review(self.core,review,p)
+        return {'kind':p['kind'],'id':key,'review':review,'unlock_estimates':estimates,'review_seconds_remaining':review_remaining(self.prepared[key])}
     def approve_sync(self,key):
         with self.lock:
             with self.store.edit() as s:
@@ -171,8 +188,7 @@ class WalletOps:
         if type(fee_ack) is not bool:raise ValueError('Invalid local fee acknowledgement.')
         if action not in ('broadcast','partial'):raise ValueError('Invalid signing action.')
         with self.lock:
-            p=self.prepared.get(key)
-            if not p or time.time()-p['created']>600:raise ValueError('Review expired. Recalculate or review again before signing.')
+            p=require_current_review(self.prepared.get(key))
             if p['kind']=='sign_psbt_partial' and action!='partial':raise ValueError('Dashboard signing requests return signatures only; broadcasting requires a separate local approval.')
             if p['kind']=='broadcast_transaction' and action!='broadcast':raise ValueError('Review and authorise broadcast locally.')
             if p['kind'] not in ('sign_psbt_partial','broadcast_transaction'):raise ValueError('This retired local builder operation is unavailable.')
@@ -183,9 +199,10 @@ class WalletOps:
                 if rpc(self.core,'gettxout',[i['txid'],i['vout'],True]) is None:raise ValueError('A reviewed input is no longer unspent. Review a fresh transaction.')
             if current!=p['review']:raise ValueError('Transaction or local wallet interpretation changed. Review again.')
             if current['fee_review']['requires_ack'] and fee_ack is not True:raise ValueError('Review and explicitly acknowledge the unusually high total network fee on this Agent.')
-            self.prepared.pop(key)
             from transaction_requests import intents
             intents(self,p,current)
+            require_current_review(p)
+            self.prepared.pop(key)
             if p['kind']=='broadcast_transaction':
                 with self.store.edit() as state:
                     if state['pending'][key]['state']!='pending':raise ValueError('Request was already attempted.')
@@ -194,9 +211,15 @@ class WalletOps:
                 final=rpc(self.core,'finalizepsbt',[p['psbt']])
                 if not final.get('complete') or rpc(self.core,'decoderawtransaction',[final['hex']])['txid']!=p['txid']:raise ValueError('The completed transaction ID changed.')
                 if not rpc(self.core,'testmempoolaccept',[[final['hex']]])[0].get('allowed'):raise ValueError('Core rejected the transaction; nothing was broadcast.')
+                try:require_current_review(p)
+                except LocalActionFailure:
+                    # The send RPC has not been called: expiry is a known refusal,
+                    # not an uncertain broadcast. A fresh local review is safe.
+                    with self.store.edit() as state:state['pending'][key]['state']='pending'
+                    raise
                 txid=rpc(self.core,'sendrawtransaction',[final['hex']]);result={'request_hash':key,'status':'broadcast','txid':txid}
                 self.store.queue('broadcast_result',result)
-                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time(),'proposal':{k:v for k,v in p.items() if k not in ('review','created')},'artifact_psbt':p['psbt'],'artifact_txid':txid};state['pending'].pop(key,None)
+                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time(),'proposal':{k:v for k,v in p.items() if k not in ('review','created','created_monotonic')},'artifact_psbt':p['psbt'],'artifact_txid':txid};state['pending'].pop(key,None)
                 return {'txid':txid,'message':'Locally authorised transaction broadcast.'}
             if p['kind']=='sign_psbt_partial':
                 with self.store.edit() as state:
@@ -205,6 +228,7 @@ class WalletOps:
             info={};sign_attempted=False
             try:
                 info=rpc(self.core,'getwalletinfo',[],p['wallet'])
+                require_current_review(p)
                 if 'unlocked_until' in info:rpc(self.core,'walletpassphrase',[password,30],p['wallet'])
                 signing_psbt=p['psbt']
                 for record in self.store.read()['vaults'].values():
@@ -217,6 +241,7 @@ class WalletOps:
                 known_shared=inventory(self.core)
                 monitors={record['monitor_wallet'] for vin in current['inputs'] for record in matches(self.core,self.store,vin['address'],known_shared) if p['wallet'] in record['wallets']}
                 for name in sorted(monitors):signing_psbt=rpc(self.core,'walletprocesspsbt',{'psbt':signing_psbt,'sign':False,'bip32derivs':True,'finalize':False},name)['psbt']
+                require_current_review(p)
                 sign_attempted=True
                 signed=rpc(self.core,'walletprocesspsbt',{'psbt':signing_psbt,'sign':True,'bip32derivs':True,'finalize':False},p['wallet'])
             except Exception:
@@ -232,5 +257,5 @@ class WalletOps:
             if after['tx_hash']!=current['tx_hash']:raise ValueError('Core changed the approved transaction; it was not broadcast.')
             if p['kind']=='sign_psbt_partial':
                 self.store.queue('partial_sign_result',{'request_hash':key,'status':'signed','psbt':signed_psbt})
-                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time(),'proposal':{k:v for k,v in p.items() if k not in ('review','created')},'artifact_psbt':signed_psbt};state['pending'].pop(key,None)
+                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time(),'proposal':{k:v for k,v in p.items() if k not in ('review','created','created_monotonic')},'artifact_psbt':signed_psbt};state['pending'].pop(key,None)
                 return {'queued':True,'message':'Approved signatures returned to Dashboard. No transaction was broadcast.'}

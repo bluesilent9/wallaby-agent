@@ -15,8 +15,11 @@ class LocalWallets:
         raw=rpc(self.core,'listdescriptors',[False],name)
         from managed_accounts import classify
         store=getattr(self.core,'managed_store',None)
-        managed=classify(store.read() if store is not None else {},name,raw)
-        return {'managed':managed,'wallet':name,'sats':str(total),'private_keys_enabled':info.get('private_keys_enabled') is True,'encrypted':'unlocked_until' in info,'scanning':bool(info.get('scanning')),'format':info.get('format'),'storage':info.get('wallaby_storage','node'),'balances':balances,'policy':digest(rpc(self.core,'listdescriptors',[False],name))}
+        # A blank local Core wallet is valid but has no policy to classify.
+        # Keep the remote public-inventory validator strict.
+        managed=classify(store.read() if store is not None else {},name,raw) if raw.get('descriptors') else None
+        from wallet_traits import local_traits
+        return {'traits':local_traits(self.core,[name],raw=raw),'managed':managed,'wallet':name,'sats':str(total),'private_keys_enabled':info.get('private_keys_enabled') is True,'encrypted':'unlocked_until' in info,'scanning':bool(info.get('scanning')),'format':info.get('format'),'storage':info.get('wallaby_storage','node'),'balances':balances,'policy':digest(rpc(self.core,'listdescriptors',[False],name))}
     def source(self,name):
         source=wallet_deletion.target(self.core,name,allow_extinct=True)
         if Path(source['path']).parent not in wallet_deletion.bases():raise ValueError('This wallet uses a custom or RAM-only location. Manage it at its source; it cannot be deleted from these cards.')
@@ -31,7 +34,7 @@ class LocalWallets:
                     self.source(name)
                     if facts['format']!='sqlite' or facts['scanning']:raise ValueError('Wait for wallet scanning to finish. Only standard SQLite wallet directories can be deleted here.')
                 except ValueError as e:reason=str(e)
-                rows.append({k:facts[k] for k in ('wallet','sats','private_keys_enabled')}|{'deletable':not reason,'reason':reason,**({'managed':facts['managed']} if facts.get('managed') else {})})
+                rows.append({k:facts[k] for k in ('wallet','sats','private_keys_enabled','traits')}|{'deletable':not reason,'reason':reason,**({'managed':facts['managed']} if facts.get('managed') else {})})
             except ValueError:rows.append({'wallet':name,'sats':None,'private_keys_enabled':None,'deletable':False,'reason':'Core could not confirm this wallet. Refresh after its current operation finishes.'})
         return {'wallets':rows}
     def review(self,name):

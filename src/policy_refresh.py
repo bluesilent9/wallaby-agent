@@ -170,3 +170,4 @@ def verify_output_policies(ops,p,review):
         matches=[o for o in review['outputs'] if o['script']==script and o['sats']==row['amount_sats'] and o['n'] not in used]
         if len(matches)!=1:raise ValueError('A bound vault output script or amount was changed, removed or duplicated.')
         out=matches[0];used.add(out['n']);parsed=restricted(row['descriptor']);out['vault_policy']={k:parsed[k] for k in ('height','threshold','total')}|{'policy_hash':row['policy_hash'],'index':row['index']}
+        out.setdefault('traits',{}).update(vault=True,multisig=parsed['threshold']>1)

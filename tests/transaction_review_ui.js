@@ -1,0 +1,23 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert'),path=require('path');
+class E{constructor(tag,props={},...children){this.tag=tag;this.props=props;this.children=children.flat().filter(x=>x!=null);this.classList={add:v=>this.props.class=(this.props.class||'')+' '+v};}append(...c){this.children.push(...c);}prepend(...c){this.children.unshift(...c);}replaceChildren(...c){this.children=c;}setAttribute(k,v){this.props[k]=v;}addEventListener(){}}
+const all=n=>n instanceof E?[n,...n.children.flatMap(all)]:[],text=n=>n instanceof E?(n.textContent||'')+' '+n.children.map(text).join(' '):String(n),nodes=new Map(),get=id=>{if(!nodes.has(id))nodes.set(id,new E('div'));return nodes.get(id);};
+let now=0,id=0,requests=0,signs=0,serverExpired=false;const intervals=new Map(),calls=[];
+const c={window:{performance:{now:()=>now},setInterval:(f,ms)=>{assert.equal(ms,1000);intervals.set(++id,f);return id;},clearInterval:k=>intervals.delete(k)},$:get,initialPage:'authorise',document:{querySelectorAll:()=>[],createElementNS:(_,tag)=>new E(tag)},notify(){},refresh:async()=>{},api:async(route,body)=>{calls.push(route);if(route==='authorise/review'){requests++;return{kind:'sign_psbt_partial',id:'tx',review_seconds_remaining:600,review:{wallet:'Sender',inputs:[{wallets:['Sender'],sats:'10000',address:'input',traits:{vault:true,multisig:true,watch:true,disc:true}}],outputs:[{wallets:[],sats:'9000',address:'unknown',traits:{}}],fee_sats:'1000',locktime:0,fee_review:{requires_ack:false}}};}if(route==='authorise/sign'){signs++;if(serverExpired)throw Error('The ten-minute transaction review period has expired. Review this transaction again.');return{message:'Signed'};}throw Error(route);}};
+vm.createContext(c);for(const file of ['transaction_review.js','workspace.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../web',file),'utf8'),c);
+c.el=(...a)=>new E(...a);c.button=(label,klass,action)=>{const n=new E('button',{class:klass},label);n.action=action;return n;};c.denyButton=()=>new E('button',{},'Deny');c.showPage=()=>{};
+const tick=()=>[...intervals.values()].forEach(f=>f());
+(async()=>{
+ c.state={pending:[{id:'tx',kind:'sign_psbt_partial',state:'pending'}],denied:[],setups:[]};vm.runInContext('workspace=state',c);await vm.runInContext('reviewApproval("tx")',c);
+ let panel=get('#approval-review');assert(text(panel).includes('10:00'));const cards=all(panel).filter(n=>n.tag==='article'),icons=n=>all(n).filter(x=>x.props['data-wallet-icon']).map(x=>x.props['data-wallet-icon']);
+ assert.deepEqual(icons(cards[0]),['wallet','vault','multisig','watch','disc']);assert.deepEqual(icons(cards[1]),['wallet']);assert.deepEqual(icons(cards[2]),[]);assert(text(cards[1]).includes('Unknown wallet'));
+ now=599000;tick();assert(text(panel).includes('00:01'));now=600000;tick();assert(text(panel).includes('Review expired'));assert.equal(signs,0);assert.equal(intervals.size,0);
+ let sign=all(panel).find(n=>n.tag==='button'&&text(n).includes('Sign and return'));assert(sign.disabled);await sign.action();assert.equal(signs,0);
+ await all(panel).find(n=>n.tag==='button'&&text(n).trim()==='Review again').action();assert.equal(requests,2);assert(text(panel).includes('10:00'));
+ // A server-side expiry during native password entry remains readable and reviewable.
+ serverExpired=true;sign=all(panel).find(n=>n.tag==='button'&&text(n).includes('Sign and return'));await assert.rejects(sign.action(),/ten-minute/);assert(sign.disabled);assert(text(panel).includes('Review this transaction again'));assert.equal(intervals.size,0);
+ serverExpired=false;await all(panel).find(n=>n.tag==='button'&&text(n).trim()==='Review again').action();await all(panel).find(n=>n.tag==='button'&&text(n).includes('Sign and return')).action();assert.equal(signs,2);assert.equal(intervals.size,0);assert.equal(panel.children.length,0);
+ // Late responses cannot create an extra ten-minute window; repeated reviews keep one timer.
+ const box=new E('section'),b=new E('button');now=30000;c.window.armTransactionReview({seconds:550,started:0,box,sign:b,valid:()=>true,reviewAgain(){}});assert(text(box).includes('08:40'));assert.equal(intervals.size,1);c.window.clearTransactionReviewTimer();
+ await vm.runInContext('reviewApproval("tx")',c);assert.equal(intervals.size,1);c.state.pending=[];vm.runInContext('reconcileApprovalReview()',c);assert.equal(intervals.size,0);
+ console.log('Transaction timer: exact expiry, disabled stale action, no automatic signature, server expiry recovery, re-review, successful signing cleanup, conservative network timing and locally sourced icon order passed.');
+})().catch(e=>{console.error(e);process.exitCode=1;});

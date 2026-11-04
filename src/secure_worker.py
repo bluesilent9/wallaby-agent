@@ -463,12 +463,13 @@ class Workspace:
                 key,action,fee_ack=args
                 if type(fee_ack) is not bool:raise ValueError('Invalid local fee acknowledgement.')
                 if action not in ('partial','broadcast'):raise ValueError('Vault Builder has moved to Dashboard. Only reviewed transaction signing or broadcast is available.')
-                prepared=self.ops.prepared.get(key,{})
-                if not prepared:raise ValueError('Review this transaction again before authorising it.')
+                from wallet_ops import require_current_review
+                prepared=require_current_review(self.ops.prepared.get(key))
                 if prepared['review']['fee_review']['requires_ack'] and not fee_ack:raise ValueError('Acknowledge the high fee locally before entering a wallet passphrase.')
                 info=__import__('wallet_ops').rpc(self.ops.core,'getwalletinfo',[],prepared['wallet']) if action=='partial' else {}
                 encrypted='unlocked_until' in info
                 prompt='Bitcoin Core wallet passphrase · sign the reviewed transaction\nCore wallet: '+json.dumps(info.get('walletname',''),ensure_ascii=False)+'\nLocal signing account: '+json.dumps(prepared['wallet'],ensure_ascii=False)
+                require_current_review(prepared)
                 password=secret_dialog(prompt,self.environment) if encrypted else ''
                 try:return self.ops.sign(key,password,action,fee_ack)
                 finally:password=None
