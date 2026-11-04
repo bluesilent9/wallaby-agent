@@ -1,4 +1,18 @@
-# Build 41 validation
+# Build 42 validation
+
+IPv6-specific checks cover real HTTP requests over `::1`, exclusive listener
+behaviour, refusal of IPv4 connections to both the webpage and offline Core,
+strict origin checks, and migration of a custom-named Wallaby desktop shortcut.
+Services and protected-page assets share the IPv6 server implementation.
+Additional API/security, wallet routing, logging and JavaScript suites run
+alongside the independent three-Agent combined multisig wallet tests.
+
+The package is extracted and its installed source, web assets, documentation and
+helpers compared byte for byte with this source. Installed desktop launchers
+and service address-family restrictions are checked separately. Target-machine
+Qt, systemd and real network testing remains necessary.
+
+# Inherited combined-wallet regression coverage
 
 The focused regression suite covers 95 Python checks, including real isolated
 Bitcoin Core 31 nodes, plus 17 JavaScript interface suites. The development test

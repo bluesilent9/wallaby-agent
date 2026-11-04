@@ -1,3 +1,4 @@
+from loopback import IPv6HTTPServer
 """Regression for actual Core wallet endpoint identity, not a reimplemented proxy."""
 import json,sys,tempfile,threading,time,unittest
 from pathlib import Path
@@ -21,7 +22,7 @@ class WalletRouting(unittest.TestCase):
         if name in names:result['result']={'walletname':name}
         else:result['error']={'code':-18,'message':'Requested wallet does not exist or is not loaded'}
         data=json.dumps(result).encode();self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
-    server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=threading.Thread(target=server.serve_forever);thread.start()
+    server=IPv6HTTPServer(('::1',0),Handler);thread=threading.Thread(target=server.serve_forever);thread.start()
     try:
       with tempfile.TemporaryDirectory() as d:
         cookie=Path(d)/'.cookie';cookie.write_text('fixture:fixture');core=Core({'cookie':str(cookie),'rpc_port':server.server_port})

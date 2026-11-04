@@ -1,3 +1,4 @@
+from loopback import IPv6HTTPServer
 """Real V155 registry, HTTP handler and broker with a simulated local Core."""
 import http.server,json,os,re,sys,tempfile,threading,time,types,unittest
 from pathlib import Path
@@ -38,7 +39,7 @@ class DashboardIntegration(unittest.TestCase):
  def test_real_hub_registration_rpc_decimal_and_disconnect(self):
   with tempfile.TemporaryDirectory() as root:
    registry=NodeRegistry(Path(root)/'dashboard.cfg');hub=create_agent_server(registry,port=0,ipv6=True,ipv4=False);hub.start()
-   core=http.server.ThreadingHTTPServer(('127.0.0.1',0),FakeCore);ct=threading.Thread(target=core.serve_forever);ct.start();cookie=Path(root)/'.cookie';cookie.write_text('__cookie__:TEST_ONLY')
+   core=IPv6HTTPServer(('::1',0),FakeCore);ct=threading.Thread(target=core.serve_forever);ct.start();cookie=Path(root)/'.cookie';cookie.write_text('__cookie__:TEST_ONLY')
    config=Config().values;config['cookie']=str(cookie);config['rpc_port']=core.server_port
    stop=threading.Event();statuses=[];errors=[];client=NodeClient(config,hub.server_port,stop,lambda *s:statuses.append(s))
    def run():

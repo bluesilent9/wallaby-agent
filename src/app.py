@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 """Wallaby Agent V2 entry point and authenticated loopback configuration page."""
 import argparse, copy, fcntl, hmac, json, os, secrets, shutil, subprocess, sys, threading, time, webbrowser
-from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from loopback import IPv6HTTPServer, Connection, origin
 from pathlib import Path
 from urllib.parse import urlsplit,parse_qs
 from capabilities import node_support,require_node,NodeUnavailable
@@ -99,7 +100,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers();self.wfile.write(raw)
     def allowed(self,auth=False):
         authority=self.headers.get('Host','')
-        if authority not in (f'127.0.0.1:{self.server.server_port}',f'localhost:{self.server.server_port}'):return False
+        if authority!=f'[::1]:{self.server.server_port}':return False
         origin=self.headers.get('Origin')
         if origin and origin!='http://'+authority:return False
         if self.headers.get('Sec-Fetch-Site') in ('cross-site','same-site'):return False
@@ -116,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
             from activity_log import DiagnosticLog
             try:return self.reply(200,DiagnosticLog().text().encode('utf-8'),'text/plain; charset=utf-8')
             except (OSError,ValueError):return self.reply(500,{'error':'Diagnostic log storage is unavailable. Check its ownership and permissions.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev41'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev42'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
@@ -303,15 +304,15 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError,KeyError):self.reply(400,{'error':'Invalid request or expired review. Refresh this page and review again.'})
         except Exception:self.reply(503,{'error':'The wallet operation failed or its outcome is uncertain. Check Core and review again; it was not automatically replayed.' if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/protected/')) else 'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
 
-class Server(ThreadingHTTPServer):
+class Server(IPv6HTTPServer):
     daemon_threads=True
     def get_request(self):
         s,a=super().get_request();s.settimeout(10);return s,a
 
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    server=Server(('127.0.0.1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev41'}
+    server=Server(('::1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev42'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -319,6 +320,8 @@ def serve(preview=False):
 
 def bootstrap():
     retire_jellyfin()
+    from desktop_links import repair
+    repair()
     from protected_memory import required
     if required() and Config().values['enabled']['node']:
         from secure_bridge import ensure_running
@@ -329,7 +332,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev41':
+    if installed!='2.0.0~dev42':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -339,18 +342,18 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev41') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev42') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)
             import http.client
-            conn=http.client.HTTPConnection('127.0.0.1',d['port'],timeout=1);conn.request('GET','/api/health',headers={'Authorization':'Bearer '+d['token']});r=conn.getresponse();r.read();conn.close()
+            conn=Connection(d['port'],timeout=1);conn.request('GET','/api/health',headers={'Authorization':'Bearer '+d['token']});r=conn.getresponse();r.read();conn.close()
             if r.status==200:
                 from protected_memory import required
                 if required() and page!='services':
                     from secure_bridge import call
                     call('ui.open',page);return
-                webbrowser.open(f"http://127.0.0.1:{d['port']}/?page="+page);return
+                webbrowser.open(origin(d['port'])+"/?page="+page);return
         except (OSError,ValueError):pass
         time.sleep(.1)
     raise RuntimeError('Configuration service did not start.')

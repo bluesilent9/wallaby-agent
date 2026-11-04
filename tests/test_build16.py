@@ -40,8 +40,8 @@ class AssetsAndViewer(unittest.TestCase):
   try:
    for name in re.findall(r'<script src="/([^"]+)"', (ROOT/'web/index.html').read_text()):
     with self.subTest(asset=name):
-     conn=http.client.HTTPConnection('127.0.0.1',fixture.server.server_port)
-     conn.request('GET','/'+name,headers={'Host':'127.0.0.1:'+str(fixture.server.server_port)})
+     conn=http.client.HTTPConnection('::1',fixture.server.server_port)
+     conn.request('GET','/'+name,headers={'Host':'[::1]:'+str(fixture.server.server_port)})
      response=conn.getresponse();data=response.read();conn.close()
      self.assertEqual(response.status,200);self.assertEqual(data,(ROOT/'web'/name).read_bytes())
   finally:fixture.tearDown()

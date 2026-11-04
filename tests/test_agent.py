@@ -84,10 +84,10 @@ class RPCTests(unittest.TestCase):
 class WebSecurityTests(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.env=patch.dict(os.environ,{'XDG_CONFIG_HOME':self.temp.name,'XDG_RUNTIME_DIR':self.temp.name});self.env.start()
-  self.server=Server(('127.0.0.1',0),Handler);self.server.token='secret';self.server.config_lock=threading.Lock();self.server.preview=True;self.thread=threading.Thread(target=self.server.serve_forever);self.thread.start()
+  self.server=Server(('::1',0),Handler);self.server.token='secret';self.server.config_lock=threading.Lock();self.server.preview=True;self.thread=threading.Thread(target=self.server.serve_forever);self.thread.start()
  def tearDown(self):self.server.shutdown();self.server.server_close();self.thread.join();self.env.stop();self.temp.cleanup()
  def call(self,path,headers=None,body=None):
-  c=http.client.HTTPConnection('127.0.0.1',self.server.server_port);c.request('POST' if body is not None else 'GET',path,body,headers or {});r=c.getresponse();data=r.read();c.close();return r.status,json.loads(data) if path.startswith('/api') else data
+  c=http.client.HTTPConnection('::1',self.server.server_port);c.request('POST' if body is not None else 'GET',path,body,headers or {});r=c.getresponse();data=r.read();c.close();return r.status,json.loads(data) if path.startswith('/api') else data
  def test_retired_vault_builder_assets_are_not_served(self):
   self.assertEqual(self.call('/timezones.json')[0],404)
   self.assertEqual(self.call('/api/wallets',{'Authorization':'Bearer secret'})[0],404)

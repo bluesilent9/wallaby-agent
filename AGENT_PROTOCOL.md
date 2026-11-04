@@ -13,7 +13,7 @@ Dashboard is the hub. Wallaby Agent initiates every connection through its autho
 ## Transport
 
 - Dashboard browser: **38951**, unchanged.
-- Agent HTTP/JSON: **56443**, bound to IPv4 `127.0.0.1` and IPv6 `::1` by default. `--agent-port` changes it; `--ipv4-only` / `--ipv6-only` apply to both listeners. Client-side SSH forwarding ports may differ.
+- Dashboard Agent HTTP/JSON service: **56443**, reached through IPv6 SSH forwarding. The Agent’s own configuration and protected web interfaces use separate dynamic ports bound exclusively to `::1`, with URLs `http://[::1]:PORT/`. No alternate address family, hostname alias or fallback is accepted.
 - These are separate loopback listeners. SSH authenticates and restricts access; the browser and agent endpoints are not public Internet services. Agents do not use browser session credentials. Core RPC credentials remain on the node computer and must never be included in a hub message.
 - POST headers: `Content-Type: application/json`, one Content-Length, `X-Wallaby-Agent: 1`. After registration add `Authorization: Bearer <connection_token>`. Tokens are temporary, not entered by users, never URL parameters, logs or profile data.
 - Control requests: at most 4,096 bytes. `/agent/v1/result`: at most 16 MiB plus 4 KiB of envelope space; the decoded result/error has its own 16 MiB limit. Oversized results must be narrowed/paginated using Core's method parameters. No chunks are silently discarded.

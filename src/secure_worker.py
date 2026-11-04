@@ -259,9 +259,9 @@ class Workspace:
                 def allowed(self,auth=False):
                     import hmac
                     return hmac.compare_digest(self.headers.get('X-Wallaby-Protected-View',''),owner.view_token) and super().allowed(auth)
-            self.view_token=secrets.token_urlsafe(32);server=Server(('127.0.0.1',0),ProtectedHandler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=False;self.view_server=server
+            self.view_token=secrets.token_urlsafe(32);server=Server(('::1',0),ProtectedHandler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=False;self.view_server=server
             threading.Thread(target=server.serve_forever,daemon=True).start()
-        config={'origin':'http://127.0.0.1:'+str(self.view_server.server_port),'page':page,'token':self.view_token}
+        config={'origin':'http://[::1]:'+str(self.view_server.server_port),'page':page,'token':self.view_token}
         env={**os.environ,**self.environment};process=__import__('subprocess').Popen(['/usr/bin/python3','-I','-B',str(Path(__file__).with_name('protected_viewer.py'))],stdin=__import__('subprocess').PIPE,stdout=__import__('subprocess').DEVNULL,stderr=__import__('subprocess').DEVNULL,env=env)
         process.stdin.write(json.dumps(config).encode()+b'\n');process.stdin.close();self.viewers=[p for p in self.viewers if p.poll() is None]+[process];self.window_required=True
         return {'message':'Opened the protected Bitcoin workspace.'}

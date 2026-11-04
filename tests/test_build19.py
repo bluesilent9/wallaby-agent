@@ -187,11 +187,11 @@ class ContractAndRPCTests(unittest.TestCase):
   import http.client,threading
   from app import Server,Handler
   with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'XDG_CONFIG_HOME':tmp}):
-   server=Server(('127.0.0.1',0),Handler);server.token='fixture-token';thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+   server=Server(('::1',0),Handler);server.token='fixture-token';thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
    try:
     log=DiagnosticLog();log.merge([row('service test')])
     def request(token):
-     connection=http.client.HTTPConnection('127.0.0.1',server.server_port);connection.request('GET','/api/logs',headers={'Authorization':'Bearer '+token});r=connection.getresponse();result=(r.status,r.getheader('Content-Type'),r.read());connection.close();return result
+     connection=http.client.HTTPConnection('::1',server.server_port);connection.request('GET','/api/logs',headers={'Authorization':'Bearer '+token});r=connection.getresponse();result=(r.status,r.getheader('Content-Type'),r.read());connection.close();return result
     self.assertEqual(request('wrong')[0],403);result=request('fixture-token');self.assertEqual(result[0],200);self.assertIn('text/plain',result[1]);self.assertIn(b'service test',result[2])
     with patch('protected_memory.inside',return_value=True):self.assertEqual(request('fixture-token')[0],403)
    finally:server.shutdown();server.server_close();thread.join()

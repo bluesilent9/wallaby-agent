@@ -86,7 +86,7 @@ def local_private_descriptors(core,name):
     """Fixed internal read following native local consent; no public dispatcher."""
     from node_client import http_json
     from urllib.parse import quote
-    result=http_json(core.config['rpc_port'],'/wallet/'+quote(name,safe=''),{'jsonrpc':'2.0','id':'private-local-refresh','method':'listdescriptors','params':[True]},auth=Path(core.config['cookie']).read_text().strip(),host='127.0.0.1',response_limit=1024*1024)
+    result=http_json(core.config['rpc_port'],'/wallet/'+quote(name,safe=''),{'jsonrpc':'2.0','id':'private-local-refresh','method':'listdescriptors','params':[True]},auth=Path(core.config['cookie']).read_text().strip(),response_limit=1024*1024)
     if not isinstance(result,dict) or result.get('error') or not isinstance(result.get('result'),dict):raise ValueError('Core could not read the unlocked local signing policy. No private diagnostic was exported.')
     return result['result']['descriptors']
 

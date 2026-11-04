@@ -41,7 +41,7 @@ def describe(stage, error):
     if isinstance(status, int):
         return ConnectionFailure(stage, 'http_status', f'{label} returned HTTP {status}. Check the service on the configured port.')
     if isinstance(error, ConnectionRefusedError):
-        advice = ('Enable RPC, restart Bitcoin Core, and check the configured local RPC port.'
+        advice = ('Enable RPC on [::1], restart Bitcoin Core, and check the configured local RPC port. The Agent requires IPv6 loopback RPC.'
                   if stage == 'rpc' else 'Check the server Agent listener on [::1]:56443 and SSH forwarding permissions.')
         return ConnectionFailure(stage, 'refused', f'{label} refused the connection. {advice}')
     if isinstance(error, (TimeoutError, socket.timeout)):

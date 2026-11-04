@@ -106,4 +106,4 @@ class AssetRoutes(unittest.TestCase):
   f=test_build13.TunnelOnlyAPI();f.setUp();self.addCleanup(f.tearDown)
   html=(Path(__file__).resolve().parents[1]/'web/index.html').read_text()
   for path in re.findall(r'<script src="([^"]+)"',html):
-   conn=http.client.HTTPConnection('127.0.0.1',f.server.server_port);conn.request('GET',path);response=conn.getresponse();raw=response.read();self.assertEqual(response.status,200,path);self.assertIn('javascript',response.getheader('Content-Type'));self.assertTrue(raw);conn.close()
+   conn=http.client.HTTPConnection('::1',f.server.server_port);conn.request('GET',path);response=conn.getresponse();raw=response.read();self.assertEqual(response.status,200,path);self.assertIn('javascript',response.getheader('Content-Type'));self.assertTrue(raw);conn.close()

@@ -4,6 +4,7 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.parse import quote
 from agent_rpc import METHODS,clean_json,request,MAX_RESULT_BYTES,PublicDataFailure
+from loopback import Connection
 from diagnostics import ConnectionFailure,describe
 
 LIMIT=16*1024*1024+4096
@@ -29,12 +30,12 @@ def exchange_http_reason(data):
     if isinstance(message,str) and re.fullmatch(r'Unsupported Agent capabilities: [a-z0-9_]{1,64}(?:, [a-z0-9_]{1,64}){0,15}\. Dashboard V1 Build [0-9]{1,5}; Agent [0-9A-Za-z.+~_-]{1,64}\.',message):return 'capabilities'
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
-def http_json(port,path,body=None,token=None,timeout=30,auth=None,host='::1',response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev41'}
+def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit=LIMIT):
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev42'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
-    conn=http.client.HTTPConnection(host,port,timeout=timeout);response=None
+    conn=Connection(port,timeout=timeout);response=None
     try:
         conn.request('GET' if raw is None else 'POST',path,raw,headers)
         response=conn.getresponse();data=response.read(response_limit+1)
@@ -87,7 +88,7 @@ class Core:
             if wallet is not None:raise ValueError('Mempool snapshots do not use wallet endpoints.')
             from mempool_snapshot import Snapshot,LOCAL_BYTES
             def fetch():
-                response=http_json(self.config['rpc_port'],'/',{'jsonrpc':'2.0','id':ident,'method':'getrawmempool','params':[True]},timeout=timeout,auth=cookie,host='127.0.0.1',response_limit=LOCAL_BYTES)
+                response=http_json(self.config['rpc_port'],'/',{'jsonrpc':'2.0','id':ident,'method':'getrawmempool','params':[True]},timeout=timeout,auth=cookie,response_limit=LOCAL_BYTES)
                 if not isinstance(response,dict) or response.get('id')!=ident:raise ConnectionFailure('rpc','response_id','Core returned an unexpected mempool response ID.')
                 if response.get('error') is not None:raise PublicDataFailure('mempool_core','Core refused its public mempool snapshot. Check node readiness.')
                 return response.get('result')
@@ -95,7 +96,7 @@ class Core:
                 value=self.mempool.call(params,fetch);value,_=clean_json(value,MAX_RESULT_BYTES);return {'result':value}
             except Exception as error:raise describe('rpc',error) from None
         path='/' if wallet is None else '/wallet/'+quote(wallet,safe='')
-        try:response=http_json(self.config['rpc_port'],path,{'jsonrpc':'2.0','id':ident,'method':method,'params':params},timeout=timeout,auth=cookie,host='127.0.0.1')
+        try:response=http_json(self.config['rpc_port'],path,{'jsonrpc':'2.0','id':ident,'method':method,'params':params},timeout=timeout,auth=cookie)
         except Exception as error:raise describe('rpc',error) from None
         if not isinstance(response,dict) or response.get('id')!=ident:raise ConnectionFailure('rpc','response_id','Bitcoin Core returned an unexpected RPC response ID. Check the local RPC port and service.')
         if response.get('error') is not None:return {'error':response['error']}

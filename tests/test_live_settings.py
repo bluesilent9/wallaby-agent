@@ -8,13 +8,13 @@ from configuration import Config
 class LiveSettings(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.env=patch.dict(os.environ,{'XDG_CONFIG_HOME':self.temp.name,'XDG_RUNTIME_DIR':self.temp.name});self.env.start()
-  self.server=Server(('127.0.0.1',0),Handler);self.server.token='test-token';self.server.config_lock=threading.Lock();self.server.preview=True
+  self.server=Server(('::1',0),Handler);self.server.token='test-token';self.server.config_lock=threading.Lock();self.server.preview=True
   self.thread=threading.Thread(target=self.server.serve_forever);self.thread.start()
  def tearDown(self):self.server.shutdown();self.server.server_close();self.thread.join();self.env.stop();self.temp.cleanup()
  def call(self,path,headers=None,body=None,host=None):
-  h={'Host':host or '127.0.0.1:'+str(self.server.server_port),**(headers or {})};raw=None if body is None else json.dumps(body)
+  h={'Host':host or '[::1]:'+str(self.server.server_port),**(headers or {})};raw=None if body is None else json.dumps(body)
   if body is not None:h['Content-Type']='application/json'
-  c=http.client.HTTPConnection('127.0.0.1',self.server.server_port);c.request('GET' if body is None else 'POST',path,raw,h);r=c.getresponse();data=r.read();c.close();return r.status,json.loads(data) if path.startswith('/api/') else data
+  c=http.client.HTTPConnection('::1',self.server.server_port);c.request('GET' if body is None else 'POST',path,raw,h);r=c.getresponse();data=r.read();c.close();return r.status,json.loads(data) if path.startswith('/api/') else data
  def test_fresh_tab_without_fragment_bootstraps_local_session(self):
   headers={'Sec-Fetch-Site':'same-origin','X-Wallaby-UI':'1'}
   status,r=self.call('/api/session',headers);self.assertEqual(status,200)
@@ -25,7 +25,7 @@ class LiveSettings(unittest.TestCase):
   self.assertEqual(self.call('/api/state')[0],403)
  def test_localhost_alias_and_new_tab_authorise_route_work(self):
   self.assertEqual(self.call('/?page=authorise')[0],200)
-  self.assertEqual(self.call('/api/session',{'X-Wallaby-UI':'1','Sec-Fetch-Site':'same-origin'},host='localhost:'+str(self.server.server_port))[0],200)
+  self.assertEqual(self.call('/api/session',{'X-Wallaby-UI':'1','Sec-Fetch-Site':'same-origin'},host='localhost:'+str(self.server.server_port))[0],403)
  def test_partial_live_edits_preserve_other_fields_and_file_reload(self):
   headers={'Authorization':'Bearer test-token'}
   for patchdata in ({'hostname':'calder.vip'},{'ssh_user':'dave-laptop'},{'ssh_port':2222}):self.assertEqual(self.call('/api/patch',headers,patchdata)[0],200)
@@ -47,15 +47,15 @@ class LiveSettings(unittest.TestCase):
   root=Path(self.temp.name)/'wallaby-agent';root.mkdir(exist_ok=True)
   with patch('app.retire_jellyfin'),patch('app.ctl') as ctl:
    bootstrap();self.assertIn(('restart','wallaby-agent-monitor.service'),[c.args for c in ctl.call_args_list])
-  (root/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev41'}))
+  (root/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev42'}))
   with patch('app.retire_jellyfin'),patch('app.ctl') as ctl:
    bootstrap();self.assertNotIn(('restart','wallaby-agent-monitor.service'),[c.args for c in ctl.call_args_list])
  def test_old_running_ui_is_restarted_and_new_launch_url_contains_no_secret(self):
   from app import launch
   root=Path(self.temp.name)/'wallaby-agent';root.mkdir(exist_ok=True);(root/'ui.json').write_text(json.dumps({'port':1234,'token':'old-test-token','pid':123,'version':'2.0.0~dev5'}))
-  with patch('app.bootstrap'),patch('app.os.kill'),patch('app.ctl') as ctl,patch('http.client.HTTPConnection') as conn,patch('app.webbrowser.open') as opened:
+  with patch('app.bootstrap'),patch('app.os.kill'),patch('app.ctl') as ctl,patch('app.Connection') as conn,patch('app.webbrowser.open') as opened:
    conn.return_value.getresponse.return_value.status=200;launch('authorise')
-  self.assertIn(('restart','wallaby-agent-ui.service'),[c.args for c in ctl.call_args_list]);self.assertEqual(opened.call_args.args[0],'http://127.0.0.1:1234/?page=authorise')
+  self.assertIn(('restart','wallaby-agent-ui.service'),[c.args for c in ctl.call_args_list]);self.assertEqual(opened.call_args.args[0],'http://[::1]:1234/?page=authorise')
  def test_external_rpc_edit_invalidates_old_review_and_local_rpc_client(self):
   from app import wallet_ops
   a=wallet_ops(self.server);a.prepared['old-review']={'test':True};v=copy.deepcopy(Config().values);v['rpc_port']=18332;Config().save(v)

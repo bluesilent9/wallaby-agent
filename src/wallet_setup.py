@@ -32,8 +32,9 @@ class MemoryCore:
         from node_client import Core
         self.root=Path(root);self.root.mkdir(mode=0o700,parents=True);self.process=None
         if not Path(binary).is_file() or not os.access(binary,os.X_OK):raise LocalActionFailure('core_executable_missing','A usable Bitcoin Core bitcoind executable is required for protected wallet creation. Install a compatible native executable; no disk fallback was used.')
-        with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
-        args=[binary,'-datadir='+str(self.root),'-conf=/dev/null','-settings=0','-server=1','-listen=0','-connect=0','-dnsseed=0','-discover=0','-networkactive=0','-debuglogfile=0','-printtoconsole=1','-dbcache=16','-par=1','-rpcport='+str(port)]
+        with socket.socket(socket.AF_INET6,socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,1);s.bind(('::1',0));port=s.getsockname()[1]
+        args=[binary,'-datadir='+str(self.root),'-conf=/dev/null','-settings=0','-server=1','-listen=0','-connect=0','-dnsseed=0','-discover=0','-networkactive=0','-debuglogfile=0','-printtoconsole=1','-dbcache=16','-par=1','-rpcbind=[::1]','-rpcallowip=::1','-onlynet=ipv6','-rpcport='+str(port)]
         if chain!='main':args.append('-'+{'test':'testnet','signet':'signet','regtest':'regtest'}[chain])
         from core_startup import StartupOutput
         try:self.process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
@@ -59,7 +60,7 @@ class MemoryCore:
         if not self.process or self.process.poll() is not None:raise ValueError('The offline signing workspace is unavailable.')
         cookie=Path(self.core.config['cookie'])
         if not cookie.resolve().is_relative_to(self.root.resolve()):raise ValueError('Offline Core credentials are outside its protected directory.')
-        result=http_json(self.core.config['rpc_port'],'/wallet/'+quote(name,safe=''),{'jsonrpc':'2.0','id':'private-local-policy','method':'listdescriptors','params':[True]},auth=cookie.read_text().strip(),host='127.0.0.1',response_limit=1024*1024)
+        result=http_json(self.core.config['rpc_port'],'/wallet/'+quote(name,safe=''),{'jsonrpc':'2.0','id':'private-local-policy','method':'listdescriptors','params':[True]},auth=cookie.read_text().strip(),response_limit=1024*1024)
         if not isinstance(result,dict) or result.get('error') or not isinstance(result.get('result'),dict):raise ValueError('Offline Core could not read the unlocked signing policy. No private diagnostic was exported.')
         return result['result']['descriptors']
     def close(self):

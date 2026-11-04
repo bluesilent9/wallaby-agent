@@ -1,3 +1,4 @@
+from loopback import IPv6HTTPServer
 """Protected-close lease regression, recovery gate and public mempool paging."""
 import copy,http.client,json,os,tempfile,threading,time,unittest
 from decimal import Decimal
@@ -111,7 +112,7 @@ class LargeLocalHTTP(unittest.TestCase):
     request=json.loads(self.rfile.read(int(self.headers['Content-Length'])));body=json.dumps({'jsonrpc':'2.0','id':request['id'],'result':payload}).encode();self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers()
     try:self.wfile.write(body)
     except (BrokenPipeError,ConnectionResetError):pass
-  server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+  server=IPv6HTTPServer(('::1',0),Handler);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
   try:
    with tempfile.TemporaryDirectory() as tmp:
     cookie=Path(tmp)/'.cookie';cookie.write_text('fixture:never-log-credential');core=Core({'rpc_port':server.server_port,'cookie':str(cookie)})
