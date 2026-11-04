@@ -1,5 +1,5 @@
 """One authenticated IPv6 OpenSSH master; services add/cancel multiplexed forwards."""
-import errno, hashlib, json, os, socket, subprocess, time, threading, uuid
+import errno, hashlib, json, os, socket, shlex, subprocess, time, threading, uuid
 from collections import deque
 from pathlib import Path
 from configuration import SERVICES,hostname
@@ -15,6 +15,8 @@ def ssh_command(config,kind,local_port,control):
           '-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ExitOnForwardFailure=yes',
           '-o','ConnectTimeout=12','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=2',
           '-o','ControlPersist=no','-o','GatewayPorts=no','-o','ForwardAgent=no','-o','ForwardX11=no']
+    proxy='/usr/bin/python3 -I -B '+shlex.quote(str(Path(__file__).with_name('ipv6_resolver.py'))) +' %h %p'
+    args+=['-o','ProxyCommand='+proxy,'-o','ProxyUseFdpass=yes']
     if kind is not None:args+=['-L',f'[::1]:{local_port}:[::1]:{SERVICES[kind]}']
     if config['identity_file']:args+=['-i',str(Path(config['identity_file']).expanduser()),'-o','IdentitiesOnly=yes']
     return args+['--',host]

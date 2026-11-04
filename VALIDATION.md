@@ -1,3 +1,21 @@
+# Build 43 validation
+
+The Build 42 regression was reproduced on the installed laptop: ordinary IPv6
+name lookup works, while the same lookup fails when IPv4 sockets are forbidden.
+The native resolver IPC query works under that restriction. The corrected
+Agent then authenticated to the configured real server, added an IPv6 Dashboard
+forward and received HTTP 200 through it, with IPv4 still denied. The temporary
+connection was closed and no installed service or configuration changed.
+
+Automated tests cover bounded/framed native resolver replies, IPv6-only results,
+link-local scope, refusal of mapped/invalid addresses, safe resolver errors,
+trying another IPv6 address, original hostname trust settings, and actual file
+descriptor handoff from a child with IPv4 sockets denied by seccomp. Existing
+shared SSH, Dashboard access, diagnostics, webpage and three-Agent wallet
+regression checks remain included. The native-desktop-dialogue test guard stays
+enabled. Physical optical hardware and the target systemd service manager are
+not simulated by these tests.
+
 # Build 42 validation
 
 IPv6-specific checks cover real HTTP requests over `::1`, exclusive listener

@@ -59,6 +59,16 @@ def describe(stage, error):
 
 def ssh_failure(lines, port, exit_code=None):
     text = '\n'.join(lines).lower()
+    for code,message in {
+        'dns_local_unavailable':'Ubuntu’s local resolver is unavailable. Start systemd-resolved, then retry the server connection.',
+        'dns_timeout':'Ubuntu’s local resolver timed out looking up the server’s IPv6 address. Check DNS and retry.',
+        'dns_lookup_failed':'Ubuntu’s resolver could not resolve the server’s IPv6 address. Check DNS and the hostname, then retry.',
+        'dns_no_ipv6':'The local resolver returned no usable IPv6 address for the server. Check its hostname and AAAA record.',
+        'dns_local_failure':'The Agent could not obtain an IPv6 address through Ubuntu’s local resolver. Check systemd-resolved and DNS.'
+    }.items():
+        if 'wallaby_resolver '+code+':' in text:return ConnectionFailure('ssh',code,message)
+    for code in ('refused','timeout','ipv6_route'):
+        if 'wallaby_connect '+code+':' in text:return ConnectionFailure('ssh',code,{'refused':'The server refused the IPv6 SSH connection. Check its SSH port and listener.','timeout':'The IPv6 SSH connection timed out. Check the server port and network reachability.','ipv6_route':'SSH has no working IPv6 route to the server. Check this computer’s IPv6 network connection.'}[code])
     if 'administratively prohibited' in text:
         return ConnectionFailure('ssh_forward', 'forward_denied', f'SSH login succeeded, but the server denied forwarding to [::1]:{port}. Check PermitOpen and the key/account forwarding restrictions.')
     if 'open failed' in text and 'connection refused' in text:

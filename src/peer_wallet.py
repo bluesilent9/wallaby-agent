@@ -8,6 +8,8 @@ from pathlib import Path
 from approval_store import Store,digest
 from build8_policy import ipv6,descriptors
 from wallet_ops import rpc
+from ipv6_resolver import resolve as resolve_ipv6
+from diagnostics import ConnectionFailure
 
 PORT=22
 MAX_FILE=256*1024*1024
@@ -19,10 +21,10 @@ def local_ipv6(host=None):
     host=host or Config().values.get('hostname')
     if not host:return None
     try:
-        for row in socket.getaddrinfo(host,22,socket.AF_INET6,socket.SOCK_DGRAM):
+        for address in resolve_ipv6(host,22,timeout=2):
             with socket.socket(socket.AF_INET6,socket.SOCK_DGRAM) as s:
-                s.connect(row[4]);return ipv6(s.getsockname()[0])
-    except (OSError,ValueError):pass
+                s.connect(address);return ipv6(s.getsockname()[0])
+    except (OSError,ValueError,ConnectionFailure):pass
     return None
 
 def active(store):
