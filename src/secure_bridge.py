@@ -81,7 +81,9 @@ def ram_prepared():
 def start():
     from capabilities import require_node
     require_node()
-    # Permission is requested by the native OS dialogue for this fixed helper only.
+    # The native OS authorises a fixed root-owned preparation unit over D-Bus.
+    # User-service seccomp filters imply no_new_privs, so pkexec cannot elevate
+    # from the IPv6-restricted configuration service.
     from configuration import Config
     config=Config();config.root.mkdir(parents=True,mode=0o700,exist_ok=True)
     key=config.root/'preview_identity'
@@ -101,8 +103,10 @@ def start():
         # An existing protected mount does not justify re-authorising setup
         # whenever the unprivileged worker fails to start.
         return ensure_running()
-    result=subprocess.run(['/usr/bin/pkexec','/usr/lib/wallaby-agent/secure-start',str(os.getuid())],capture_output=True,timeout=180)
-    if result.returncode:raise WorkspaceFailure('setup_failed','Protected workspace setup was cancelled, denied or failed. No automatic authorisation retry was made; SSH services remain available.')
+    try:result=subprocess.run(['/usr/bin/systemctl','start','wallaby-agent-prepare@'+str(os.getuid())+'.service'],capture_output=True,timeout=180)
+    except subprocess.TimeoutExpired:raise WorkspaceFailure('setup_timeout','Administrator preparation of the protected workspace timed out. Inspect its preparation service before retrying; no automatic authorisation retry was made.') from None
+    except OSError:raise WorkspaceFailure('setup_manager','The local service manager could not be reached for administrator preparation of the protected workspace.') from None
+    if result.returncode:raise WorkspaceFailure('setup_failed','Administrator preparation of the protected workspace did not complete. Check wallaby-agent-prepare@'+str(os.getuid())+'.service for the setup error, or retry if authorisation was cancelled. No automatic authorisation retry was made; SSH services remain available.')
     return compatible(wait_ready())
 
 def compatible(state):

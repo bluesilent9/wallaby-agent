@@ -1,1 +1,1 @@
-02ae80eeba659f6824da9f45bb4b4f366570d981f25dbfc759abed3b12d8a076  wallaby-agent_2.0.0~dev52_amd64.deb
+1535bb3ac53f8548603846b9e4d3ad4dc6ac2f5ada27af4dcd62351b83bfcf99  wallaby-agent_2.0.0~dev53_amd64.deb

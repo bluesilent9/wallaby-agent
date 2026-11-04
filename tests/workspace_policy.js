@@ -16,3 +16,6 @@ for(const verb of ['start','stop'])assert.equal(evaluate('org.freedesktop.system
 for(const verb of ['restart','reload','kill'])assert.equal(evaluate('org.freedesktop.systemd1.manage-units',own,{unit:'wallaby-agent-secure@1000.service',verb}),undefined);
 assert.equal(evaluate('org.freedesktop.systemd1.manage-units',own,{unit:'ssh.service',verb:'start'}),undefined);
 console.log('Shipped polkit rule: only matching UID/system unit/NoNewPrivileges may acquire the two inhibitors; unrelated power/admin actions refused.');
+
+for(const verb of ['start','stop','restart'])assert.equal(evaluate('org.freedesktop.systemd1.manage-units',own,{unit:'wallaby-agent-prepare@1000.service',verb}),undefined);
+console.log('Administrator preparation never receives the routine worker start/stop exemption.');

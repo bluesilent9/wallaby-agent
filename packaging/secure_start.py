@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""Fixed local pkexec entry point. No RPC names, user paths or commands accepted."""
+"""Fixed authorised system-service and terminal recovery entry point. No RPC names, user paths or commands accepted."""
 import os,pwd,subprocess,sys
 from pathlib import Path
 
@@ -47,10 +47,21 @@ def rename_paths(uid,home,unit_root=Path('/run/systemd/system')):
 def retirement_paths(uid,home,unit_root=Path('/run/systemd/system')):
     wallet_paths(uid,home,unit_root,'retirement')
 
+def authorised_caller(uid):
+    caller=os.environ.get('PKEXEC_UID')
+    if caller is not None:return caller==str(uid)
+    # A root-owned system unit starts this helper after systemd/Polkit has
+    # authorised the administrator request. User-service cgroups cannot pass
+    # main's root check, even with a matching unit basename.
+    try:
+        group=next(line.split('::',1)[1] for line in Path('/proc/self/cgroup').read_text().splitlines() if line.startswith('0::'))
+        return group.startswith('/system.slice/') and Path(group).name=='wallaby-agent-prepare@'+str(uid)+'.service'
+    except (OSError,StopIteration):return False
+
 def main():
     if os.geteuid()!=0 or len(sys.argv)!=2 or not sys.argv[1].isdecimal():raise SystemExit('Local administrator authorisation required.')
-    uid=int(sys.argv[1]);caller=os.environ.get('PKEXEC_UID')
-    if uid<1000 or caller is None or caller!=str(uid):raise SystemExit('Only the requesting desktop user may start its protected workspace.')
+    uid=int(sys.argv[1])
+    if uid<1000 or not authorised_caller(uid):raise SystemExit('Only the requesting desktop user may start its protected workspace.')
     account=pwd.getpwuid(uid);base=Path('/run/wallaby-agent-secure');runtime_parent(base)
     home=base/str(uid);runtime_parent(home)
     ram=home/'ram';ram.mkdir(mode=0o700,exist_ok=True)
