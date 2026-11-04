@@ -36,15 +36,14 @@ class IdleDiscReads(unittest.TestCase):
    with self.w.store.edit() as s:s.pop(key)
 
 class ConfirmationPrompts(unittest.TestCase):
- def test_kdialog_and_zenity_confirmation_explicitly_request_retyping(self):
-  for program in ('kdialog','zenity'):
-   seen=[]
-   def available(name):return '/usr/bin/'+name if name==program else None
-   def ask(command,**kwargs):seen.append(command);return SimpleNamespace(returncode=0,stdout=b'fixture-passphrase\n')
-   with patch('wallet_setup.shutil.which',side_effect=available),patch('wallet_setup.subprocess.run',side_effect=ask):self.assertEqual(secret_dialog('Signing role: Archive alpha',{},confirm=True),'fixture-passphrase')
-   first=' '.join(seen[0]);second=' '.join(seen[1]);self.assertNotIn('Retype',first);self.assertIn('Retype the passphrase to confirm.',second);self.assertIn('Archive alpha',first);self.assertIn('Archive alpha',second)
- def test_mismatch_still_refuses_confirmation(self):
-  with patch('wallet_setup.shutil.which',return_value='/usr/bin/kdialog'),patch('wallet_setup.subprocess.run',side_effect=[SimpleNamespace(returncode=0,stdout=b'first\n'),SimpleNamespace(returncode=0,stdout=b'second\n')]),self.assertRaisesRegex(ValueError,'did not match'):secret_dialog('Role',{},confirm=True)
+ def test_native_confirmation_request_never_puts_secret_in_command_or_environment(self):
+  import json
+  with patch('wallet_setup.subprocess.run',return_value=SimpleNamespace(returncode=0,stdout=b'"fixture-passphrase"')) as run:
+   self.assertEqual(secret_dialog('Signing role: Archive alpha',{},confirm=True),'fixture-passphrase')
+  command=run.call_args.args[0];settings=json.loads(run.call_args.kwargs['input'])
+  self.assertEqual(settings,{'prompt':'Signing role: Archive alpha','confirm':True});self.assertIn('secret_prompt.py',command[-1]);self.assertNotIn('fixture-passphrase',str(command));self.assertNotIn('fixture-passphrase',str(run.call_args.kwargs['env']))
+ def test_cancel_does_not_return_or_authorise_a_secret(self):
+  with patch('wallet_setup.subprocess.run',return_value=SimpleNamespace(returncode=1,stdout=b'')),self.assertRaisesRegex(ValueError,'cancelled'):secret_dialog('Role',{},confirm=True)
 
 class CleanupPreflight(unittest.TestCase):
  def test_read_only_helper_is_detected_without_unlinking_or_locking(self):

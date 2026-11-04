@@ -7,4 +7,4 @@ function render(detected){actions.length=0;const box=new Element('section');sand
 const first=render(true);assert(first.items.some(x=>x instanceof Element&&x.props.class==='warning broadcast-detected'&&x.items.includes('Broadcast PSBTs from this Transaction Build have been detected')));
 assert.deepEqual(actions.map(b=>b.items[0]),['Delete and Cancel','Backup and Cancel']);assert.equal(actions[0].props.class,'cancel-delete');assert.equal(actions[1].props.class,'cancel-backup');
 const second=render(false);assert(second.items.some(x=>x instanceof Element&&x.items.includes('No broadcast PSBTs from this Transaction Build have been detected')));
-(async()=>{await assert.rejects(actions[0].action(),/Acknowledge/);await actions[1].action();console.log('Cancellation UI: local choices, deletion acknowledgement and red broadcast warning passed.');})().catch(e=>{console.error(e);process.exitCode=1;});
+(async()=>{await actions[0].action();await actions[1].action();console.log('Cancellation UI: local choices, direct reviewed deletion and red broadcast warning passed.');})().catch(e=>{console.error(e);process.exitCode=1;});

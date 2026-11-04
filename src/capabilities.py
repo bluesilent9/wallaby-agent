@@ -15,7 +15,7 @@ def node_support(config=None):
     if not shutil.which('pkexec'):
         missing.append('local administrator authorisation');packages+=['pkexec','polkitd']
     if not (shutil.which('kdialog') or shutil.which('zenity')):
-        missing.append('native passphrase dialogue');packages+=['kdialog']
+        missing.append('native file and confirmation dialogues');packages+=['kdialog']
     cookie=config.get('cookie') or discover_cookie()
     try:cookie_ok=bool(cookie) and Path(cookie).expanduser().is_file() and os.access(Path(cookie).expanduser(),os.R_OK)
     except OSError:cookie_ok=False

@@ -129,9 +129,9 @@ class DisplayEnvironment(unittest.TestCase):
   self.configure(w,{'XDG_RUNTIME_DIR':'/run/user/1000','DBUS_SESSION_BUS_ADDRESS':'unix:path=/run/user/1000/bus','LANG':'C.UTF-8'})
   def prompt(*args,**kwargs):
    available=kwargs['env'].get('DISPLAY')==':77' and kwargs['env'].get('XAUTHORITY')==gui['XAUTHORITY']
-   return SimpleNamespace(returncode=0 if available else 1,stdout=b'fixture-passphrase\n')
+   return SimpleNamespace(returncode=0 if available else 1,stdout=b'"fixture-passphrase"')
   with patch('wallet_setup.shutil.which',return_value='/usr/bin/kdialog'),patch('wallet_setup.subprocess.run',side_effect=prompt) as run:
-   self.assertEqual(secret_dialog('Fixture confirmation',w.setup.environment,confirm=True),'fixture-passphrase');self.assertEqual(run.call_count,2)
+   self.assertEqual(secret_dialog('Fixture confirmation',w.setup.environment,confirm=True),'fixture-passphrase');self.assertEqual(run.call_count,1)
   self.assertEqual(w.cancellations.environment['DISPLAY'],':77')
  def test_empty_background_values_do_not_clear_display_and_valid_replacement_is_used(self):
   w=self.worker();self.configure(w,{'DISPLAY':':77'});self.configure(w,{'DISPLAY':''});self.assertEqual(w.environment['DISPLAY'],':77');self.configure(w,{'DISPLAY':':88'});self.assertEqual(w.environment['DISPLAY'],':88')

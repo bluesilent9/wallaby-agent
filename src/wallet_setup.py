@@ -13,18 +13,19 @@ from diagnostics import LocalActionFailure
 
 
 def secret_dialog(prompt,environment,confirm=False):
+    import json,importlib.util
+    try:available=importlib.util.find_spec('PyQt6.QtWidgets') is not None
+    except (ImportError,ValueError):available=False
+    if not available:raise LocalActionFailure('native_dialog_missing','Install python3-pyqt6 for the protected native passphrase dialogue. No secret was requested through the browser.')
     env={**os.environ,**environment};env['QT_LOGGING_RULES']='*.debug=false;*.info=false'
-    def ask(message):
-        if shutil.which('kdialog'):command=['/usr/bin/kdialog','--title','Wallaby Agent · protected local authorisation','--password',message]
-        elif shutil.which('zenity'):command=['/usr/bin/zenity','--password','--title=Wallaby Agent · '+message]
-        else:raise ValueError('Install kdialog or zenity. Secrets are never requested through the browser.')
-        result=subprocess.run(command,capture_output=True,timeout=300,env=env)
-        if result.returncode:raise ValueError('Local secret entry cancelled. No operation was authorised.')
-        value=result.stdout.decode().rstrip('\n')
-        if not value or len(value)>1024:raise ValueError('Enter a non-empty passphrase, up to 1024 characters.')
-        return value
-    value=ask(prompt)
-    if confirm and ask('Retype the passphrase to confirm.\n'+prompt)!=value:raise ValueError('Passphrases did not match.')
+    command=['/usr/bin/python3','-I','-B',str(Path(__file__).resolve().with_name('secret_prompt.py'))]
+    try:result=subprocess.run(command,input=json.dumps({'prompt':prompt,'confirm':confirm}).encode(),capture_output=True,timeout=300,env=env)
+    except subprocess.TimeoutExpired:raise ValueError('Local secret entry cancelled. No operation was authorised.') from None
+    if result.returncode==1:raise ValueError('Local secret entry cancelled. No operation was authorised.')
+    if result.returncode:raise LocalActionFailure('native_dialog_failed','The protected native passphrase dialogue could not open. Check the local desktop session; no secret operation was authorised.')
+    try:value=json.loads(result.stdout)
+    except (ValueError,UnicodeError):raise ValueError('Invalid native passphrase response.') from None
+    if not isinstance(value,str) or not value or len(value)>1024:raise ValueError('Enter a non-empty passphrase, up to 1024 characters.')
     return value
 
 class MemoryCore:

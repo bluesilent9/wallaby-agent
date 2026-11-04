@@ -1,3 +1,24 @@
+# Build 46 validation
+
+Native Qt widget tests run offscreen with invented passphrases. Mismatch leaves
+entry open without an accepted signal; corrected confirmation succeeds. Both
+Show/Hide controls, clearing/reset, short/empty/overlong creation retry, existing
+short wallet unlocks, Unicode/newline framing and safe native-helper failure pass.
+Eleven focused native/display-context checks pass. All 18 JavaScript suites pass,
+including revealed login-password clearing and direct red-button cancellation
+without the old checkbox. Existing backend cancellation guards remain unchanged.
+The dialogue was rendered and visually inspected with dummy values, without
+opening any password request on the user's desktop.
+
+A separate real three-Agent pending-disc check passes inventory reads and local
+approval of an unrelated David SMSF archive. Replaying those public replies
+through Dashboard Build 54 inventory processing succeeds with a regtest-only
+network adapter. Adding an unrelated unloaded directory reproduces the Dashboard
+inventory rejection and exact UI message. Dashboard is addressing that cause.
+
+See [Build 46 details](AGENT_BUILD46_PASSPHRASES.md). Tests use no production
+wallets, installed services, profiles or actual optical media.
+
 # Build 45 validation
 
 The new pruned-node suite passes three focused checks: three independent actually
