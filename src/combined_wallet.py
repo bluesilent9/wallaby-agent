@@ -32,7 +32,7 @@ def wallet_name(proposal,role=None):
 def public_policy(facts):
     return {'wallet_name':'approved','descriptors':[{'desc':facts[field]} for field in ('receive_descriptor','change_descriptor')]}
 
-def role_wallet(setup,session,role,facts):
+def role_wallet(setup,session,role,facts,destination=None,target=None):
     from wallet_setup import secret_dialog
     source=session['wallets'][role['id']]['name'];core=session['core'].core
     contribution=next(e['message'] for e in session['contributions'] if e['message']['cosigner_id']==role['id'])
@@ -53,16 +53,20 @@ def role_wallet(setup,session,role,facts):
             body=facts[field].split('#')[0]
             if body.count(contribution[keyfield])!=1:raise ValueError('The approved policy does not contain the exact local signing role once.')
             body=body.replace(contribution[keyfield],str(key))
-            requests.append({'desc':body+'#'+checksum(body),'timestamp':'now','active':True,'internal':bool(i),'range':[0,999]})
-        target='policy_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20]
-        rpc(core,'createwallet',{'wallet_name':target,'blank':True,'descriptors':True,'passphrase':password,'load_on_startup':False})
-        rpc(core,'walletpassphrase',[password,120],target)
+            requests.append({'desc':body+'#'+checksum(body),'timestamp':session['created_at'],'active':True,'internal':bool(i),'range':[0,999]})
+        working=destination or core
+        target=target or 'policy_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20]
+        rpc(working,'createwallet',{'wallet_name':target,'blank':True,'descriptors':True,'passphrase':password,'load_on_startup':destination is not None})
+        if destination is not None:session.setdefault('created_wallets',[]).append(target)
+        rpc(working,'walletpassphrase',[password,120],target)
         try:
-            result=rpc(core,'importdescriptors',[requests],target)
-            if len(result)!=2 or not all(r.get('success') for r in result):raise ValueError('Core could not install both complete signing policies. No production wallet was restored.')
-        finally:rpc(core,'walletlock',[],target)
-        if descriptors(rpc(core,'listdescriptors',[False],target))!=descriptors(public_policy(facts)):raise ValueError('The complete signing wallet differs from the approved public policy.')
-        if rpc(core,'getwalletinfo',[],target).get('unlocked_until')!=0:raise ValueError('The completed signing wallet is not encrypted and locked.')
+            result=rpc(working,'importdescriptors',[requests],target,timeout=86400)
+            if len(result)!=2 or not all(r.get('success') for r in result):
+                from diagnostics import LocalActionFailure
+                raise LocalActionFailure('policy_import_incomplete','Core could not install both approved signing policies. The encrypted wallet and RAM keys were retained for local reconciliation.')
+        finally:rpc(working,'walletlock',[],target)
+        if descriptors(rpc(working,'listdescriptors',[False],target))!=descriptors(public_policy(facts)):raise ValueError('The complete signing wallet differs from the approved public policy.')
+        if rpc(working,'getwalletinfo',[],target).get('unlocked_until')!=0:raise ValueError('The completed signing wallet is not encrypted and locked.')
         return target
     finally:
         password=None;private=None;requests=None;branches=None

@@ -1,3 +1,26 @@
+# Build 45 validation
+
+The new pruned-node suite passes three focused checks: three independent actually
+pruned Core nodes install the original encrypted signing accounts with their full
+policy; an interrupted blank-wallet installation remains explicitly cancelable
+while unknown creation/extra descriptors are refused; and pruned restore failures
+emit a fixed safe reason without exposing the raw Core error. The three-Agent
+fixture uses a 3-of-5 policy, including two physical roles queued on one Agent.
+The old genesis-dated offline backup fails on the same pruned chain. Prune heights
+are unchanged and node installation may not invoke restorewallet.
+
+The existing three-Agent combined-wallet suite also passes: named signer wallets
+jointly sign a dummy transaction, the physical archive restores and verifies the
+correct role, and an unrelated private wallet remains available for archiving
+while physical backups wait. A further 35 focused checks cover cancellation,
+helper write preflight/reconciliation, managed-account transfer guards and key
+privacy. All 17 JavaScript suites pass, including a failed-installation status
+that replaces the misleading in-progress message without offering unsafe discard.
+
+No production wallet, installed service or pruning configuration is changed by
+these isolated tests. Actual optical media and the user's installed desktop are
+not covered. See [Build 45 details](AGENT_BUILD45_PRUNED_INSTALLATION.md).
+
 # Build 44 validation
 
 A three-Agent IPv6 HTTP test uses three independent isolated Core nodes. Each

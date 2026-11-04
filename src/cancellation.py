@@ -105,7 +105,13 @@ class Cancellations:
                 if name not in present and name not in rpc(self.core,'listwallets'):continue # A failed restore/create never installed this reserved name.
                 info=rpc(self.core,'getwalletinfo',[],name)
                 actual=rpc(self.core,'listdescriptors',[False],name)
-                if expected is not None and descriptors(actual)!=descriptors(expected):raise ValueError('An installed setup wallet no longer matches its locally recorded public policy. No cancellation cleanup was performed.')
+                actual_policy=descriptors(actual) if actual.get('descriptors') else set()
+                if expected is not None and actual_policy!=descriptors(expected):
+                    # Only a positively created wallet from this failed local
+                    # installation may have a strict subset of its approved policy.
+                    # Unknown/changed descriptors and uncertain creation stay blocked.
+                    partial=(session.get('phase')=='installation_failed' and name in session.get('created_wallets',[]) and actual_policy<=descriptors(expected))
+                    if not partial:raise ValueError('An installed setup wallet no longer matches its locally recorded public policy. No cancellation cleanup was performed.')
                 if expected is None and actual.get('descriptors'):raise ValueError('An unfinished monitor changed since creation. Inspect locally; it was retained.')
                 wallets.append({'core':self.core,'name':name,'temporary':False})
         return saved,keys,proposals,sorted(psbts),txids,wallets,sessions

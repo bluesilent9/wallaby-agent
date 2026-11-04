@@ -23,5 +23,6 @@ const review=id=>vm.runInContext('reviewApproval('+JSON.stringify(id)+')',c);
  // A still-valid review survives unrelated arrivals; cancelled setup cards point to the same cancellation.
  setPending([initial]);request=review('creation');resolveReview({id:'creation',kind:'wallet_setup'});await request;setPending([initial,other]);assert(text(get('#approval-review')).includes('Old creation controls'));
  c.fixture.setups=[{id:'setup',name:'Unfinished vault',phase:'contributed',cancellation_id:'cancel'}];setPending([cancel]);assert(!text(get('#setup-list')).includes('Discard unfinished setup'));assert(text(get('#setup-list')).includes('Review cancellation'));
+ c.fixture.setups=[{id:'setup',name:'Interrupted vault',phase:'installation_failed',cancellation_id:null}];setPending([]);assert(text(get('#setup-list')).includes('Installation failed'));assert(text(get('#setup-list')).includes('No automatic retry'));assert(!text(get('#setup-list')).includes('Work in progress'));assert(!text(get('#setup-list')).includes('Discard unfinished setup'));
  console.log('Cancellation transition: open creation replaced, cancellation priority/link, explicit cleanup consent, late-response rejection, unrelated review preservation and setup routing passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

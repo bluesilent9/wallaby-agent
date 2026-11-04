@@ -32,6 +32,10 @@ def rpc(core,method,params=None,wallet=None,timeout=30):
     r=core.call('local-'+uuid.uuid4().hex,method,params or [],wallet,timeout=timeout)
     if 'error' in r:
         code=r['error'].get('code') if isinstance(r['error'],dict) else None
+        message=r['error'].get('message','') if isinstance(r['error'],dict) else ''
+        if method=='restorewallet' and code==-4 and isinstance(message,str) and 'prune:' in message.lower():
+            from diagnostics import LocalActionFailure
+            raise LocalActionFailure('core_restore_pruned_history','Core refused this wallet backup because its last synchronisation predates the retained pruned history. No pruning settings were changed. Keep protected RAM open for local recovery or cancellation.')
         raise ValueError(f'Bitcoin Core rejected {method} (code {code}). Check wallet readiness, encryption and node synchronisation.')
     return r['result']
 

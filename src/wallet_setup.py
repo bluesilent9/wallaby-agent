@@ -132,7 +132,7 @@ class WalletSetup:
         if binding in self.sessions:raise ValueError('This setup already generated keys. No secret generation was repeated.')
         # Before generating anything, reserve this immutable session and mark attempted.
         with self.store.edit() as s:s['pending'][key]['state']='attempted';s['setup_active']=binding
-        session={'proposal':p,'installed_wallets':{},'contributions':[],'wallets':{},'core':None,'phase':'generating','pins':dict(pins)};self.sessions[binding]=session
+        session={'created_at':int(time.time()),'proposal':p,'installed_wallets':{},'contributions':[],'wallets':{},'core':None,'phase':'generating','pins':dict(pins)};self.sessions[binding]=session
         stage='offline_core_start'
         try:
             local=[r for r in p['cosigners'] if r['agent_key']==own['public_key']]
@@ -184,51 +184,59 @@ class WalletSetup:
         if existing.intersection(planned):raise ValueError('A requested Core wallet name already exists. No existing wallet was replaced or renamed.')
         with self.store.edit() as s:s['pending'][key]['state']='attempted'
         session.update(phase='installing',policy=p,review=fresh)
-        local={};disc={}
-        # All production names are checked before requesting any additional secret.
-        for ident,row in session['wallets'].items():
+        try:
+            local={};disc={}
+            # All production names are checked before requesting any additional secret.
+            for ident,row in session['wallets'].items():
+                self.check_cancel(fresh['proposal_hash'])
+                if row['storage']=='disc':
+                    combined=role_wallet(self,session,roles[ident],fresh)
+                    path=self.store.root/'setup-cores'/fresh['proposal_hash']/(hashlib.sha256(ident.encode()).hexdigest()+'.dat')
+                    rpc(session['core'].core,'backupwallet',[str(path)],combined)
+                    disc[hashlib.sha256(ident.encode()).hexdigest()]=str(path)
+                else:
+                    target=targets[ident]
+                    session.setdefault('installed_wallets',{})[target]=public_policy(fresh)
+                    role_wallet(self,session,roles[ident],fresh,destination=self.core,target=target)
+                    info=rpc(self.core,'getwalletinfo',[],target)
+                    if not info.get('private_keys_enabled') or info.get('unlocked_until')!=0:raise ValueError('Persistent signer failed encrypted/locked verification.')
+                    from build8_policy import descriptors
+                    if descriptors(rpc(self.core,'listdescriptors',[False],target))!=descriptors(public_policy(fresh)):raise ValueError('Persistent signing wallet differs from the approved full policy.')
+                    local[ident]=target
             self.check_cancel(fresh['proposal_hash'])
-            combined=role_wallet(self,session,roles[ident],fresh)
-            path=self.store.root/'setup-cores'/fresh['proposal_hash']/(hashlib.sha256(ident.encode()).hexdigest()+'.dat')
-            rpc(session['core'].core,'backupwallet',[str(path)],combined)
-            if row['storage']=='disc':disc[hashlib.sha256(ident.encode()).hexdigest()]=str(path)
-            else:
-                target=targets[ident]
-                session.setdefault('installed_wallets',{})[target]=public_policy(fresh)
-                rpc(self.core,'restorewallet',{'wallet_name':target,'backup_file':__import__('core_ram_path').for_core(self.core,path),'load_on_startup':True},timeout=86400)
-                info=rpc(self.core,'getwalletinfo',[],target)
-                if not info.get('private_keys_enabled') or info.get('unlocked_until')!=0:raise ValueError('Persistent signer failed encrypted/locked verification.')
-                from build8_policy import descriptors
-                if descriptors(rpc(self.core,'listdescriptors',[False],target))!=descriptors(public_policy(fresh)):raise ValueError('Persistent signing wallet differs from the approved full policy.')
-                local[ident]=target;path.unlink()
-        self.check_cancel(fresh['proposal_hash'])
-        if not local:
-            # A machine producing only physical keys still needs a named public
-            # wallet. Machines with node keys use that same wallet for monitoring.
-            session.setdefault('installed_wallets',{})[monitor]=None
-            rpc(self.core,'createwallet',{'wallet_name':monitor,'disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':True})
-            requests=[{'desc':fresh[field],'timestamp':'now','active':True,'internal':bool(i),'range':[0,999]} for i,field in enumerate(('receive_descriptor','change_descriptor'))]
-            result=rpc(self.core,'importdescriptors',{'requests':requests},monitor,timeout=86400)
-            if not all(r.get('success') for r in result):raise ValueError('Core could not install the approved public policy.')
-            session['installed_wallets'][monitor]=rpc(self.core,'listdescriptors',[False],monitor)
-        recovery={'version':1,'wallet_layout':LAYOUT,'proposal':p['proposal'],'policy_hash':fresh['policy_hash'],'receive_descriptor':fresh['receive_descriptor'],'change_descriptor':fresh['change_descriptor'],'contributions':p['contributions'],'local_cosigners':list(session['wallets'])}
-        with self.store.edit() as s:
-            s.setdefault('approved_wallets',{})[fresh['policy_hash']]={**recovery,'monitor_wallet':monitor,'signing_wallets':local,'height':fresh['height'],'created':time.time()}
-            s['completed'][key]={'kind':'wallet_setup_policy','at':time.time()};s['pending'].pop(key,None)
-        from setup_completion import mark
-        mark(self.core,self.store.read()['approved_wallets'][fresh['policy_hash']],False)
-        session['phase']='awaiting_disc' if disc else 'complete'
-        self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'session_id':p['proposal']['session_id'],'proposal_hash':fresh['proposal_hash'],'policy_hash':fresh['policy_hash'],'status':'policy_approved','backup':'pending' if disc else 'not_required'}))
-        self.store.queue('wallet_setup_inventory',sign(self.store,{'version':1,'session_id':p['proposal']['session_id'],'policy_hash':fresh['policy_hash'],'chain':p['proposal']['chain'],'monitor_wallet':monitor,'signing_wallets':local,'receive_descriptor':fresh['receive_descriptor'],'change_descriptor':fresh['change_descriptor']}))
-        with self.store.edit() as saved:
-            if saved.get('setup_active')==fresh['proposal_hash']:saved.pop('setup_active',None)
-        if disc:
-            session['discs_remaining']=set(disc)
-            for ident,path in sorted(disc.items()):
-                job_id=fresh['proposal_hash']+'-'+ident[:12];self.disc_sessions[job_id]=(fresh['proposal_hash'],ident)
-                self.burner.queue(job_id,{ident:path},{**recovery,'physical_cosigner_file':ident,'local_cosigners':[role['id'] for role in p['proposal']['cosigners'] if hashlib.sha256(role['id'].encode()).hexdigest()==ident]})
-        else:self.finish_session(session)
-        return {'message':'Exact policy approved. Each node signer stores its encrypted key and complete policy in one named Core wallet.'+(' Disc Operations is now available. Private-only disc keys remain in protected RAM.' if disc else ' Encrypted local signing wallets installed.'),'burn_authorised':bool(disc)}
+            if not local:
+                # A machine producing only physical keys still needs a named public
+                # wallet. Machines with node keys use that same wallet for monitoring.
+                session.setdefault('installed_wallets',{})[monitor]=None
+                rpc(self.core,'createwallet',{'wallet_name':monitor,'disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':True})
+                requests=[{'desc':fresh[field],'timestamp':session['created_at'],'active':True,'internal':bool(i),'range':[0,999]} for i,field in enumerate(('receive_descriptor','change_descriptor'))]
+                result=rpc(self.core,'importdescriptors',{'requests':requests},monitor,timeout=86400)
+                if not all(r.get('success') for r in result):raise ValueError('Core could not install the approved public policy.')
+                session['installed_wallets'][monitor]=rpc(self.core,'listdescriptors',[False],monitor)
+            recovery={'version':1,'wallet_layout':LAYOUT,'proposal':p['proposal'],'policy_hash':fresh['policy_hash'],'receive_descriptor':fresh['receive_descriptor'],'change_descriptor':fresh['change_descriptor'],'contributions':p['contributions'],'local_cosigners':list(session['wallets'])}
+            with self.store.edit() as s:
+                s.setdefault('approved_wallets',{})[fresh['policy_hash']]={**recovery,'monitor_wallet':monitor,'signing_wallets':local,'height':fresh['height'],'created':time.time()}
+                s['completed'][key]={'kind':'wallet_setup_policy','at':time.time()};s['pending'].pop(key,None)
+            from setup_completion import mark
+            mark(self.core,self.store.read()['approved_wallets'][fresh['policy_hash']],False)
+            session['phase']='awaiting_disc' if disc else 'complete'
+            self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'session_id':p['proposal']['session_id'],'proposal_hash':fresh['proposal_hash'],'policy_hash':fresh['policy_hash'],'status':'policy_approved','backup':'pending' if disc else 'not_required'}))
+            self.store.queue('wallet_setup_inventory',sign(self.store,{'version':1,'session_id':p['proposal']['session_id'],'policy_hash':fresh['policy_hash'],'chain':p['proposal']['chain'],'monitor_wallet':monitor,'signing_wallets':local,'receive_descriptor':fresh['receive_descriptor'],'change_descriptor':fresh['change_descriptor']}))
+            with self.store.edit() as saved:
+                if saved.get('setup_active')==fresh['proposal_hash']:saved.pop('setup_active',None)
+            if disc:
+                session['discs_remaining']=set(disc)
+                for ident,path in sorted(disc.items()):
+                    job_id=fresh['proposal_hash']+'-'+ident[:12];self.disc_sessions[job_id]=(fresh['proposal_hash'],ident)
+                    self.burner.queue(job_id,{ident:path},{**recovery,'physical_cosigner_file':ident,'local_cosigners':[role['id'] for role in p['proposal']['cosigners'] if hashlib.sha256(role['id'].encode()).hexdigest()==ident]})
+            else:self.finish_session(session)
+            return {'message':'Exact policy approved. Each node signer stores its encrypted key and complete policy in one named Core wallet.'+(' Disc Operations is now available. Private-only disc keys remain in protected RAM.' if disc else ' Encrypted local signing wallets installed.'),'burn_authorised':bool(disc)}
+        except Exception as error:
+            session['phase']='installation_failed'
+            from activity_log import event
+            from diagnostics import action_code,action_detail
+            event('setup.installation','Installation failed · '+action_code(error)+' · '+action_detail(error)+' · keys retained in protected RAM; no automatic retry')
+            raise
     def burn_complete(self,ident,sha):
         if ident not in self.disc_sessions:
             if not getattr(self,'external_burn_complete',None):raise ValueError('Unknown external archive completion.')
