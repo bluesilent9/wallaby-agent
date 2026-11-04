@@ -64,7 +64,7 @@ class ExchangeShutdown(unittest.TestCase):
    state=store.read();self.assertIn(key,state['outbox']);self.assertNotIn('sync_revision',state)
  def test_intentional_shutdown_does_not_log_connection_failure_or_requeue_work(self):
   ex=Exchange(1,'fixture');cancelled=threading.Event();ex.cancelled=cancelled.is_set;stop=threading.Event()
-  def interrupted():cancelled.set();raise ConnectionRefusedError('Closed deliberately')
+  def interrupted(*args,**kwargs):cancelled.set();raise ConnectionRefusedError('Closed deliberately')
   with patch.object(ex,'once',side_effect=interrupted),patch('activity_log.event') as log:ex.run(stop)
   log.assert_not_called()
 

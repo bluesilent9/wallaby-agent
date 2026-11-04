@@ -48,6 +48,10 @@ def dashboard(source,root,port="0"):
    time.sleep(.5)
  threading.Thread(target=poll_nodes,daemon=True).start();reply({'port':server.server_port,'polling':'production-health'})
  def control(c):
+  if c['op']=='discover_identity':return registry.hub.wallet_builder.discover(foreground=True)
+  if c['op']=='identity_status':
+   data=registry.hub.wallet_builder.read()
+   return {'eligible':len(registry.hub.wallet_builder.available()),'identities':len(data['identities']),'challenges':len(data['challenges']),'connections':len(registry.connections),'sessions':sorted(hashlib.sha256(t.encode()).hexdigest() for t in registry.connections)}
   if c['op']=='advance':clock['offset']=c['seconds'];return True
   if c['op']=='clear_profile':
    from profile_archive import ProfileArchive

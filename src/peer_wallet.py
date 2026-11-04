@@ -21,7 +21,9 @@ def local_ipv6(host=None):
     host=host or Config().values.get('hostname')
     if not host:return None
     try:
-        for address in resolve_ipv6(host,22,timeout=2):
+        try:addresses=[(ipv6(host),22,0,0)]
+        except ValueError:addresses=resolve_ipv6(host,22,timeout=2)
+        for address in addresses:
             with socket.socket(socket.AF_INET6,socket.SOCK_DGRAM) as s:
                 s.connect(address);return ipv6(s.getsockname()[0])
     except (OSError,ValueError,ConnectionFailure):pass

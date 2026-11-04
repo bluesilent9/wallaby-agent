@@ -31,7 +31,7 @@ def exchange_http_reason(data):
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev43'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev44'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -146,24 +146,48 @@ class NodeClient:
             if not isinstance(c,dict) or set(c)!={'id','kind','method','params','wallet','expires_in_seconds'}:raise protocol_failure('rpc_fields','An RPC command has missing or unexpected fields.')
             ident=c['id']
             if not isinstance(ident,str) or not 1<=len(ident)<=100:raise protocol_failure('rpc_id','An RPC command has an invalid request identifier.')
+            expiry=c['expires_in_seconds']
+            if type(expiry) not in (int,float,Decimal) or not __import__('math').isfinite(expiry) or not 0<=expiry<=3600:raise protocol_failure('rpc_deadline','An RPC command has an invalid deadline.')
             with self.lock:
                 if ident in self.seen:continue
                 if len(self.seen)>=10000:raise protocol_failure('session_limit','The session request limit was reached; reconnecting.')
+                if expiry==0:continue
+                # Unacknowledged delivered commands are offered again by Dashboard.
+                # Never block heartbeat/poll behind occupied Core workers.
+                if not self.pending.acquire(blocking=False):return
                 self.seen.add(ident)
             received=time.monotonic()
-            while not self.pending.acquire(timeout=.1):
-                if self.stop.is_set() or self.failed.is_set():return
-                if time.monotonic()-received>=float(c['expires_in_seconds']):raise ConnectionFailure('dashboard','rpc_queue_timeout','A Dashboard RPC request expired while waiting for a local Core worker. Check whether Bitcoin Core is busy or responding slowly.')
             if self.stop.is_set() or self.failed.is_set():self.pending.release();return
             self.pool.submit(self.execute,c,received)
+    @staticmethod
+    def transient(error):
+        failure=describe('dashboard',error)
+        return failure.stage=='dashboard' and failure.code in ('timeout','transport','io')
+    def degraded(self,error,phase):
+        failure=describe('dashboard',error)
+        from activity_log import event
+        event('node.transport','Temporary failure · endpoint='+phase+' · '+failure.code+' · session retained · retry_budget_s=15')
+        if getattr(self,'on_degraded',None):self.on_degraded(failure)
+    def control_post(self,path,body,timeout=5):
+        # Only idempotent heartbeat/poll are retried. ACK/results and Core calls
+        # retain their one-attempt semantics when the outcome is uncertain.
+        deadline=None
+        while not self.stop.is_set() and not self.failed.is_set():
+            try:return self.post(path,body,timeout=min(timeout,max(.05,deadline-time.monotonic())) if deadline is not None else timeout)
+            except Exception as error:
+                if not self.transient(error):raise
+                if deadline is None:deadline=time.monotonic()+15;self.degraded(error,path)
+                if time.monotonic()>=deadline:raise
+                if self.stop.wait(min(.5,max(0,deadline-time.monotonic()))):return {}
+        return {}
     def execute(self,c,received):
         try:
-            ident=c['id'];expiry=c['expires_in_seconds']
-            if not isinstance(expiry,(int,Decimal)) or expiry<=0 or expiry>3600:raise protocol_failure('rpc_deadline','An RPC command has an invalid or expired deadline.')
+            phase='validation';ident=c['id'];expiry=c['expires_in_seconds']
+            if not isinstance(expiry,(int,float,Decimal)) or expiry<=0 or expiry>3600:raise protocol_failure('rpc_deadline','An RPC command has an invalid or expired deadline.')
             try:params,_=request(c['method'],c['params'],c['wallet'])
             except ValueError:raise protocol_failure('rpc_scope','The requested RPC method, wallet scope or public parameters were refused by the local read-only policy.') from None
             if c['kind']!='rpc' or self.stop.is_set() or self.failed.is_set() or time.monotonic()-received>=expiry:return
-            ack=self.post('ack',{'id':ident})
+            phase='ack';ack=self.post('ack',{'id':ident})
             if ack.get('execute') is not True:return
             # Never retry an acknowledged Core call; a lost response has unknown outcome.
             try:
@@ -176,15 +200,20 @@ class NodeClient:
                 from activity_log import event
                 event('rpc.'+c['method'],'Local public RPC failed · '+failure.code+((' · '+json.dumps(failure.measurements,sort_keys=True)) if getattr(failure,'measurements',None) else ''))
                 result={'error':{'code':'local_rpc_'+failure.code,'message':str(failure)+' The acknowledged request was not replayed.','data':{'stage':failure.stage,'category':failure.code,'method':c['method'],**getattr(failure,'measurements',{})}}}
-            self.post('result',{'id':ident,**result})
-        except Exception as error:self.fail(error)
+            phase='result';self.post('result',{'id':ident,**result})
+        except Exception as error:
+            if self.transient(error):
+                self.degraded(error,phase)
+                from activity_log import event
+                event('rpc.delivery','Uncertain '+phase+' delivery · request retained as seen · no Core call or delivery replayed')
+            else:self.fail(error)
         finally:self.pending.release()
     def heartbeat(self):
         while not self.stop.wait(5) and not self.failed.is_set():
             try:
                 self.check_core()
                 if self.stop.is_set() or self.failed.is_set():return
-                self.consume(self.post('heartbeat',{},timeout=5))
+                self.consume(self.control_post('heartbeat',{},timeout=5))
                 if not self.stop.is_set() and not self.failed.is_set():self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
             except Exception as error:self.fail(error)
     def run(self):
@@ -205,7 +234,7 @@ class NodeClient:
             exchange_thread=threading.Thread(target=exchange.run,args=(self.failed,),daemon=True);self.threads.append(exchange_thread);exchange_thread.start()
             self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
             thread=threading.Thread(target=self.heartbeat,daemon=True);self.threads.append(thread);thread.start()
-            while not self.stop.is_set() and not self.failed.is_set():self.consume(self.post('poll',{'wait_seconds':2},timeout=5))
+            while not self.stop.is_set() and not self.failed.is_set():self.consume(self.control_post('poll',{'wait_seconds':2},timeout=5))
             if self.failed.is_set():raise self.error or ConnectionFailure('dashboard','session','Dashboard node session ended unexpectedly. Check the Dashboard Agent service.')
         except Exception as error:
             # Record the first failure before disconnect/late heartbeat callbacks.

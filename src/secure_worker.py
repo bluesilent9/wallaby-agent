@@ -207,11 +207,13 @@ class Workspace:
                         if color=='green':
                             recovering=self.recovery_state().get('active')
                             if not self.recovery.connected():return
-                            if recovering:event('node.recovery','Recovered · fresh authenticated session · attempt='+str(self.recovery.attempt))
+                            if recovering:event('node.recovery','Recovered · authenticated connection healthy · attempt='+str(self.recovery.attempt))
                         elif self.recovery_state().get('active'):return
                         if self.node_status.get('color')!=color or self.node_status.get('message')!=message:event('node.connection',color+' · '+message)
                         self.node_status={'color':color,'message':message}
-                client=NodeClient(self.ops.core.config,port,stop,status);client.on_failure=failure
+                def degraded(error,current=current):
+                    if current():self.connection_lost(error)
+                client=NodeClient(self.ops.core.config,port,stop,status);client.on_failure=failure;client.on_degraded=degraded
                 try:client.run()
                 except Exception as error:failure(error)
                 if not self.recovery_state().get('active'):return

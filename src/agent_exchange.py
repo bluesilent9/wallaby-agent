@@ -3,7 +3,7 @@
 The transport stores proposals and public results. It never imports or signs.
 No retry ever repeats a wallet operation; only content-addressed data is retried.
 """
-import time
+import time,threading
 
 LOCAL_CANCELLATIONS=None
 LOCAL_RETIREMENT=None
@@ -14,7 +14,7 @@ from node_client import http_json,HTTPFailure
 
 class Exchange:
     def __init__(self,port,token,store=None):self.port=port;self.token=token;self.store=store;self.unsupported=False;self.phase='local_outbox';self.proposal_kind='none';self.cancelled=lambda:False
-    def once(self):
+    def once(self,previews=True):
         if self.cancelled():return
         self.phase='local_outbox';self.proposal_kind='none'
         from protected_memory import required,inside
@@ -36,7 +36,9 @@ class Exchange:
         ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1)
         items=[{'id':key,**row} for key,row in ordered if not held_item(state,row)][:8]
         body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_rename_v1']}
-        address=local_ipv6()
+        if time.monotonic()-getattr(self,'address_checked',-60)>=30:
+            self.address=local_ipv6();self.address_checked=time.monotonic()
+        address=getattr(self,'address',None)
         if address:body['node_info']={'ipv6':address}
         self.phase='http'
         try:r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)
@@ -105,25 +107,43 @@ class Exchange:
             elif p['kind']=='node_identity':
                 if address:self.store.queue('node_identity',{'ipv6':address})
             elif p['kind'] not in ('wallet_sync_queue','wallet_archive_queue','wallet_rename_queue'):self.store.receive(p)
-        self.phase='sender_preview';self.proposal_kind='wallet_transfer'
-        saved=self.store.read()
-        if not saved.get('sync_batch') and not saved.get('active_transfer'):
-            from configuration import Config,discover_cookie
-            from node_client import Core
-            from wallet_preview import prepare
-            c=Config().values;c['cookie']=c['cookie'] or discover_cookie()
-            for key,row in saved['pending'].items():
-                p=row['proposal']
-                if p['kind']!='wallet_transfer' or p['direction']!='send' or not p.get('preview_challenge') or key in saved.get('transfer_previews',{}):continue
-                try:prepare(Core(c),self.store,key,p)
-                except Exception as error:
-                    with self.store.edit() as state:state.setdefault('preview_errors',{})[key]=str(error) if isinstance(error,ValueError) else 'Sender node verification failed. Check the local node and wallet.'
+        if previews:self.prepare_preview()
         self.phase='acknowledgement';self.proposal_kind='none'
         with self.store.edit() as s:
             for key in r['accepted']:
                 item=s['outbox'].pop(key,None)
                 if item and item['kind']=='transaction_builder_psbt':s.setdefault('delivered_artifacts',{})[key]=item
+            self.preview_ready=not s.get('sync_batch') and not s.get('active_transfer') and any(row['proposal']['kind']=='wallet_transfer' and row['proposal']['direction']=='send' and row['proposal'].get('preview_challenge') and key not in s.get('transfer_previews',{}) for key,row in s['pending'].items())
             s['sync']='Dashboard exchange connected. Pending changes require local authorisation.';s['last_exchange']=time.time();s.pop('exchange_error',None)
+    def prepare_preview(self):
+        if self.cancelled():return
+        saved=self.store.read()
+        self.preview_due={k:v for k,v in getattr(self,'preview_due',{}).items() if k in saved['pending']}
+        if not saved.get('sync_batch') and not saved.get('active_transfer'):
+            from configuration import Config,discover_cookie
+            from node_client import Core
+            from wallet_preview import prepare
+            for key,row in saved['pending'].items():
+                p=row['proposal']
+                if p['kind']!='wallet_transfer' or p['direction']!='send' or not p.get('preview_challenge') or key in saved.get('transfer_previews',{}):continue
+                if time.monotonic()<getattr(self,'preview_due',{}).get(key,0):continue
+                if self.cancelled():return
+                if not hasattr(self,'preview_due'):self.preview_due={}
+                self.preview_due[key]=time.monotonic()+30
+                try:
+                    c=Config().values;c['cookie']=c['cookie'] or discover_cookie();prepare(Core(c),self.store,key,p)
+                except Exception as error:
+                    with self.store.edit() as state:state.setdefault('preview_errors',{})[key]=str(error) if isinstance(error,ValueError) else 'Sender node verification failed. Check the local node and wallet.'
+                break
+    def start_preview(self):
+        if not getattr(self,'preview_ready',False):return
+        if getattr(self,'preview_thread',None) and self.preview_thread.is_alive():return
+        def work():
+            try:self.prepare_preview()
+            except Exception:
+                from activity_log import event
+                event('sync.preview','Background public preview deferred; control exchange remains active.')
+        self.preview_thread=threading.Thread(target=work,daemon=True,name='sender-public-preview');self.preview_thread.start()
     def failure(self,error):
         from diagnostics import describe,ConnectionFailure
         failure=describe('dashboard',error)
@@ -141,15 +161,21 @@ class Exchange:
             return ConnectionFailure('dashboard','exchange_'+reason,'Agent rejected Dashboard exchange data at '+self.phase+' ('+self.proposal_kind+'); category '+reason+'. Queued data retained. Compare the Dashboard protocol log; no rejected request authorised a wallet operation.')
         return failure
     def run(self,stop):
+        transport_delay=1
         while not stop.is_set() and not self.unsupported and not self.cancelled():
             delay=2
-            try:self.once()
+            try:
+                self.once(previews=False);transport_delay=1
+                if not self.cancelled() and not self.unsupported:self.start_preview()
             except Exception as error:
                 if self.cancelled():return
                 from activity_log import event
-                failure=self.failure(error);delay=30
-                event('dashboard.exchange','Exchange failed · endpoint=/agent/v2/exchange · phase='+self.phase+' · kind='+self.proposal_kind+' · '+failure.stage+' · '+failure.code+' · retry_s=30 · '+str(failure))
+                failure=self.failure(error);delay=transport_delay if failure.code in ('timeout','transport','io') else 30
+                transport_delay=min(30,transport_delay*2)
+                event('dashboard.exchange','Exchange failed · endpoint=/agent/v2/exchange · phase='+self.phase+' · kind='+self.proposal_kind+' · '+failure.stage+' · '+failure.code+' · retry_s='+str(delay)+' · '+str(failure))
                 if self.store is None:
-                    stop.wait(30);continue
-                with self.store.edit() as s:s['sync']=str(failure)+' Queued data retained; retry in 30 seconds.';s['exchange_error']={'stage':failure.stage,'code':failure.code,'phase':self.phase,'kind':self.proposal_kind}
+                    stop.wait(delay);continue
+                with self.store.edit() as s:s['sync']=str(failure)+' Queued data retained; retry in '+str(delay)+' seconds.';s['exchange_error']={'stage':failure.stage,'code':failure.code,'phase':self.phase,'kind':self.proposal_kind}
+            if self.store is not None and not self.cancelled():
+                if delay==2 and any(v['kind']=='wallet_setup_identity' for v in self.store.read()['outbox'].values()):delay=.1
             stop.wait(delay)

@@ -1,3 +1,19 @@
+# Build 44 validation
+
+A three-Agent IPv6 HTTP test uses three independent isolated Core nodes. Each
+Agent receives an identity challenge while its sender-preview worker is blocked.
+Each also encounters one deliberately dropped poll connection. All three signed
+identity replies are verified before the slow work is released; there are exactly
+three registrations, proving that the transient faults did not replace sessions.
+
+Focused tests check non-blocking command admission under full RPC capacity, a
+fixed control retry deadline, immediate rejection of expired authentication,
+non-replay after lost ACK/result replies, prompt exchange retries, and amber/green
+protected-window recovery using one client. Existing 15-second cleanup and stale
+callback guards remain covered. IPv6 restrictions and native DNS repair stay in
+place. The tests do not reproduce the user’s real internet latency or installed
+systemd/desktop environment, nor prove the separate Dashboard login fix.
+
 # Build 43 validation
 
 The Build 42 regression was reproduced on the installed laptop: ordinary IPv6
@@ -71,3 +87,11 @@ file with the extracted DEB, verify version and dependencies, and record hashes.
 Only source, tests, documentation and the built package are published. Machine
 logs, recovery scripts, real wallets, credentials and test runtime directories are
 excluded. There is no automatic migration or deletion of old persistent wallets.
+
+Build 44 cross-application integration: the current Dashboard Build 54 source
+accepted three signed identities from three separate Agent processes and three
+isolated Core nodes in 2.277 seconds after discovery, with no session replacement.
+This is a local regtest measurement, not a prediction of live network latency.
+
+Final route checks cover direct peer IPv6 addresses without DNS and named hosts
+through native IPv6 resolver IPC.
