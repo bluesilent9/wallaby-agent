@@ -88,7 +88,10 @@ class WalletSetup:
             facts={'name':p['name'],'chain':p['chain'],'threshold':p['threshold'],'total':len(roles),'height':p['height'],'roles':roles,'proposal_hash':digest(p),'identity':own,'requires_disc':any(r['local'] and r['storage']=='disc' for r in roles),'no_bypass':True}
             return {'kind':'wallet_setup','id':key,'setup':facts,'unlock_estimates':self.unlock_estimates(facts)}
         session=self.sessions.get(digest(p['proposal']))
-        if not session:raise ValueError('Approve this exact participation proposal locally before reviewing its complete policy. A RAM workspace restart requires a fresh setup session.')
+        if not session:
+            from activity_log import event
+            event('setup.missing','Complete policy has no original RAM session · setup='+digest(p['proposal'])[:12]+' · live_setups='+str(len(self.sessions))+' · burn_jobs='+str(len(self.disc_sessions)))
+            raise LocalActionFailure('setup_session_missing','This policy request has no original setup in this protected workspace. Do not approve participation again to recreate its keys. Cancel this setup in Dashboard and reconcile any installed wallets locally before starting a fresh setup. Other approved archive jobs are unaffected.')
         messages=[];roles={r['id']:r for r in p['proposal']['cosigners']}
         for envelope in p['contributions']:
             ident=envelope.get('message',{}).get('cosigner_id')

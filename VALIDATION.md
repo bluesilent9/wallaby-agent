@@ -1,3 +1,19 @@
+# Build 47 validation
+
+Final regression and UI results are recorded with the distributed package. The
+new repeat-archive fixture uses three isolated real Core 31 nodes, two distinct
+signer discs and two encrypted captures of one existing wallet. Each file-backed
+xorriso burn passes direct read-back and completes only its own archive request.
+Replayed completed requests do not create another capture; fresh requests do.
+Unmodified Dashboard Build 55 permits the new request after signed verification. Stage failures, disc status,
+memory admission, and unapproved/approved checkbox behavior have focused checks.
+All native desktop secret prompts are blocked by the test runner.
+
+The accelerated Qt renderer soak, renderer-only kill/reload and disposable user
+service OOM-continuation checks passed. No real optical hardware was tested and
+these checks do not guarantee recovery from every worker or machine failure.
+See [details and measured limits](AGENT_BUILD47_DISC_OPERATIONS.md).
+
 # Build 46 validation
 
 Native Qt widget tests run offscreen with invented passphrases. Mismatch leaves

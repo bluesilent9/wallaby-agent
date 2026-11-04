@@ -36,6 +36,19 @@ def decrypt_file(source,target,password):
 
 def require_space(root,amount):
     if shutil.disk_usage(root).free<amount:raise ValueError('Protected RAM has insufficient free space for this operation. Finish or unload other work first; no disk fallback is allowed.')
+    from protected_memory import required
+    if required():memory_budget(amount+128*1024*1024)
+
+def memory_budget(amount):
+    from diagnostics import LocalActionFailure
+    try:
+        group=next(line.split('::',1)[1] for line in Path('/proc/self/cgroup').read_text().splitlines() if line.startswith('0::'))
+        folder=Path('/sys/fs/cgroup')/group.lstrip('/');raw=(folder/'memory.max').read_text().strip();current=int((folder/'memory.current').read_text())
+        limit=None if raw=='max' else int(raw)
+    except (OSError,ValueError,StopIteration):raise LocalActionFailure('memory_budget_unavailable','The protected memory budget could not be checked. Disc preparation was not started; keep this workspace open.') from None
+    from activity_log import event
+    event('disc.memory','Preparation budget · current_bytes='+str(current)+' · limit_bytes='+str(limit)+' · reserve_bytes='+str(amount))
+    if limit is not None and current+amount>limit:raise LocalActionFailure('protected_memory_pressure','Protected memory is too full to prepare this backup safely. Keep this workspace open, finish or unload other RAM work, and retry after memory is available. No disc write was started and no disk fallback was used.')
 
 def pack(root,wallets,recovery,password):
     if recovery.get('version')==2:
@@ -112,6 +125,30 @@ def speed_value(speed):
     if not 0<Decimal(speed)<=64:raise ValueError('Unsupported optical write speed.')
     return speed
 
+def disc_status(device):
+    """Read-only medium classification; never selects an output drive or writes."""
+    if not shutil.which('xorriso'):raise ValueError('Install xorriso to check the optical disc.')
+    if not isinstance(device,str) or not re.fullmatch(r'/dev/sr[0-9]{1,2}',device):raise ValueError('Select a local optical drive.')
+    st=os.stat(device,follow_symlinks=False)
+    if not stat.S_ISBLK(st.st_mode) or os.major(st.st_rdev)!=11:raise ValueError('Device is not a Linux optical drive.')
+    result=subprocess.run(['/usr/bin/xorriso','-abort_on','FAILURE','-indev',device,'-toc','-end'],capture_output=True,timeout=30)
+    output=(result.stdout+result.stderr).decode(errors='replace')
+    current=re.search(r'Media current\s*:\s*([^\r\n]+)',output)
+    medium=current[1].strip()[:100] if current else ''
+    status=re.search(r'Media status\s*:\s*([^\r\n]+)',output)
+    status=status[1].strip().lower() if status else ''
+    if result.returncode==0 and re.search(r'\bis blank\b',status):
+        kind='blank';message='Blank disc — the drive reports no recorded session. It can be selected for a new burn if its type and capacity are supported.'
+    elif result.returncode==0 and re.search(r'\b(is written|is closed|is appendable|is full|contains data)\b',status):
+        kind='written';message='Already written — do not use this disc as a fresh blank. This status does not verify its files or recovery backup.'
+    elif re.search(r'no (?:media|medium)(?: present| found)?|medium not present',output,re.I):
+        kind='no_disc';message='No disc detected. Insert the disc and check again.'
+    else:
+        kind='unknown';message='Disc status could not be determined. Check the inserted disc and drive; no write was started.'
+    from activity_log import event
+    event('disc.status','Read-only check · status='+kind+' · exit_code='+str(result.returncode))
+    return {'status':kind,'message':message,'media':medium,'read_only':True}
+
 def media(device):
     if not shutil.which('xorriso'):raise ValueError('Disc Operations requires the optional xorriso package. Install it with: sudo apt install xorriso. SSH tunnels and node reporting do not require it.')
     if not isinstance(device,str) or not re.fullmatch(r'/dev/sr[0-9]{1,2}',device):raise ValueError('Select a local optical drive.')
@@ -150,10 +187,29 @@ def readback(device,size,expected,progress=None):
     finally:os.close(fd)
     if result.hexdigest()!=expected:raise ValueError('Disc read-back differs from the protected RAM image. Keep the RAM session open and use a fresh disc.')
 
+def writer_bytes(line,total):
+    """Drive-reported written MB, not bytes merely accepted by its input pipe."""
+    match=re.search(r'Track\s+\d+:\s*([0-9]+(?:\.[0-9]+)?)\s+of\s+[0-9]+(?:\.[0-9]+)?\s+MB\s+written',line)
+    return min(total,int(float(match[1])*1024*1024)) if match else None
+
 def write_stream(device,source,total,progress,speed='slowest'):
     selected=speed_value(speed)
-    import selectors
-    process=subprocess.Popen(['/usr/bin/xorriso','-abort_on','FAILURE','-as','cdrecord','-sao','speed='+selected,'fs=16m','dev='+device,'tsize='+str(total//2048)+'s','-data','-'],stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    import selectors,collections
+    process=subprocess.Popen(['/usr/bin/xorriso','-abort_on','FAILURE','-as','cdrecord','-v','-sao','speed='+selected,'fs=16m','dev='+device,'tsize='+str(total//2048)+'s','-data','-'],stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+    tail=collections.deque(maxlen=12);reported=0
+    def read_status():
+        nonlocal reported
+        pending=b''
+        try:
+            while data:=os.read(process.stderr.fileno(),4096):
+                pending=(pending+data).replace(b'\r',b'\n');lines=pending.split(b'\n');pending=lines.pop()[-4096:]
+                for raw in lines:
+                    line=raw.decode(errors='replace')[:600];tail.append(line)
+                    amount=writer_bytes(line,total)
+                    if amount is not None and amount>reported:reported=amount;progress(min(amount,max(0,total-1)))
+            if pending:tail.append(pending.decode(errors='replace')[:600])
+        finally:process.stderr.close()
+    reader=threading.Thread(target=read_status,daemon=True);reader.start()
     digest=hashlib.sha256();written=0;deadline=time.monotonic()+48*3600
     try:
         os.set_blocking(process.stdin.fileno(),False)
@@ -163,21 +219,28 @@ def write_stream(device,source,total,progress,speed='slowest'):
                 view=memoryview(chunk)
                 try:
                     while view:
+                        if process.poll() is not None:raise ValueError('The optical writer exited before accepting the complete image.')
                         if time.monotonic()>deadline or not selector.select(120):raise ValueError('The optical writer stopped accepting data. The disc is incomplete; use a fresh blank disc after checking the drive.')
                         try:count=os.write(process.stdin.fileno(),view)
                         except BlockingIOError:continue
                         if count<=0:raise ValueError('The optical writer stopped.')
-                        digest.update(view[:count]);written+=count;progress(written);view=view[count:]
+                        digest.update(view[:count]);written+=count;view=view[count:]
                 finally:view.release()
         process.stdin.close()
         if written!=total or process.wait(timeout=1800)!=0:raise ValueError('Optical writing failed or is uncertain. Keep the RAM session open and use a fresh blank disc.')
+        reader.join(2);progress(total)
         return digest.hexdigest()
     except Exception:
         if process.poll() is None:process.terminate();process.wait(timeout=30)
+        reader.join(2)
+        from activity_log import event,redact
+        event('disc.writer','Writer failed · exit_code='+str(process.returncode)+' · '+redact(' | '.join(tail))[-1100:])
         raise
+    finally:
+        if not process.stdin.closed:process.stdin.close()
 
 class Burner:
-    def __init__(self,root,on_complete):self.root=Path(root);self.root.mkdir(mode=0o700,parents=True,exist_ok=True);self.on_complete=on_complete;self.job=None;self.lock=threading.Lock();self.pending=[];self.thread=None;self.selected=None;self.replacement_resolver=None;self.completed_sets=[]
+    def __init__(self,root,on_complete):self.root=Path(root);self.root.mkdir(mode=0o700,parents=True,exist_ok=True);self.on_complete=on_complete;self.job=None;self.lock=threading.Lock();self.pending=[];self.thread=None;self.selected=None;self.replacement_resolver=None;self.completed_sets=[];self.outcomes=[]
     def state(self):
         if self.job and self.job['phase']=='complete' and time.time()-self.job['finished']>5:
             self.job=None
@@ -186,6 +249,7 @@ class Burner:
         rows=(self.job.get('_members') or [(self.job['id'],self.job['wallets'],self.job['recovery'])]) if self.job else []
         rows+=self.pending
         result['completed_sets']=list(self.completed_sets)
+        result['outcomes']=list(self.outcomes)
         result['queue']=[]
         for i,w,r in rows:
             row={'id':i,'name':r.get('display_name',r.get('name',r.get('proposal',{}).get('name','Wallet'))),'policy_hash':r['policy_hash'],'selected':i in (self.selected if self.selected is not None else [self.job['id']] if self.job else [])}
@@ -193,6 +257,16 @@ class Burner:
             if role:row.update(signer_name=role['name'],signer_id=role['id'])
             result['queue'].append(row)
         return result
+    def outcome(self,job,kind):
+        import secrets
+        row={'id':secrets.token_hex(12),'job_id':job['id'],'disc':job.get('discs_verified',0)+(0 if kind in ('verified','completion_failed') else 1),'kind':kind}
+        self.outcomes.append(row);self.outcomes=self.outcomes[-32:]
+        from activity_log import event
+        event('disc.result','outcome='+kind+' · disc='+str(row['disc'])+' · job='+job['id'][:12])
+    def stage(self,job,phase,**values):
+        job.update(phase=phase,**values)
+        from activity_log import event
+        event('disc.stage','stage='+phase+' · disc='+str(job.get('discs_verified',0)+1)+' · job='+job['id'][:12])
     def authorise(self,job_id,wallets,recovery):
         if self.job:raise ValueError('Finish the current disc session first.')
         self.selected=None
@@ -264,29 +338,30 @@ class Burner:
         with self.lock:
             self.validate_options(device,confirmed,disc_count,speed)
             self.combine()
-            job=self.job;job['_options']=(disc_count,speed);job.update(disc_count=disc_count,speed=speed,phase='preparing',message='Preparing disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+' in protected RAM.')
+            job=self.job;job['_options']=(disc_count,speed);job.update(disc_count=disc_count,speed=speed,phase='preparing',preparation_percent=0,preparation_detail='Encrypting the approved recovery package',message='Preparing disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+' in protected RAM.')
             def work():
                 nonlocal password
-                written=False;all_verified=False
+                written=False;all_verified=False;burn_finished=False;verification_started=False
                 try:
                     directory=self.root/job['id'];directory.mkdir(mode=0o700,exist_ok=True);disc=directory/'disc';iso=directory/'disc.iso'
                     if not job.get('_prepared'):
-                        disc=pack(directory,job['wallets'],job['recovery'],password);password=None;image(disc,iso);job['_prepared']=True
+                        disc=pack(directory,job['wallets'],job['recovery'],password);password=None;job.update(preparation_percent=25,preparation_detail='Creating the recovery filesystem');image(disc,iso);job.update(preparation_percent=50,preparation_detail='Checking the encrypted package');job['_prepared']=True
                         with (disc/'recovery.wallaby').open('rb') as stream:job['archive_id']=hashlib.file_digest(stream,'sha256').hexdigest()
-                    password=None
+                    password=None;job.update(preparation_percent=75,preparation_detail='Checking drive, medium and recovery layout')
                     details=media(device)
                     if speed!='slowest' and speed not in details['speeds']:raise ValueError('The inserted medium no longer supports the chosen speed. No write was started.')
                     capacity=details['capacity_bytes']
                     if capacity is None:raise ValueError('The drive did not report writable capacity. No write was started.')
                     from disc_archive import plan,chunks
                     layout=plan(iso,disc/'recovery.wallaby',capacity)
-                    job.update(phase='burning',copies=layout['copies'],total_bytes=layout['total_bytes'],written_bytes=0,verified_bytes=0,message='Writing disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+' with '+str(layout['copies'])+' repeated recovery copies. Speed: '+('slowest supported' if speed=='slowest' else speed+'×')+'. Full read-back follows writing.')
+                    job['preparation_percent']=100
+                    self.stage(job,'burning',copies=layout['copies'],total_bytes=layout['total_bytes'],written_bytes=0,verified_bytes=0,message='Burning disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+' with '+str(layout['copies'])+' repeated recovery copies. Speed: '+('slowest supported' if speed=='slowest' else speed+'×')+'. Full read-back follows writing.')
                     job['_write_started']=True;job['_device']=device;job['_layout']=layout;job['_verification_finished']=False;job['_verification_succeeded']=False;job['_attempts']=job.get('_attempts',0)+1
-                    written=True;sha=write_stream(device,chunks(iso,disc/'recovery.wallaby',layout),layout['total_bytes'],lambda count:job.update(written_bytes=count),speed);job['_image_sha256']=sha
-                    job.update(phase='verifying',message='Checking every recorded byte on disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+'.')
+                    written=True;sha=write_stream(device,chunks(iso,disc/'recovery.wallaby',layout),layout['total_bytes'],lambda count:job.update(written_bytes=count),speed);job['_image_sha256']=sha;burn_finished=True
+                    verification_started=True;self.stage(job,'verifying',message='Checking every recorded byte on disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+'.')
                     try:readback(device,layout['total_bytes'],sha,lambda count:job.update(verified_bytes=count));job['_verification_succeeded']=True
                     finally:job['_verification_finished']=True
-                    job['discs_verified']+=1;job.setdefault('verified_discs',[]).append({'disc':job['discs_verified'],'sha256':sha,'bytes':layout['total_bytes']})
+                    job['discs_verified']+=1;self.outcome(job,'verified');job.setdefault('verified_discs',[]).append({'disc':job['discs_verified'],'sha256':sha,'bytes':layout['total_bytes']})
                     if job.get('_cancel_pending'):
                         job.update(phase='cancel_cleanup',message='Cancellation received. The current burn and read-back finished. Review disc cleanup on Authorise; no additional copy will be written.');return
                     if job['discs_verified']<disc_count:
@@ -297,6 +372,11 @@ class Burner:
                     import shutil
                     shutil.rmtree(directory);job.update(phase='complete',message='Success! All '+str(disc_count)+' requested disc(s) passed complete direct read-back verification.',finished=time.time())
                 except Exception as error:
+                    self.outcome(job,'completion_failed' if all_verified else 'verification_failed' if burn_finished and verification_started else 'burn_failed' if written else 'preparation_failed')
+                    from activity_log import event
+                    from diagnostics import action_code,action_detail
+                    event('disc.failure','stage='+job.get('phase','unknown')+' · '+action_code(error)+' · '+action_detail(error))
+                    job['failed_stage']=job.get('phase','preparing')
                     phase='completion_uncertain' if all_verified else 'uncertain' if written else 'error'
                     message=str(error) if isinstance(error,ValueError) else 'Disc work stopped. Inspect the local drive and outcome; no operation was repeated.'
                     job.update(phase=phase,message=message+(' All requested discs were verified; reconcile completion before doing anything else.' if all_verified else ' Keep the RAM workspace open. Any retry requires a fresh blank disc and your confirmation.'))
@@ -304,7 +384,7 @@ class Burner:
                     password=None
                     if job.get('_cancel_pending') and job.get('_write_started') and job['phase']!='complete':
                         if not job.get('_verification_finished'):
-                            job.update(phase='verifying',message='Cancellation received. Checking the medium after the writer stopped; an incomplete disc must still be destroyed locally.')
+                            verification_started=True;self.stage(job,'verifying',message='Cancellation received. Checking the medium after the writer stopped; an incomplete disc must still be destroyed locally.')
                             try:
                                 expected=job.get('_image_sha256')
                                 if not job.get('_image_sha256'):

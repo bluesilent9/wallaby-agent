@@ -1,0 +1,4 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert'),path=require('path');
+const source=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8'),start=source.indexOf('async function refresh('),end=source.indexOf('\nfunction edited(',start);let resolve,calls=0,renders=0;
+const c={busy:false,window:{},refreshPromise:null,saving:false,initialized:true,api:async()=>{calls++;return new Promise(r=>resolve=r);},render(){renders++;},notify(){},$:()=>({})};vm.createContext(c);vm.runInContext(source.slice(start,end),c);
+(async()=>{const pending=Array.from({length:100},()=>c.refresh());assert.equal(calls,1);resolve({fixture:true});await Promise.all(pending);assert.equal(renders,1);const next=c.refresh();assert.equal(calls,2);resolve({fixture:true});await next;assert.equal(renders,2);console.log('One in-flight status poll despite 100 timer/refresh requests; completed polling resumes normally.');})().catch(e=>{console.error(e);process.exitCode=1;});

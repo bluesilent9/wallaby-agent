@@ -414,6 +414,10 @@ class Workspace:
                 return (stage if method=='archive.retire_stage' else destroyed)(self.archive_ops,*args)
             if method=='archive.delete':return self.archive_ops.delete(*args)
             if method=='archive.destroyed':return self.archive_ops.destroyed(*args)
+            if method in ('disc.read','disc.status','disc.probe') and (self.archives.reading or self.setup.burner.thread and self.setup.burner.thread.is_alive()):
+                from diagnostics import LocalActionFailure
+                raise LocalActionFailure('optical_busy','Another optical read, burn or verification is active. Wait for it to finish before checking or reading the disc.')
+            if method=='disc.burn' and self.archives.reading:raise ValueError('Wait for the current optical read to finish before burning.')
             if method=='disc.selection':return self.setup.burner.select(*args)
             if method=='disc.refresh':return self.archive_ops.queue_loaded(*args)
             if method=='disc.read':
@@ -452,6 +456,7 @@ class Workspace:
             if method=='disc.probe':
                 from disc_backup import media
                 return media(*args)
+            if method=='disc.status':return __import__('disc_backup').disc_status(*args)
             if method=='disc.drives':return [{'device':'/dev/'+p.name,'name':(p/'device/model').read_text().strip()} for p in Path('/sys/class/block').glob('sr[0-9]*')]
             if method=='wallet.sign':
                 key,action,fee_ack=args
