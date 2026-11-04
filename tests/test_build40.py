@@ -24,11 +24,13 @@ class ThreeAgentAccounts(unittest.TestCase):
      a.store.receive(p)
      with patch('wallet_setup.secret_dialog',return_value='fixture-encrypted-passphrase'):a.approve_proposal(binding,{r['fingerprint']:r['fingerprint'] for r in identities})
     contributions=[e for a in agents for e in a.sessions[binding]['contributions']];descs=policy(p,[e['message'] for e in contributions]);final={'kind':'wallet_setup_policy','version':1,'proposal':p,'contributions':contributions,'receive_descriptor':descs[0],'change_descriptor':descs[1]}
-    for a in agents:a.store.receive(final);a.review(digest(final));a.approve_policy(digest(final))
+    for a in agents:
+     a.store.receive(final);a.review(digest(final))
+     with patch('wallet_setup.secret_dialog',return_value='fixture-encrypted-passphrase'):a.approve_policy(digest(final))
     records=[next(iter(a.store.read()['approved_wallets'].values())) for a in agents];signers=[next(iter(r['signing_wallets'].values())) for r in records];raw=[rpc(n.core,'listdescriptors',[False],name) for n,name in zip(nodes,signers)]
     for i,a in enumerate(agents):
-     state=a.store.read();self.assertEqual(classify(state,records[i]['monitor_wallet'],rpc(nodes[i].core,'listdescriptors',[False],records[i]['monitor_wallet']))['display_name'],'Treasury fixture')
-     meta=classify(state,signers[i],raw[i]);self.assertEqual(meta['role_name'],roles[i+2]['name']);self.assertEqual(meta['kind'],'signer');requests=[]
+     state=a.store.read();self.assertEqual(classify(state,records[i]['monitor_wallet'],rpc(nodes[i].core,'listdescriptors',[False],records[i]['monitor_wallet']))['display_name'],signers[i])
+     meta=classify(state,signers[i],raw[i]);self.assertEqual(meta['role_name'],roles[i+2]['name']);self.assertEqual(meta['kind'],'combined');requests=[]
      for j in range(3):
       if j==i:continue
       for sender,receiver,direction in [(i,j,'send'),(j,i,'receive')]:

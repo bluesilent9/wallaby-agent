@@ -18,7 +18,11 @@ def classify(state,name,raw):
     for record in state.get('approved_wallets',{}).values():
         if not isinstance(record,dict) or not {'proposal','policy_hash','receive_descriptor','change_descriptor','contributions'}<=set(record):continue
         proposal=record['proposal'];base={'version':1,'setup_id':digest(proposal),'policy_hash':record['policy_hash'],'logical_name':proposal['name'],'threshold':proposal['threshold'],'total':len(proposal['cosigners'])}
-        if actual==raw_keys([record['receive_descriptor'].split('#')[0],record['change_descriptor'].split('#')[0]]):
+        if raw_keys([record['receive_descriptor'].split('#')[0],record['change_descriptor'].split('#')[0]])<=actual:
+            ident=next((ident for ident,wallet in record.get('signing_wallets',{}).items() if wallet==name),None)
+            if ident is not None:
+                role=next(r for r in proposal['cosigners'] if r['id']==ident)
+                return {**base,'kind':'combined','role_id':ident,'role_name':role['name'],'display_name':name,'ready':record.get('ready',False)}
             return {**base,'kind':'policy','display_name':proposal['name'],'ready':record.get('ready',False)}
         for envelope in record['contributions']:
             contribution=envelope['message'];expected=raw_keys(['wpkh('+contribution[k]+')' for k in ('receive_key','change_key')])
@@ -32,9 +36,13 @@ def classify(state,name,raw):
     return None
 
 def blocked(state,p):
+    if not isinstance(state,dict):state={}
     if p.get('kind')!='wallet_transfer':return False
     raw=p['public_wallet'];info=classify(state,raw['wallet_name'],raw)
-    return bool(info and info['kind']=='signer')
+    if p.get('source_has_private_keys') is True:
+        for record in state.get('approved_wallets',{}).values():
+            if record.get('wallet_layout')=='combined-policy-key-v1' and raw_keys([record['receive_descriptor'].split('#')[0],record['change_descriptor'].split('#')[0]])<=descriptors(raw):return True
+    return bool(info and info['kind'] in ('signer','combined'))
 
 def guard(core,p,store=None,actual_name=None):
     from wallet_ops import rpc
@@ -43,6 +51,15 @@ def guard(core,p,store=None,actual_name=None):
     # Match public keys against persisted Core policies too. A Dashboard rename
     # cannot bypass the check, including after a protected RAM session restarts.
     wanted=descriptors(p['public_wallet'])
+    # Combined private wallets must not become ordinary replica transfers. The
+    # Dashboard must coordinate their public policy separately, never clone roles.
+    from wallet_setup_signing import restricted
+    for name in (rpc(core,'listwallets') if isinstance(getattr(core,'config',None),dict) else []):
+        local=rpc(core,'listdescriptors',[False],name)
+        if descriptors(local)!=wanted:continue
+        if not rpc(core,'getwalletinfo',[],name).get('private_keys_enabled'):continue
+        protected_policy=any((parsed:=restricted(row['desc'])) and (parsed['height'] is not None or parsed['total']>1) for row in local['descriptors'])
+        if protected_policy:raise LocalActionFailure('managed_signer_transfer',REASON)
     if not isinstance(getattr(core,'config',None),dict):return
     from wallet_setup_signing import restricted
     for monitor in rpc(core,'listwallets'):

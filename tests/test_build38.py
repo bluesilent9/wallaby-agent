@@ -24,7 +24,7 @@ class IdleDiscReads(unittest.TestCase):
   for phase in ('capturing','error','discarding'):
    self.w.archive_ops.jobs={'backup':{'phase':phase}};self.assertEqual(self.query()['error']['code'],'synchronisation_busy')
   self.w.archive_ops.jobs={};self.w.archives.reading=True;self.assertIn('error',self.query());self.w.archives.reading=False
-  self.w.setup.burner.thread=Mock();self.w.setup.burner.thread.is_alive.return_value=True;self.assertIn('error',self.query())
+  self.w.setup.burner.thread=Mock();self.w.setup.burner.thread.is_alive.return_value=True;self.assertIn('result',self.query())
  def test_pending_cleanup_transfer_and_history_guards_are_unchanged(self):
   for kind in ('destroy_disc','archive_cancel','builder_cancel'):
    with self.w.store.edit() as s:s['pending']={'task':{'proposal':{'kind':kind},'state':'pending'}}

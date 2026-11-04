@@ -52,6 +52,16 @@ class MemoryCore:
         else:
             self.close();raise LocalActionFailure('core_startup_rpc_timeout','The offline Core process did not make its loopback RPC ready within 10 seconds. No wallet keys were created.')
         self.startup_output.clear()
+    def private_descriptors(self,name):
+        """Internal offline-Core read. Never exposed through public RPC or bridge."""
+        from node_client import http_json
+        from urllib.parse import quote
+        if not self.process or self.process.poll() is not None:raise ValueError('The offline signing workspace is unavailable.')
+        cookie=Path(self.core.config['cookie'])
+        if not cookie.resolve().is_relative_to(self.root.resolve()):raise ValueError('Offline Core credentials are outside its protected directory.')
+        result=http_json(self.core.config['rpc_port'],'/wallet/'+quote(name,safe=''),{'jsonrpc':'2.0','id':'private-local-policy','method':'listdescriptors','params':[True]},auth=cookie.read_text().strip(),host='127.0.0.1',response_limit=1024*1024)
+        if not isinstance(result,dict) or result.get('error') or not isinstance(result.get('result'),dict):raise ValueError('Offline Core could not read the unlocked signing policy. No private diagnostic was exported.')
+        return result['result']['descriptors']
     def close(self):
         if self.process and self.process.poll() is None:
             try:rpc(self.core,'stop');self.process.wait(timeout=60)
@@ -111,6 +121,11 @@ class WalletSetup:
         elif set(pins)=={r['id'] for r in p['cosigners']}:
             if any(pins[r['id']]!=fingerprint(r['agent_key']) for r in p['cosigners']):raise ValueError('An independently entered Agent fingerprint does not match.')
         else:raise ValueError('Verify each distinct producing Agent in this exact wallet setup.')
+        from combined_wallet import wallet_name
+        local_roles=[r for r in p['cosigners'] if r['agent_key']==own['public_key'] and r['storage']=='node']
+        planned=[wallet_name(p,r) for r in local_roles] or [wallet_name(p)]
+        if len(set(planned))!=len(planned):raise ValueError('Use distinct local signing-role names before generating keys.')
+        if {w['name'] for w in rpc(self.core,'listwalletdir')['wallets']}.intersection(planned):raise ValueError('A requested Core wallet name already exists. Existing wallets were retained; no signing keys were generated.')
         if any(session['phase'] not in ('complete','awaiting_disc') for session in self.sessions.values()):raise ValueError('Finish the current wallet setup and its physical backups before starting another wallet.')
         binding=digest(p);self.check_cancel(binding)
         if binding in self.sessions:raise ValueError('This setup already generated keys. No secret generation was repeated.')
@@ -158,31 +173,44 @@ class WalletSetup:
         if fresh!=old[0]:raise ValueError('Complete policy changed. Review again.')
         p=self.store.read()['pending'][key]['proposal'];session=self.sessions[fresh['proposal_hash']];self.check_cancel(fresh['proposal_hash'])
         if session['phase']!='contributed':raise ValueError('Setup already attempted. Inspect local outcome; nothing was replayed.')
+        from combined_wallet import wallet_name,role_wallet,public_policy,LAYOUT
+        roles={r['id']:r for r in session['proposal']['cosigners']}
+        targets={ident:wallet_name(session['proposal'],roles[ident]) for ident,row in session['wallets'].items() if row['storage']=='node'}
+        monitor=next(iter(targets.values()),wallet_name(session['proposal']))
+        planned=list(targets.values()) or [monitor]
+        if len(set(planned))!=len(planned):raise ValueError('Signing roles produce duplicate wallet names. Choose distinct role names; no wallet was installed.')
+        existing={w['name'] for w in rpc(self.core,'listwalletdir')['wallets']}
+        if existing.intersection(planned):raise ValueError('A requested Core wallet name already exists. No existing wallet was replaced or renamed.')
         with self.store.edit() as s:s['pending'][key]['state']='attempted'
         session.update(phase='installing',policy=p,review=fresh)
         local={};disc={}
+        # All production names are checked before requesting any additional secret.
         for ident,row in session['wallets'].items():
             self.check_cancel(fresh['proposal_hash'])
-            path=self.store.root/'setup-cores'/fresh['proposal_hash']/(hashlib.sha256(ident.encode()).hexdigest()+'.dat');rpc(session['core'].core,'backupwallet',[str(path)],row['name'])
+            combined=role_wallet(self,session,roles[ident],fresh)
+            path=self.store.root/'setup-cores'/fresh['proposal_hash']/(hashlib.sha256(ident.encode()).hexdigest()+'.dat')
+            rpc(session['core'].core,'backupwallet',[str(path)],combined)
             if row['storage']=='disc':disc[hashlib.sha256(ident.encode()).hexdigest()]=str(path)
             else:
-                target='Wallaby key '+fresh['proposal_hash'][:12]+' '+hashlib.sha256(ident.encode()).hexdigest()[:8]
-                if any(w['name']==target for w in rpc(self.core,'listwalletdir')['wallets']):raise ValueError('The setup signing-wallet name already exists; no existing wallet was claimed or overwritten.')
-                session.setdefault('installed_wallets',{})[target]=rpc(session['core'].core,'listdescriptors',[False],row['name'])
+                target=targets[ident]
+                session.setdefault('installed_wallets',{})[target]=public_policy(fresh)
                 rpc(self.core,'restorewallet',{'wallet_name':target,'backup_file':__import__('core_ram_path').for_core(self.core,path),'load_on_startup':True},timeout=86400)
                 info=rpc(self.core,'getwalletinfo',[],target)
                 if not info.get('private_keys_enabled') or info.get('unlocked_until')!=0:raise ValueError('Persistent signer failed encrypted/locked verification.')
+                from build8_policy import descriptors
+                if descriptors(rpc(self.core,'listdescriptors',[False],target))!=descriptors(public_policy(fresh)):raise ValueError('Persistent signing wallet differs from the approved full policy.')
                 local[ident]=target;path.unlink()
-        monitor='Wallaby policy '+fresh['policy_hash'][:20]
         self.check_cancel(fresh['proposal_hash'])
-        if any(w['name']==monitor for w in rpc(self.core,'listwalletdir')['wallets']):raise ValueError('The setup monitor already exists; no existing wallet was claimed.')
-        session.setdefault('installed_wallets',{})[monitor]=None
-        rpc(self.core,'createwallet',{'wallet_name':monitor,'disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':True})
-        requests=[{'desc':fresh[field],'timestamp':'now','active':True,'internal':bool(i),'range':[0,999]} for i,field in enumerate(('receive_descriptor','change_descriptor'))]
-        result=rpc(self.core,'importdescriptors',{'requests':requests},monitor,timeout=86400)
-        if not all(r.get('success') for r in result):raise ValueError('Core could not install the approved public policy.')
-        session['installed_wallets'][monitor]=rpc(self.core,'listdescriptors',[False],monitor)
-        recovery={'version':1,'proposal':p['proposal'],'policy_hash':fresh['policy_hash'],'receive_descriptor':fresh['receive_descriptor'],'change_descriptor':fresh['change_descriptor'],'contributions':p['contributions'],'local_cosigners':list(session['wallets'])}
+        if not local:
+            # A machine producing only physical keys still needs a named public
+            # wallet. Machines with node keys use that same wallet for monitoring.
+            session.setdefault('installed_wallets',{})[monitor]=None
+            rpc(self.core,'createwallet',{'wallet_name':monitor,'disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':True})
+            requests=[{'desc':fresh[field],'timestamp':'now','active':True,'internal':bool(i),'range':[0,999]} for i,field in enumerate(('receive_descriptor','change_descriptor'))]
+            result=rpc(self.core,'importdescriptors',{'requests':requests},monitor,timeout=86400)
+            if not all(r.get('success') for r in result):raise ValueError('Core could not install the approved public policy.')
+            session['installed_wallets'][monitor]=rpc(self.core,'listdescriptors',[False],monitor)
+        recovery={'version':1,'wallet_layout':LAYOUT,'proposal':p['proposal'],'policy_hash':fresh['policy_hash'],'receive_descriptor':fresh['receive_descriptor'],'change_descriptor':fresh['change_descriptor'],'contributions':p['contributions'],'local_cosigners':list(session['wallets'])}
         with self.store.edit() as s:
             s.setdefault('approved_wallets',{})[fresh['policy_hash']]={**recovery,'monitor_wallet':monitor,'signing_wallets':local,'height':fresh['height'],'created':time.time()}
             s['completed'][key]={'kind':'wallet_setup_policy','at':time.time()};s['pending'].pop(key,None)
@@ -199,7 +227,7 @@ class WalletSetup:
                 job_id=fresh['proposal_hash']+'-'+ident[:12];self.disc_sessions[job_id]=(fresh['proposal_hash'],ident)
                 self.burner.queue(job_id,{ident:path},{**recovery,'physical_cosigner_file':ident,'local_cosigners':[role['id'] for role in p['proposal']['cosigners'] if hashlib.sha256(role['id'].encode()).hexdigest()==ident]})
         else:self.finish_session(session)
-        return {'message':'Exact policy approved and public monitor installed.'+(' Disc Operations is now available. Private-only disc keys remain in protected RAM.' if disc else ' Encrypted local signing wallets installed.'),'burn_authorised':bool(disc)}
+        return {'message':'Exact policy approved. Each node signer stores its encrypted key and complete policy in one named Core wallet.'+(' Disc Operations is now available. Private-only disc keys remain in protected RAM.' if disc else ' Encrypted local signing wallets installed.'),'burn_authorised':bool(disc)}
     def burn_complete(self,ident,sha):
         if ident not in self.disc_sessions:
             if not getattr(self,'external_burn_complete',None):raise ValueError('Unknown external archive completion.')

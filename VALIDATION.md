@@ -1,11 +1,41 @@
-# Build 40 validation
+# Build 41 validation
 
-80 focused Python checks passed: 79 in the complete local regression run and one additional receive-boundary check after its final guard was added. All 17 JavaScript interface suites and syntax checks passed.
+The focused regression suite covers 95 Python checks, including real isolated
+Bitcoin Core 31 nodes, plus 17 JavaScript interface suites. The development test
+runner isolates runtime/configuration directories and refuses any unmocked native
+desktop dialogue. Release evidence is recorded in the supplied test log.
 
-The new real Bitcoin Core 31 test creates a 3-of-5 vault across three independent Agents with two physical-only roles and one persistent signer per Agent. Every Agent receives four directed signer-transfer offers, reproducing the reported shape. All are refused locally, fixed error results are queued, original node account placement is unchanged and physical signer material remains in its original RAM Core. Descriptor matching catches renamed offers. A fresh RAM store with persisted Core policy data still refuses the recognised key; an unrelated private wallet remains synchronisable.
+The new cluster test uses three independent Agents for a 3-of-5 height-locked
+wallet, with two physical roles produced on the Australia-like node. Each node
+signer is restored as one encrypted named wallet containing the exact complete
+receive/change policy; no additional persistent monitor is created there. The
+private keys remain distinct. Three named wallets produce a complete spend of
+regtest coins after independent signing. Ordinary signer-clone offers remain
+blocked, including after RAM-state loss.
 
-Additional checks cover descriptor-bound logical names and roles, reserved legacy accounts, pending-request refusal without user denials, retention of attempted outcomes, receiving rejection before wallet staging/import, and friendly labels with the exact Core name still visible. Existing archive-during-setup, three-Agent complete-policy approval, expiry/re-review, cancellation preflight/reconciliation, startup, helper configuration, public RPC execution, queue revisions and independently signed public preview tests remain active.
+The same producer serves public wallet inventory and stages an unrelated existing
+David SMSF fixture while its two original physical roles wait for disc writing.
+A separate contention check overlaps two public requests with optical writing
+flagged active; both return successful public results while unsafe closure stays
+blocked. Existing generation, installation, restoration, capture and recovery
+restrictions are also tested.
 
-The sandbox blocked local test sockets, so the complete isolated test command was run from the user's terminal on the development machine; its shared output is recorded in work/build40-final.log. The run uses dummy regtest wallets and no external peers or production RPC. The receive-boundary, non-network queue tests and all interface checks also ran under the sandbox. No production node, key, Core wallet or installed service was modified by development tests. Physical optical burning and a privileged fresh-OS installer run were not exercised.
+A combined role backup restores into an offline RAM Core, independently verifies
+its assigned private account and stays encrypted/locked. Substituting another
+role's encrypted backup is refused despite identical public policies. A private
+wallet refresh keeps the same Core wallet name and retains old descriptors while
+adding the new height policy. Existing tests exercise two archival refreshes,
+policy history, message/output checks, multi-wallet packages, cancellation and
+helper preflight/reconciliation, startup, public RPC privacy and queue behaviour.
 
-Packaging verifies source, web assets, helpers and documentation against the DEB and records checksums. Machine-specific recovery scripts, production logs, runtime data, wallets, keys and browser profiles are excluded from publication. Dashboard requires its companion managed-account discovery/ownership changes; Agent alone cannot purge a server's saved catalogue.
+The tests do not replace testing your three physical laptops against the deployed
+Dashboard. Physical optical writing/read-back, a privileged installer run on a
+fresh OS and your real wallet files were not exercised or modified. Dashboard
+Build 52 supplies companion workflow/UI fixes; see the Build 41 format document
+for role identity, logical wallet grouping and archive routing requirements.
+
+Packaging checks compare every shipped source/web file, helper and documentation
+file with the extracted DEB, verify version and dependencies, and record hashes.
+Only source, tests, documentation and the built package are published. Machine
+logs, recovery scripts, real wallets, credentials and test runtime directories are
+excluded. There is no automatic migration or deletion of old persistent wallets.

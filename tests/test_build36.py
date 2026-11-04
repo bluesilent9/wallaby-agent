@@ -60,11 +60,12 @@ class ThreeAgentVault(unittest.TestCase):
     contributions=[e for a in agents for e in a.sessions[key]['contributions']];self.assertEqual(len(contributions),5)
     descriptors=policy(p,[e['message'] for e in contributions]);final={'kind':'wallet_setup_policy','version':1,'proposal':p,'contributions':contributions,'receive_descriptor':descriptors[0],'change_descriptor':descriptors[1]}
     for agent in agents:
-     agent.store.receive(final);review=agent.review(digest(final));self.assertEqual((review['setup']['threshold'],review['setup']['total'],review['setup']['height']),(3,5,100));agent.approve_policy(digest(final))
+     agent.store.receive(final);review=agent.review(digest(final));self.assertEqual((review['setup']['threshold'],review['setup']['total'],review['setup']['height']),(3,5,100));
+     with patch('wallet_setup.secret_dialog',return_value='fixture-encryption-passphrase'):agent.approve_policy(digest(final))
     self.assertEqual(len(agents[0].disc_sessions),2)
     self.assertEqual(agents[0].sessions[key]['phase'],'awaiting_disc')
     self.assertEqual([a.sessions[key]['phase'] for a in agents[1:]],['complete','complete'])
-    self.assertEqual([len(rpc(n.core,'listwallets')) for n in nodes],[1,3,2])
+    self.assertEqual([len(rpc(n.core,'listwallets')) for n in nodes],[1,2,1])
     # Add an unrelated Dashboard archive while this producer waits for discs.
     from archive_operations import Operations
     from types import SimpleNamespace
@@ -94,7 +95,7 @@ class SetupFailureEvents(unittest.TestCase):
   from approval_store import Store,digest
   from wallet_setup import WalletSetup
   with tempfile.TemporaryDirectory() as d:
-   core=Mock();core.call.return_value={'result':{'chain':'regtest'}};setup=WalletSetup(core,Store(Path(d)/'state'),binary='/missing-wallaby-bitcoind');own=setup.own_identity()
+   core=Mock();core.call.side_effect=lambda ident,method,*a,**k:{'result':{'wallets':[]} if method=='listwalletdir' else {'chain':'regtest'}};setup=WalletSetup(core,Store(Path(d)/'state'),binary='/missing-wallaby-bitcoind');own=setup.own_identity()
    p={'kind':'wallet_setup','version':1,'session_id':'c'*64,'chain':'regtest','name':'Failure fixture','threshold':1,'height':100,'expires_at':int(time.time())+3600,'cosigners':[{'id':'one','name':'Disc signer','agent_key':own['public_key'],'storage':'disc'}]};setup.store.receive(p)
    with patch('wallet_setup.secret_dialog') as secret,patch('activity_log.event') as event:
     with self.assertRaises(LocalActionFailure):setup.approve_proposal(digest(p),{own['fingerprint']:own['fingerprint']})

@@ -57,9 +57,9 @@ class Refresh:
         p=validate(self.store.read()['pending'][key]['proposal'])
         if rpc(self.core,'getblockchaininfo')['chain']!=p['chain']:raise ValueError('Policy network differs from the local node.')
         raw=rpc(self.core,'listdescriptors',[False],p['wallet'])
-        if re.fullmatch('Wallaby policy [0-9a-f]{20}',p['wallet']):
-            first=rpc(self.core,'deriveaddresses',[p['previous_descriptors'][0],[0,0]])[0]
-            if not any(v.startswith('Wallaby setup ready:') for v in rpc(self.core,'getaddressinfo',[first],p['wallet']).get('labels',[])):raise ValueError('Finish and verify the original wallet setup before refreshing its vault policy.')
+        first=rpc(self.core,'deriveaddresses',[p['previous_descriptors'][0],[0,0]])[0]
+        labels=rpc(self.core,'getaddressinfo',[first],p['wallet']).get('labels',[])
+        if any(v.startswith('Wallaby setup pending:') for v in labels) or re.fullmatch('Wallaby policy [0-9a-f]{20}',p['wallet']) and not any(v.startswith('Wallaby setup ready:') for v in labels):raise ValueError('Finish and verify the original wallet setup before refreshing its vault policy.')
         if not descriptors({'wallet_name':'old','descriptors':[{'desc':d} for d in p['previous_descriptors']]})<=descriptors(raw):raise ValueError('The old policy is not present in the selected local wallet.')
         parsed=restricted(p['receive_descriptor']);samples=[]
         for branch,desc in enumerate((p['receive_descriptor'],p['change_descriptor'])):
@@ -102,17 +102,18 @@ class Refresh:
         missing=bool(not record and not unfunded_future and history_missing(self.core,p['timestamp']))
         import_time=staging_timestamp(self.core) if missing else 'now' if record or unfunded_future else p['timestamp']
         with self.store.edit() as saved:saved['pending'][key]['state']='attempted'
-        # A separate additive monitor keeps each generation identifiable while
-        # leaving every old funded policy and its history completely intact.
-        target='Wallaby refresh '+reviewed[1]['policy_hash'][:20]
-        if target in rpc(target_core,'listwallets'):raise ValueError('The public refresh monitor already exists. Reconcile its local outcome.')
-        rpc(target_core,'createwallet',{'wallet_name':target,'disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':not bool(record)})
-        monitor_route=target
-        if record:
-            monitor_route=record['monitor']+' refresh '+reviewed[1]['policy_hash'][:8];record['routes'][monitor_route]=target
-        requests=[{'desc':p[k],'timestamp':import_time,'active':False,'internal':bool(i),'range':[0,999]} for i,k in enumerate(('receive_descriptor','change_descriptor'))]
-        result=rpc(target_core,'importdescriptors',[requests],target,timeout=86400)
-        if len(result)!=2 or any(not r.get('success') for r in result):raise ValueError('Core did not import both public policies. Reconcile before retrying.')
+        private_target=rpc(target_core,'getwalletinfo',[],target).get('private_keys_enabled') is True
+        if private_target:
+            from combined_wallet import extend
+            read_private=(lambda:record['node'].private_descriptors(target)) if record else None
+            extend(target_core,target,[p['receive_descriptor'],p['change_descriptor']],import_time,getattr(self,'environment',{}),read_private)
+            monitor_route=p['wallet']
+        else:
+            # Public-only wallets can retain all generations in the same wallet.
+            monitor_route=p['wallet']
+            requests=[{'desc':p[k],'timestamp':import_time,'active':True,'internal':bool(i),'range':[0,999]} for i,k in enumerate(('receive_descriptor','change_descriptor'))]
+            result=rpc(target_core,'importdescriptors',{'requests':requests},target,timeout=86400)
+            if len(result)!=2 or any(not r.get('success') for r in result):raise ValueError('Core did not import both public policies. Reconcile before retrying.')
         if not descriptors({'wallet_name':'new','descriptors':[{'desc':p[k]} for k in ('receive_descriptor','change_descriptor')]})<=descriptors(rpc(target_core,'listdescriptors',[False],target)):raise ValueError('Imported policy verification failed.')
         address=rpc(target_core,'deriveaddresses',[p['receive_descriptor'],[0,0]])[0]
         rpc(target_core,'setlabel',[address,'Wallaby setup ready:'+reviewed[1]['policy_hash']],target)

@@ -76,6 +76,8 @@ class Workspace:
             agent_exchange.LOCAL_RETIREMENT=self.retirement
             agent_exchange.LOCAL_ARCHIVES=self.archive_ops
         self.setup.environment=self.environment
+        if getattr(self,'archives',None):self.archives.environment=self.environment
+        if getattr(self,'refresh_ops',None):self.refresh_ops.environment=self.environment
         if self.cancellations:self.cancellations.environment=self.environment
     def binary(self):
         for path in ('/usr/bin/bitcoind','/usr/local/bin/bitcoind','/opt/bitcoin/bin/bitcoind','/snap/bitcoin-core/current/bin/bitcoind','/snap/bitcoin-core/current/usr/bin/bitcoind'):
@@ -95,7 +97,9 @@ class Workspace:
         sessions=getattr(self.setup,'sessions',{}) if self.setup else {}
         setup_busy=any(v['phase'] not in (('complete','contributed','awaiting_disc') if public_reads else ('complete',)) for v in sessions.values())
         burner=getattr(self.setup,'burner',None)
-        writing=bool(public_reads and burner and getattr(burner,'thread',None) and burner.thread.is_alive())
+        # Optical writing uses an already captured encrypted package. It does
+        # not mutate Core wallets or make read-only inventory unavailable.
+        writing=False
         active=s.get('setup_active')
         setup_reserved=bool(active and (active not in sessions or sessions[active]['phase'] not in ('contributed','awaiting_disc','complete')))
         return bool(archive_busy or setup_busy or writing or public_reads and setup_reserved or
@@ -109,10 +113,16 @@ class Workspace:
         from agent_rpc import request
         validated,_=request(name,params,wallet)
         busy={'error':{'code':'synchronisation_busy','message':'A locally authorised wallet operation is active. Retry after it finishes.'}}
-        if not self.lock.acquire(blocking=False):return busy
+        # Dashboard issues parallel read-only inventory calls while the viewer
+        # polls status. A non-blocking exclusive lock falsely classified every
+        # overlapping public read as wallet work and prevented complete inventory.
+        if not self.lock.acquire(timeout=min(3,max(.05,float(timeout)))):
+            self.public_busy_notice('workspace_lock_timeout')
+            return busy
         try:
             enforce()
-            if self.closing or self.busy(public_reads=True):return busy
+            if self.closing or self.busy(public_reads=True):
+                self.public_busy_notice('active_wallet_operation');return busy
             result=self.ops.core.call(ident,name,validated,wallet,timeout)
             if name=='getwalletinfo' and isinstance(result.get('result'),dict):
                 from managed_accounts import classify
@@ -122,6 +132,14 @@ class Workspace:
                     if metadata:result['result']['wallaby_managed']=metadata
             return result
         finally:self.lock.release()
+    def public_busy_notice(self,reason):
+        # Fixed diagnostic categories only; never log a descriptor or RPC body.
+        now=time.monotonic()
+        previous=getattr(self,'_public_busy_log',{})
+        if now-previous.get(reason,-60)>=60:
+            from activity_log import event
+            event('rpc.busy','reason='+reason+' · retryable=true · public inventory deferred')
+            previous[reason]=now;self._public_busy_log=previous
     def burn_state(self):
         result=self.setup.burner.state();jobs=getattr(getattr(self,'archive_ops',None),'jobs',{})
         for row in result.get('queue',[]):row['archive_request']=bool(jobs.get(row['id'],{}).get('request') and jobs[row['id']]['phase']=='queued')

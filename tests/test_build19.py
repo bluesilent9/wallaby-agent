@@ -153,7 +153,8 @@ class RealCoreCancellation(unittest.TestCase):
   with patch('wallet_setup.secret_dialog',return_value='fixture-Core-passphrase'):self.setup.approve_proposal(digest(p),{own['fingerprint']:own['fingerprint']})
   if installed:
    from setup_policy import policy
-   contributions=self.setup.sessions[digest(p)]['contributions'];descs=policy(p,[e['message'] for e in contributions]);complete={'kind':'wallet_setup_policy','version':1,'proposal':p,'contributions':contributions,'receive_descriptor':descs[0],'change_descriptor':descs[1]};self.store.receive(complete);self.setup.review(digest(complete));self.setup.approve_policy(digest(complete))
+   contributions=self.setup.sessions[digest(p)]['contributions'];descs=policy(p,[e['message'] for e in contributions]);complete={'kind':'wallet_setup_policy','version':1,'proposal':p,'contributions':contributions,'receive_descriptor':descs[0],'change_descriptor':descs[1]};self.store.receive(complete);self.setup.review(digest(complete))
+   with patch('wallet_setup.secret_dialog',return_value='fixture-Core-passphrase'):self.setup.approve_policy(digest(complete))
   return p
  def test_receipt_preserves_keys_then_encrypted_backup_restores_every_wallet(self):
   from disc_backup import decrypt_file
@@ -168,7 +169,7 @@ class RealCoreCancellation(unittest.TestCase):
     temp=self.root/('restore-'+str(i)+'.dat');temp.write_bytes(z.read(w['file']));name='Restored'+str(i);rpc(self.core,'restorewallet',{'wallet_name':name,'backup_file':str(temp)});actual=rpc(self.core,'listdescriptors',[False],name);self.assertEqual(actual['descriptors'],expected[w['name']]['descriptors'])
  def test_installed_group_and_disc_session_cancelled_without_unrelated_deletion(self):
   from wallet_deletion import remove
-  rpc(self.core,'createwallet',{'wallet_name':'Unrelated'});p=self.setup_wallet(True);binding=digest(p);session=self.setup.sessions[binding];names=set(session['installed_wallets']);self.assertEqual(len(names),3);key=self.c.receive(cancel('wallet',[binding],[binding]));self.c.review(key)
+  rpc(self.core,'createwallet',{'wallet_name':'Unrelated'});p=self.setup_wallet(True);binding=digest(p);session=self.setup.sessions[binding];names=set(session['installed_wallets']);self.assertEqual(len(names),2);key=self.c.receive(cancel('wallet',[binding],[binding]));self.c.review(key)
   with patch('wallet_deletion.delete',side_effect=lambda request,**options:remove(request,[Path(request['path']).parent],**options)):self.c.confirm(key,'delete')
   self.assertFalse(names&set(rpc(self.core,'listwallets')));self.assertIn('Unrelated',rpc(self.core,'listwallets'));self.assertFalse(self.setup.burner.pending);self.assertFalse(self.store.read().get('approved_wallets'));self.assertNotIn('setup_active',self.store.read())
 

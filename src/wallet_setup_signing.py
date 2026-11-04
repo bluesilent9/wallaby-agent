@@ -29,7 +29,7 @@ def inventory(core):
     loaded=rpc(core,'listwallets');private=[];monitors=[]
     for name in loaded:
         if rpc(core,'getwalletinfo',[],name).get('private_keys_enabled'):private.append((name,descriptors(rpc(core,'listdescriptors',[False],name))))
-        else:monitors.append(name)
+        monitors.append(name)
     return {'private':private,'monitors':monitors,'addresses':{}}
 
 def matches(core,store,address,known=None):
@@ -43,7 +43,12 @@ def matches(core,store,address,known=None):
         desc=info['parent_desc'];parsed=restricted(desc)
         if not parsed:continue
         wallets=[]
+        monitor_policy=descriptors(rpc(core,'listdescriptors',[False],monitor))
         for name,local in private:
+            if local==monitor_policy:
+                wallets.append(name);continue
+            if descriptors(rpc(core,'listdescriptors',[False],monitor))==local:
+                result.append(monitor);break
             for key in parsed['keys']:
                 body='wpkh('+str(key)+')';raw={'wallet_name':name,'descriptors':[{'desc':body+'#'+checksum(body)}]}
                 if descriptors(raw)<=local:
@@ -61,10 +66,11 @@ def matches(core,store,address,known=None):
 def monitors_for_key(core,name):
     local=descriptors(rpc(core,'listdescriptors',[False],name));result=[]
     for monitor in rpc(core,'listwallets'):
-        if rpc(core,'getwalletinfo',[],monitor).get('private_keys_enabled'):continue
         for row in rpc(core,'listdescriptors',[False],monitor)['descriptors']:
             parsed=restricted(row['desc'])
             if not parsed:continue
+            if descriptors(rpc(core,'listdescriptors',[False],monitor))==local:
+                result.append(monitor);break
             for key in parsed['keys']:
                 body='wpkh('+str(key)+')'
                 if descriptors({'wallet_name':name,'descriptors':[{'desc':body+'#'+checksum(body)}]})<=local:
@@ -73,7 +79,9 @@ def monitors_for_key(core,name):
     return result
 
 def signers_for_policy(core,raw):
-    known=inventory(core);owners=set()
+    known=inventory(core);owners=set();wanted=descriptors(raw)
+    combined={name for name,local in known['private'] if wanted<=local}
+    if combined:return sorted(combined)
     for row in raw['descriptors']:
         parsed=restricted(row['desc'])
         if not parsed:return []

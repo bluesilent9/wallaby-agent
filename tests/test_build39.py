@@ -52,5 +52,6 @@ class ExistingArchive(unittest.TestCase):
   from setup_policy import policy
   descs=policy(p,[e['message'] for e in contributions]);complete={'kind':'wallet_setup_policy','version':1,'proposal':p,'contributions':contributions,'receive_descriptor':descs[0],'change_descriptor':descs[1]};f.store.receive(complete)
   with patch('secure_worker.enforce'):
-   w.dispatch('authorise.review',[digest(complete)],{});w.dispatch('authorise.approve',[digest(complete)],{})
+   w.dispatch('authorise.review',[digest(complete)],{})
+   with patch('wallet_setup.secret_dialog',return_value='fixture-Core-passphrase'):w.dispatch('authorise.approve',[digest(complete)],{})
   self.assertEqual(f.setup.sessions[binding]['phase'],'awaiting_disc');self.assertEqual(f.setup.burner.job['id'],key);self.assertEqual(len(f.setup.burner.pending),1)

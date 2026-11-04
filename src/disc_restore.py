@@ -3,7 +3,7 @@ import copy,fcntl,hashlib,json,os,re,secrets,shutil,stat,struct,subprocess,threa
 from pathlib import Path
 from approval_store import digest
 from wallet_ops import rpc
-from wallet_setup import MemoryCore
+from wallet_setup import MemoryCore,secret_dialog
 from setup_policy import policy
 from setup_messages import verify
 from build8_policy import descriptors
@@ -156,6 +156,15 @@ class Archives:
                 else:
                     contribution=next(e['message'] for e in r['recovery']['contributions'] if e['message']['cosigner_id']==r['role']['id'])
                     wanted={'wallet_name':'archive-key','descriptors':[{'desc':'wpkh('+contribution[k]+')#'+checksum('wpkh('+contribution[k]+')')} for k in ('receive_key','change_key')]}
+                    if r['recovery'].get('wallet_layout')=='combined-policy-key-v1':
+                        from combined_wallet import public_policy,verify_private_role
+                        wanted=public_policy(r['recovery'])
+                        password=secret_dialog('Unlock archived signing role: '+r['role']['name']+' · '+r['review']['name'],getattr(self,'environment',{}))
+                        try:
+                            rpc(c,'walletpassphrase',[password,120],'archive-key')
+                            verify_private_role(node,'archive-key',contribution)
+                        finally:
+                            password=None;rpc(c,'walletlock',[],'archive-key')
                 if not descriptors(wanted)<=descriptors(rpc(c,'listdescriptors',[False],'archive-key')):raise ValueError('Archived private wallet public account does not match the approved recovery policy.')
                 rpc(c,'createwallet',{'wallet_name':'archive-policy','disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':False})
                 if r.get('generic'):

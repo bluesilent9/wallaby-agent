@@ -10,9 +10,11 @@ READY='Wallaby setup ready:'
 
 def mark(core,record,ready):
     expected=descriptors({'wallet_name':'approved','descriptors':[{'desc':record[x]} for x in ('receive_descriptor','change_descriptor')]})
-    if descriptors(rpc(core,'listdescriptors',[False],record['monitor_wallet']))!=expected:raise ValueError('Local public monitor no longer matches the approved policy.')
+    names={record['monitor_wallet'],*record.get('signing_wallets',{}).values()}
     address=rpc(core,'deriveaddresses',[record['receive_descriptor'],[0,0]])[0]
-    rpc(core,'setlabel',[address,(READY if ready else PENDING)+record['policy_hash']],record['monitor_wallet'])
+    for name in names:
+        if descriptors(rpc(core,'listdescriptors',[False],name))!=expected:raise ValueError('Local wallet no longer matches the approved policy.')
+        rpc(core,'setlabel',[address,(READY if ready else PENDING)+record['policy_hash']],name)
 
 def apply(core,store,p):
     if set(p)!={'kind','version','proposal_hash','policy_hash','acknowledgements'} or p['kind']!='wallet_setup_complete' or p['version']!=1 or any(not re.fullmatch('[0-9a-f]{64}',str(p[k])) for k in ('proposal_hash','policy_hash')) or not isinstance(p['acknowledgements'],list) or len(p['acknowledgements'])>64:raise ValueError('Invalid setup completion proof.')
