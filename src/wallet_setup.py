@@ -274,7 +274,11 @@ class WalletSetup:
         self.finish_session(session)
         self.store.queue('wallet_setup_ack',sign(self.store,{'version':1,'proposal_hash':binding,'status':'denied'}))
         return {'message':'Unfinished temporary keys discarded after local confirmation. Start again with a fresh setup session.'}
-    def burn(self,device,confirmed,disc_count=1,speed='slowest'):
+    def burn(self,device,confirmed,disc_count=1,speed='slowest',job_id=None,selected_ids=None):
+        if job_id is not None:
+            if not self.burner.job or self.burner.job['id']!=job_id:raise ValueError('The disc job changed. Review its wallet selection again before burning.')
+            if self.burner.job['phase']=='authorised':self.burner.select(selected_ids,job_id)
+            elif selected_ids!=[i for i,w,r in self.burner.job.get('_members') or [(self.burner.job['id'],None,None)]]:raise ValueError('The prepared disc wallet selection cannot be changed.')
         self.enforce();self.burner.validate_options(device,confirmed,disc_count,speed)
         password=None
         if not self.burner.job.get('_prepared'):password=secret_dialog('Disc-backup passphrase · encrypt the complete recovery package (not your Core wallet passphrase)',self.environment,confirm=True)

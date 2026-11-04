@@ -1,13 +1,13 @@
 # Wallaby Agent Development installers
 
-Current: **V2 Development Build 15**, Ubuntu 26.04 LTS amd64.
+Current: **V2 Development Build 52**, Ubuntu 26.04 LTS amd64.
 
-Build 15 fixes background-service sleep/shutdown inhibitor authorisation, prepares the protected workspace before enabling the node, and adds red/amber/green workspace status. The permission applies only to the matching unprivileged Agent system service with NoNewPrivileges; SSH-only clients still require no Bitcoin components.
+[Download Build 52](wallaby-agent_2.0.0~dev52_amd64.deb). Check its SHA-256 against [SHA256SUMS.txt](SHA256SUMS.txt) before installing.
 
-Install `wallaby-agent_2.0.0~dev15_amd64.deb` using your normal package manager. Tunnel-only clients do not need Bitcoin Core, PyQt6 WebEngine, xorriso or pkexec/polkitd. These are optional suggestions, not dependencies or automatically installed recommendations. The unavailable policykit-1 dependency and bitcoind recommendation are removed.
+Build 52 includes the cumulative disc fixes: recognized writer progress, independent burn/verification ETA countdowns, stable wallet and drive selections, bounded disc membership, and verification-only retries. Optical verification reads through the drive interface so Linux's stale 2 KB block capacity cannot truncate a newly written disc. Success still requires the entire intended byte count, a successful reader exit and the original full-track checksum.
 
-DDNS-GO and Dashboard browser-access tunnels remain usable. An unavailable node switch stays off and explains its prerequisites. Bitcoin clients can install pkexec, polkitd, PyQt6/WebEngine and a native passphrase dialogue separately, then install/start Core with RPC and configure its cookie. Snap/manual Core installations do not require an apt package named bitcoind. Optical work additionally needs xorriso.
+Validated with 164 Python regression checks, 21 interface suites and an isolated live three-Agent recovery test. See the [main README](../README.md) and [Build 52 notes](../AGENT_BUILD52_OPTICAL_READBACK.md).
 
-Services settings are retained on upgrade. Fresh installations have all tunnels off. Finish sensitive Bitcoin work and close an existing protected workspace before upgrading/restarting it; the installer does not destroy active RAM sessions.
+Finish sensitive work and all required backups, wait for Dashboard completion, then close the existing protected workspace normally before installing/restarting. A webpage refresh does not update a worker already running in RAM. Services settings are retained on upgrade; the installer does not forcibly destroy an active protected session.
 
-Verify SHA256SUMS.txt before installation. Earlier installers remain here. Development only. See the main README and VALIDATION.md for tests and deployment limits.
+Tunnel-only clients do not need Bitcoin Core or the optional protected viewer/optical packages. Optical operations additionally require xorriso. Earlier installers remain in this directory. This is a Development build.

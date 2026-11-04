@@ -1,3 +1,13 @@
+# Build 48 validation
+
+A real throttled xorriso stream now advances intermediate progress before writer
+exit and passes direct read-back. Accepted pipe data alone cannot advance the
+physical bar. The focused 21-check writer/disc suite and all 20 JavaScript suites
+pass. UI checks include elapsed time, reported byte counts and stale-report age.
+See [details and upgrade guidance](AGENT_BUILD48_WRITER_PROGRESS.md).
+Full regression results accompany the distribution; no real wallets or optical
+media were used in development here.
+
 # Build 47 validation
 
 Final regression and UI results are recorded with the distributed package. The

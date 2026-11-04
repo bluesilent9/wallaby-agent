@@ -172,41 +172,158 @@ def image(disc,path):
     if r.returncode:raise ValueError('Could not prepare the disc image in protected RAM.')
     with open(path,'rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 
-def readback(device,size,expected,progress=None):
-    # Aligned direct reads bypass the host page cache. No extracted file on disk.
-    fd=os.open(device,os.O_RDONLY|os.O_DIRECT);result=hashlib.sha256();remaining=size
+def optical_readback(device,size,expected,progress=None):
+    """Read the full raw track through libburn, independent of stale block size."""
+    import collections,selectors
+    from activity_log import event,redact
+    from diagnostics import LocalActionFailure
+    if type(size) is not int or size<=0 or size%2048:raise ValueError('Invalid complete optical track length.')
+    command=['/usr/bin/xorriso','-abort_on','FAILURE','-return_with','FAILURE','32','-indev',device,'-check_media','use=indev','what=disc','min_lba=0','max_lba='+str(size//2048-1),'data_to=-','patch_lba0=off','retry=on','bad_limit=partial','event=FAILURE','time_limit=172800','item_limit=1024','chunk_size=1m','async_chunks=0','--','-end']
+    process=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    tail=collections.deque(maxlen=8)
+    def drain():
+        try:
+            while line:=process.stderr.readline(4096):tail.append(line.decode(errors='replace').strip()[:600])
+        finally:process.stderr.close()
+    reader=threading.Thread(target=drain,daemon=True);reader.start();result=hashlib.sha256();count=0
+    event('disc.readback','Drive-level read started · expected_bytes='+str(size)+' · Linux block capacity is not used')
     try:
-        with mmap.mmap(-1,1024*1024) as buffer:
-            while remaining:
-                count=min(remaining,len(buffer));view=memoryview(buffer)[:count]
-                try:n=os.readv(fd,[view]);result.update(view[:n])
-                finally:view.release()
-                if n!=count:raise ValueError('Disc read-back ended early.')
-                remaining-=n
-                if progress:progress(size-remaining)
-    finally:os.close(fd)
-    if result.hexdigest()!=expected:raise ValueError('Disc read-back differs from the protected RAM image. Keep the RAM session open and use a fresh disc.')
+        os.set_blocking(process.stdout.fileno(),False)
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout,selectors.EVENT_READ)
+            while True:
+                if not selector.select(180):raise LocalActionFailure('disc_readback_unavailable','The drive stopped reporting readable data. Keep this workspace open and retry verification of the same disc; no burn was started.')
+                try:data=os.read(process.stdout.fileno(),1024*1024)
+                except BlockingIOError:continue
+                if not data:break
+                count+=len(data)
+                if count>size:raise LocalActionFailure('disc_readback_length','The drive returned more data than the original track. No verification result was accepted.')
+                result.update(data)
+                if progress:progress(count)
+        code=process.wait(timeout=60);reader.join(2)
+        event('disc.readback','Drive-level read ended · read_bytes='+str(count)+' · expected_bytes='+str(size)+' · exit_code='+str(code))
+        if code or count!=size:
+            event('disc.readback','Reader detail · '+redact(' | '.join(tail))[-1600:])
+            raise LocalActionFailure('disc_readback_unavailable','Complete drive-level verification could not finish: read '+str(count)+' of '+str(size)+' bytes; reader exit '+str(code)+'. Keep this workspace open. The disc has not been marked verified.')
+        if result.hexdigest()!=expected:raise LocalActionFailure('disc_readback_mismatch','The complete disc checksum differs from the original protected RAM image. The disc has not passed verification.')
+        event('disc.readback','Full-track checksum matched · transport=drive · total_bytes='+str(size))
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:process.wait(timeout=15)
+            except subprocess.TimeoutExpired:process.kill();process.wait()
+        process.stdout.close();reader.join(2)
+
+def readback(device,size,expected,progress=None):
+    """Compare the entire track using one aligned buffer; tolerate initial readiness lag."""
+    if stat.S_ISBLK(os.stat(device,follow_symlinks=False).st_mode):
+        import fcntl,struct
+        from activity_log import event
+        fd=None
+        try:
+            fd=os.open(device,os.O_RDONLY|os.O_NONBLOCK)
+            capacity=struct.unpack('<Q',fcntl.ioctl(fd,0x80081272,bytes(8)))[0]
+            event('disc.readback','Capacity observation · kernel_bytes='+str(capacity)+' · expected_bytes='+str(size)+' · verification uses drive-level reads')
+        except OSError as error:event('disc.readback','Kernel capacity unavailable · errno='+str(error.errno)+' · verification uses drive-level reads')
+        finally:
+            if fd is not None:os.close(fd)
+        return optical_readback(device,size,expected,progress)
+    from diagnostics import LocalActionFailure
+    from activity_log import event
+    result=hashlib.sha256();offset=0;deadline=time.monotonic()+30;attempt=0
+    with mmap.mmap(-1,1024*1024) as buffer:
+        while offset<size:
+            fd=None
+            try:
+                fd=os.open(device,os.O_RDONLY|os.O_DIRECT);os.lseek(fd,offset,os.SEEK_SET)
+                while offset<size:
+                    count=min(size-offset,len(buffer));view=memoryview(buffer)[:count]
+                    try:
+                        n=os.readv(fd,[view])
+                        if n>0 and n%2048==0:result.update(view[:n])
+                    finally:view.release()
+                    if n<=0 or n%2048:
+                        event('disc.readback','Short read · offset_bytes='+str(offset)+' · requested_bytes='+str(count)+' · returned_bytes='+str(n))
+                        raise OSError(5,'Disc returned no complete sector')
+                    offset+=n
+                    if progress:progress(offset)
+                    if n<count:event('disc.readback','Partial read accepted · offset_bytes='+str(offset)+' · returned_bytes='+str(n))
+            except OSError as error:
+                attempt+=1
+                event('disc.readback','Read unavailable · offset_bytes='+str(offset)+' · errno='+str(error.errno)+' · attempt='+str(attempt))
+                # Only initial drive readiness is retried automatically. A later
+                # error keeps its exact offset and requires a deliberate retry.
+                if offset or time.monotonic()>=deadline:
+                    raise LocalActionFailure('disc_readback_unavailable','Disc read-back stopped at byte '+str(offset)+' of '+str(size)+'. No complete verification was recorded. Reinsert the same disc and choose Verify written disc; this will not burn again.') from None
+            finally:
+                if fd is not None:os.close(fd)
+            if offset<size:time.sleep(min(2,max(0,deadline-time.monotonic())))
+    if result.hexdigest()!=expected:
+        event('disc.readback','Full-track checksum mismatch · total_bytes='+str(size))
+        raise LocalActionFailure('disc_readback_mismatch','The complete disc checksum differs from the protected RAM image. Keep this workspace open. The disc has not passed verification.')
+    event('disc.readback','Full-track checksum matched · total_bytes='+str(size))
 
 def writer_bytes(line,total):
     """Drive-reported written MB, not bytes merely accepted by its input pipe."""
-    match=re.search(r'Track\s+\d+:\s*([0-9]+(?:\.[0-9]+)?)\s+of\s+[0-9]+(?:\.[0-9]+)?\s+MB\s+written',line)
-    return min(total,int(float(match[1])*1024*1024)) if match else None
+    from decimal import Decimal
+    message=re.sub(r'^\s*xorriso\s*:\s*UPDATE\s*:\s*','',line)
+    match=re.match(r'\s*(?:Track\s+\d+:\s*)?([0-9]+(?:\.[0-9]+)?)\s+of\s+[0-9]+(?:\.[0-9]+)?\s+MB\s+written\b',message)
+    return min(total,int(Decimal(match[1])*1024*1024)) if match else None
+
+class StageProgress:
+    """Constant-size throughput estimate from actual progress in this stage."""
+    def __init__(self,job,field,stage):
+        self.job=job;self.field=field;self.started=self.tick=time.monotonic();self.count=0;self.rate=None
+        job['_eta_seen_bytes']=0;job[field]=0
+        job.update(eta_stage=stage,eta_seconds=None,eta_updated_at=None,eta_last_progress_at=None)
+    def __call__(self,count):
+        if count<self.count:return
+        now=time.monotonic();self.job[self.field]=count
+        if count>self.job.get('_eta_seen_bytes',0):self.job['eta_last_progress_at']=time.time()
+        self.job['_eta_seen_bytes']=count
+        elapsed=now-self.tick
+        if elapsed>=1:
+            rate=(count-self.count)/elapsed
+            if rate>0:self.rate=rate if self.rate is None else .25*rate+.75*self.rate
+            self.tick=now;self.count=count
+            if now-self.started>=5 and self.rate:
+                remaining=max(0,self.job.get('total_bytes',0)-count)
+                self.job.update(eta_seconds=remaining/self.rate,eta_updated_at=time.time())
+
+class WriterProgress(StageProgress):
+    """Public counters only; accepting pipe bytes never advances disc percent."""
+    def __init__(self,job):
+        job['_eta_seen_bytes']=0
+        super().__init__(job,'written_bytes','burning')
+    def __call__(self,count):super().__call__(count);self.job.update(writer_last_progress_at=time.time())
+    def writer_report(self,**facts):self.job.update(facts)
 
 def write_stream(device,source,total,progress,speed='slowest'):
     selected=speed_value(speed)
     import selectors,collections
     process=subprocess.Popen(['/usr/bin/xorriso','-abort_on','FAILURE','-as','cdrecord','-v','-sao','speed='+selected,'fs=16m','dev='+device,'tsize='+str(total//2048)+'s','-data','-'],stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
-    tail=collections.deque(maxlen=12);reported=0
+    from activity_log import event
+    observer=getattr(progress,'writer_report',lambda **facts:None)
+    observer(writer_started_at=time.time(),writer_input_bytes=0,writer_input_complete=False,writer_last_progress_at=None,writer_last_output_at=None,writer_status='starting')
+    event('disc.writer','Writer launched · total_bytes='+str(total))
+    tail=collections.deque(maxlen=12);reported=0;logged_bucket=-1
     def read_status():
-        nonlocal reported
+        nonlocal reported,logged_bucket
         pending=b''
         try:
             while data:=os.read(process.stderr.fileno(),4096):
                 pending=(pending+data).replace(b'\r',b'\n');lines=pending.split(b'\n');pending=lines.pop()[-4096:]
                 for raw in lines:
                     line=raw.decode(errors='replace')[:600];tail.append(line)
+                    observer(writer_last_output_at=time.time())
+                    if 'Beginning to write data track' in line:observer(writer_status='writing')
+                    if 'Closing track/session' in line:observer(writer_status='closing')
                     amount=writer_bytes(line,total)
-                    if amount is not None and amount>reported:reported=amount;progress(min(amount,max(0,total-1)))
+                    if amount is not None and amount>reported:
+                        reported=amount;progress(min(amount,max(0,total-1)))
+                        bucket=min(10,int(10*amount/max(1,total)))
+                        if bucket>logged_bucket:
+                            logged_bucket=bucket;event('disc.writer','Progress report recognised · written_bytes='+str(amount)+' · total_bytes='+str(total))
             if pending:tail.append(pending.decode(errors='replace')[:600])
         finally:process.stderr.close()
     reader=threading.Thread(target=read_status,daemon=True);reader.start()
@@ -224,11 +341,13 @@ def write_stream(device,source,total,progress,speed='slowest'):
                         try:count=os.write(process.stdin.fileno(),view)
                         except BlockingIOError:continue
                         if count<=0:raise ValueError('The optical writer stopped.')
-                        digest.update(view[:count]);written+=count;view=view[count:]
+                        digest.update(view[:count]);written+=count;observer(writer_input_bytes=written);view=view[count:]
                 finally:view.release()
-        process.stdin.close()
+        process.stdin.close();observer(writer_input_complete=True)
+        event('disc.writer','All image bytes handed to writer; awaiting process completion · input_bytes='+str(written))
         if written!=total or process.wait(timeout=1800)!=0:raise ValueError('Optical writing failed or is uncertain. Keep the RAM session open and use a fresh blank disc.')
-        reader.join(2);progress(total)
+        reader.join(2);progress(total);observer(writer_status='finished')
+        event('disc.writer','Writer exited successfully; physical read-back still required')
         return digest.hexdigest()
     except Exception:
         if process.poll() is None:process.terminate();process.wait(timeout=30)
@@ -246,8 +365,16 @@ class Burner:
             self.job=None
             if self.pending:self.authorise(*self.pending.pop(0))
         result={k:v for k,v in (self.job or {}).items() if k not in ('recovery','wallets') and not k.startswith('_')}
-        rows=(self.job.get('_members') or [(self.job['id'],self.job['wallets'],self.job['recovery'])]) if self.job else []
+        rows=list(self.job.get('_members') or [(self.job['id'],self.job['wallets'],self.job['recovery'])]) if self.job else []
         rows+=self.pending
+        if result.get('writer_started_at'):
+            result['writer_elapsed_seconds']=max(0,int(time.time()-result['writer_started_at']))
+        if result.get('writer_last_progress_at'):
+            result['writer_progress_age_seconds']=max(0,int(time.time()-result['writer_last_progress_at']))
+        if result.get('phase')==result.get('eta_stage'):
+            age=max(0,time.time()-(result.get('eta_last_progress_at') or time.time()))
+            result['eta_waiting_for_progress']=age>=30
+            result['estimated_remaining_seconds']=max(0,int(__import__('math').ceil(result['eta_seconds']-max(0,time.time()-result['eta_updated_at'])))) if result.get('eta_seconds') is not None and not result['eta_waiting_for_progress'] else None
         result['completed_sets']=list(self.completed_sets)
         result['outcomes']=list(self.outcomes)
         result['queue']=[]
@@ -274,7 +401,8 @@ class Burner:
     def queue(self,job_id,wallets,recovery):
         if self.job:self.pending.append((job_id,wallets,recovery))
         else:self.authorise(job_id,wallets,recovery)
-    def select(self,ids):
+    def select(self,ids,job_id=None):
+        if job_id is not None and (not self.job or self.job['id']!=job_id):raise ValueError('The disc job changed. Review its wallet selection again before burning.')
         if not self.job or self.job['phase']!='authorised' or self.job.get('_prepared'):raise ValueError('Select wallets before preparing the first disc.')
         available={self.job['id']}|{i for i,w,r in self.pending}
         if not isinstance(ids,list) or not 1<=len(ids)<=15 or len(set(ids))!=len(ids) or not set(ids)<=available:raise ValueError('Choose 1 to 15 approved archive rows.')
@@ -292,7 +420,7 @@ class Burner:
         replacements=self.replacement_resolver(chosen) if self.replacement_resolver else []
         wallets,recovery=bundle(chosen,replacements)
         self.pending=[v for v in rows if v[0] not in self.selected]
-        self.job=None;self.authorise(chosen[0][0],wallets,recovery);self.job['_members']=chosen;self.job['_required_members']=required;self.selected=[v[0] for v in chosen]
+        self.job=None;self.authorise(chosen[0][0],wallets,recovery);self.job['_members']=tuple(chosen);self.job['_required_members']=required;self.selected=[v[0] for v in chosen]
     def cancel_members(self,ids):
         if self.thread and self.thread.is_alive():raise ValueError('Wait for optical writing and verification to finish before cancelling archive members.')
         self.pending=[r for r in self.pending if r[0] not in ids]
@@ -320,11 +448,51 @@ class Burner:
                     from disc_archive import chunks
                     directory=self.root/job['id'];checksum=hashlib.sha256()
                     for part in chunks(directory/'disc.iso',directory/'disc/recovery.wallaby',job['_layout']):checksum.update(part)
-                    readback(job['_device'],job['_layout']['total_bytes'],checksum.hexdigest(),lambda count:job.update(verified_bytes=count));job['_verification_succeeded']=True
+                    readback(job['_device'],job['_layout']['total_bytes'],checksum.hexdigest(),StageProgress(job,'verified_bytes','verifying'));job['_verification_succeeded']=True
                 except Exception:job['_verification_succeeded']=False
                 finally:job['_verification_finished']=True;job.update(phase='cancel_cleanup',message='Cancelled-disc verification attempt finished. Complete the local cleanup checklist on Authorise.')
             self.thread=threading.Thread(target=check,daemon=True);self.thread.start()
             return {'message':'Read-only verification started. No additional disc is being written.'}
+    def finish_verified(self,job,sha,disc_count):
+        # Verify membership against the prepared bundle before any receipt can
+        # acknowledge a pending wallet that was never put on this disc.
+        members=job.get('_members') or [(job['id'],job['wallets'],job['recovery'])]
+        if job.get('_members'):
+            from archive_format import bundle
+            wallets,recovery=bundle(members,job['recovery'].get('replaces',[]))
+            if wallets!=job['wallets'] or recovery!=job['recovery']:raise ValueError('Prepared disc members differ from the encrypted recovery bundle. Completion was withheld.')
+        job['discs_verified']+=1;self.outcome(job,'verified');job.setdefault('verified_discs',[]).append({'disc':job['discs_verified'],'sha256':sha,'bytes':job['_layout']['total_bytes']})
+        if job.get('_cancel_pending'):
+            job.update(phase='cancel_cleanup',message='Cancellation received. The current burn and read-back finished. Review disc cleanup on Authorise; no additional copy will be written.');return
+        if job['discs_verified']<disc_count:
+            job.update(phase='awaiting_disc',message='Disc '+str(job['discs_verified'])+' verified. Remove it, insert a fresh blank disc, then explicitly continue. The remaining recovery material stays in protected RAM.');return
+        job['phase']='completing'
+        for member in job.get('_members') or [(job['id'],None,None)]:self.on_complete(member[0],sha)
+        self.completed_sets.append({'archive_id':job.get('archive_id'),'discs_verified':job['discs_verified'],'image_sha256':sha,'wallet_names':[r.get('display_name',r.get('name',r.get('proposal',{}).get('name','Wallet'))) for i,w,r in job.get('_members') or [(job['id'],None,job['recovery'])]]});self.completed_sets=self.completed_sets[-32:]
+        import shutil
+        shutil.rmtree(self.root/job['id']);job.update(phase='complete',message='Success! All '+str(disc_count)+' requested disc(s) passed complete direct read-back verification.',finished=time.time())
+    def verify_written(self,job_id):
+        with self.lock:
+            job=self.job
+            if not job or job['id']!=job_id or job['phase']!='uncertain' or job.get('failed_stage')!='verifying' or job.get('_cancel_pending') or self.thread and self.thread.is_alive():raise ValueError('Only an idle failed verification can be retried. No write was started.')
+            if not job.get('_image_sha256') or not job.get('_layout') or not job.get('_device'):raise ValueError('The original written image is unavailable. No verification claim was made.')
+            job.update(phase='verifying',verified_bytes=0,message='Checking the same written disc against its original RAM image. No disc is being written.')
+            def check():
+                try:
+                    readback(job['_device'],job['_layout']['total_bytes'],job['_image_sha256'],StageProgress(job,'verified_bytes','verifying'))
+                    job['_verification_succeeded']=True
+                    self.finish_verified(job,job['_image_sha256'],job['disc_count'])
+                except Exception as error:
+                    from activity_log import event
+                    from diagnostics import action_code,action_detail
+                    event('disc.failure','Read-only retry · '+action_code(error)+' · '+action_detail(error))
+                    complete=job.get('discs_verified',0)>=job['disc_count']
+                    self.outcome(job,'completion_failed' if complete else 'verification_interrupted' if getattr(error,'code',None)=='disc_readback_unavailable' else 'verification_failed')
+                    job.update(phase='completion_uncertain' if complete else 'uncertain',failed_stage='completing' if complete else 'verifying',message=str(error) if isinstance(error,ValueError) else 'Verification stopped. Keep the workspace open; no disc was written.')
+                finally:job['_verification_finished']=True
+            job['_verification_finished']=False
+            self.thread=threading.Thread(target=check,daemon=True);self.thread.start()
+            return {'message':'Read-only verification started for the original written disc. No additional burn was started.'}
     def validate_options(self,device,confirmed,disc_count=1,speed='slowest'):
         if self.job and self.job.get('_cancel_pending'):raise ValueError('This disc set was cancelled. Review its cleanup on Authorise; no further copy will be burned.')
         if not self.job or self.job['phase'] not in ('authorised','awaiting_disc','error','uncertain') or confirmed is not True:raise ValueError('Authorise and confirm a fresh blank M-Disc before writing.')
@@ -357,29 +525,21 @@ class Burner:
                     job['preparation_percent']=100
                     self.stage(job,'burning',copies=layout['copies'],total_bytes=layout['total_bytes'],written_bytes=0,verified_bytes=0,message='Burning disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+' with '+str(layout['copies'])+' repeated recovery copies. Speed: '+('slowest supported' if speed=='slowest' else speed+'×')+'. Full read-back follows writing.')
                     job['_write_started']=True;job['_device']=device;job['_layout']=layout;job['_verification_finished']=False;job['_verification_succeeded']=False;job['_attempts']=job.get('_attempts',0)+1
-                    written=True;sha=write_stream(device,chunks(iso,disc/'recovery.wallaby',layout),layout['total_bytes'],lambda count:job.update(written_bytes=count),speed);job['_image_sha256']=sha;burn_finished=True
+                    written=True;sha=write_stream(device,chunks(iso,disc/'recovery.wallaby',layout),layout['total_bytes'],WriterProgress(job),speed);job['_image_sha256']=sha;burn_finished=True
                     verification_started=True;self.stage(job,'verifying',message='Checking every recorded byte on disc '+str(job['discs_verified']+1)+' of '+str(disc_count)+'.')
-                    try:readback(device,layout['total_bytes'],sha,lambda count:job.update(verified_bytes=count));job['_verification_succeeded']=True
+                    try:readback(device,layout['total_bytes'],sha,StageProgress(job,'verified_bytes','verifying'));job['_verification_succeeded']=True
                     finally:job['_verification_finished']=True
-                    job['discs_verified']+=1;self.outcome(job,'verified');job.setdefault('verified_discs',[]).append({'disc':job['discs_verified'],'sha256':sha,'bytes':layout['total_bytes']})
-                    if job.get('_cancel_pending'):
-                        job.update(phase='cancel_cleanup',message='Cancellation received. The current burn and read-back finished. Review disc cleanup on Authorise; no additional copy will be written.');return
-                    if job['discs_verified']<disc_count:
-                        job.update(phase='awaiting_disc',message='Disc '+str(job['discs_verified'])+' verified. Remove it, insert a fresh blank disc, then explicitly continue. The remaining recovery material stays in protected RAM.');return
-                    all_verified=True;job['phase']='completing'
-                    for member in job.get('_members') or [(job['id'],None,None)]:self.on_complete(member[0],sha)
-                    self.completed_sets.append({'archive_id':job.get('archive_id'),'discs_verified':job['discs_verified'],'image_sha256':sha,'wallet_names':[r.get('display_name',r.get('name',r.get('proposal',{}).get('name','Wallet'))) for i,w,r in job.get('_members') or [(job['id'],None,job['recovery'])]]});self.completed_sets=self.completed_sets[-32:]
-                    import shutil
-                    shutil.rmtree(directory);job.update(phase='complete',message='Success! All '+str(disc_count)+' requested disc(s) passed complete direct read-back verification.',finished=time.time())
+                    self.finish_verified(job,sha,disc_count);all_verified=True
                 except Exception as error:
-                    self.outcome(job,'completion_failed' if all_verified else 'verification_failed' if burn_finished and verification_started else 'burn_failed' if written else 'preparation_failed')
+                    all_verified=all_verified or job.get('discs_verified',0)>=disc_count
+                    self.outcome(job,'completion_failed' if all_verified else ('verification_interrupted' if getattr(error,'code',None)=='disc_readback_unavailable' else 'verification_failed') if burn_finished and verification_started else 'burn_failed' if written else 'preparation_failed')
                     from activity_log import event
                     from diagnostics import action_code,action_detail
                     event('disc.failure','stage='+job.get('phase','unknown')+' · '+action_code(error)+' · '+action_detail(error))
                     job['failed_stage']=job.get('phase','preparing')
                     phase='completion_uncertain' if all_verified else 'uncertain' if written else 'error'
                     message=str(error) if isinstance(error,ValueError) else 'Disc work stopped. Inspect the local drive and outcome; no operation was repeated.'
-                    job.update(phase=phase,message=message+(' All requested discs were verified; reconcile completion before doing anything else.' if all_verified else ' Keep the RAM workspace open. Any retry requires a fresh blank disc and your confirmation.'))
+                    job.update(phase=phase,message=message+(' All requested discs were verified; reconcile completion before doing anything else.' if all_verified else ' Keep the RAM workspace open. Reinsert the same disc and choose Verify written disc to retry verification without burning.' if burn_finished and verification_started else ' Keep the RAM workspace open. A new burn requires a fresh blank disc and your confirmation.'))
                 finally:
                     password=None
                     if job.get('_cancel_pending') and job.get('_write_started') and job['phase']!='complete':
@@ -391,7 +551,7 @@ class Burner:
                                     checksum=hashlib.sha256()
                                     for part in chunks(iso,disc/'recovery.wallaby',job['_layout']):checksum.update(part)
                                     expected=checksum.hexdigest()
-                                readback(device,job['_layout']['total_bytes'],expected,lambda count:job.update(verified_bytes=count));job['_verification_succeeded']=True
+                                readback(device,job['_layout']['total_bytes'],expected,StageProgress(job,'verified_bytes','verifying'));job['_verification_succeeded']=True
                             except Exception:job['_verification_succeeded']=False
                             finally:job['_verification_finished']=True
                         job.update(phase='cancel_cleanup',message='The writer and verification attempt have finished. Review cancellation on Authorise and account for every written or partial disc. No further copy will be burned.')

@@ -2,9 +2,19 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** Private keys and passphrases are never sent to the Dashboard. Policy installation and refresh temporarily handle private descriptors inside the protected local worker; signing unlocks the selected Core wallet. Those protections do not remove the risk of a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 47
+# Wallaby Agent V2 — Development Build 52
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
+
+Build 52 verifies written optical media through the drive-level reader instead of Linux's block-device size, which can remain incorrectly cached at 2 KB after burning. Complete byte count, successful reader exit and the original full-track checksum are all required. Interrupted reading is distinguished from a checksum failure. [Confirmed cause and recovery](AGENT_BUILD52_OPTICAL_READBACK.md).
+
+Build 51 adds independent burn and verification countdown estimates based on measured progress. Wallet and drive choices survive status updates; quick checkbox edits save in order, and starting a burn binds the exact visible wallet selection to the current job. [Countdowns and stable selection](AGENT_BUILD51_ETA_SELECTION.md).
+
+Build 50 preserves the archive-reader drive list and selected drive across Disc Operations updates, including discovery responses arriving after a screen rebuild. Drive discovery remains separate from an active writer/verification job. [Drive selector fix](AGENT_BUILD50_ARCHIVE_DRIVES.md).
+
+Build 49 fixes repeated screen refreshes duplicating waiting archive jobs into the active disc set. Disc membership stays fixed, and completion checks it against the encrypted bundle. Full verification tolerates initial drive readiness delays and aligned short reads; a failed read can be retried on the same written disc with **Verify written disc**, without a new burn. Ordinary loads still stop at the first intact recovery package. [Failure analysis, verification and recovery](AGENT_BUILD49_DISC_READBACK.md).
+
+Build 48 recognises the actual xorriso progress format, fixing the bar stuck at zero during a running burn. It shows elapsed time and reported MB/GB, distinguishes accepted input from physical progress, and records bounded writer diagnostics for later disc/refresh testing. Leave an existing Build 47 burn running until verification finishes; install afterwards. [Cause, validation and upgrade](AGENT_BUILD48_WRITER_PROGRESS.md).
 
 Build 47 adds three-stage disc progress, read-only disc status, disabled pending archive checkboxes, and protected-viewer memory/recovery fixes. Wallet Builder backups need no second approval after complete-policy approval. To put an existing wallet beside another signer disc, wait for verification and Dashboard completion, then request its archive again. No Dashboard protocol update is needed. [Cause, validation and upgrade](AGENT_BUILD47_DISC_OPERATIONS.md) · [Dashboard coordination](DASHBOARD_BUILD47_DISC_REPEATS.md).
 
@@ -45,7 +55,7 @@ Disc Operations is divided into **Read a Disc**, **Review and Load Wallets**, **
 Archive requests can accumulate before burning. Authorise each request, then select up to 15 independent wallets together in **Disc Operations**. Only selected wallets complete after every requested disc passes read-back; unselected wallets remain queued. **Review staged archive** lets you delete an unused request and its RAM capture. Agent reports signed `complete` or `deleted` results to Dashboard; archiving has no Disable option or denial list. Wallet synchronisation retains its separate persistent denial list. **Use Dashboard Build 37 or later for signed deletion results and Notifications/Wallets notices:** [handoff](DASHBOARD_ARCHIVE_RESULTS_BUILD30.md).
 
 
-[Build 47 DEB](dist/wallaby-agent_2.0.0~dev47_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
+[Build 48 DEB](dist/wallaby-agent_2.0.0~dev48_amd64.deb) · [Checksums](dist/SHA256SUMS.txt) · [Validation](VALIDATION.md) · [Build 12 integration notes](DASHBOARD_BUILD12_UPDATE.md)
 
 Build 31 adds Dashboard V1 Build 40 archive cancellation: unused captures can be withdrawn; an active disc finishes writing/read-back, and any written or partial discs require local destruction confirmation. Shared discs preserve unrelated wallets on a read-back-verified replacement first. Discs from another Agent require the matching actual disc and independent creator fingerprint comparison. [Build 31 details](AGENT_BUILD31_CANCELLATION.md).
 

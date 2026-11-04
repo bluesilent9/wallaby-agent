@@ -417,7 +417,8 @@ class Workspace:
             if method in ('disc.read','disc.status','disc.probe') and (self.archives.reading or self.setup.burner.thread and self.setup.burner.thread.is_alive()):
                 from diagnostics import LocalActionFailure
                 raise LocalActionFailure('optical_busy','Another optical read, burn or verification is active. Wait for it to finish before checking or reading the disc.')
-            if method=='disc.burn' and self.archives.reading:raise ValueError('Wait for the current optical read to finish before burning.')
+            if method in ('disc.burn','disc.verify') and self.archives.reading:raise ValueError('Wait for the current optical read to finish before burning.')
+            if method=='disc.verify':return self.setup.burner.verify_written(*args)
             if method=='disc.selection':return self.setup.burner.select(*args)
             if method=='disc.refresh':return self.archive_ops.queue_loaded(*args)
             if method=='disc.read':
