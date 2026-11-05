@@ -33,13 +33,18 @@ class Exchange:
                 if old:saved.setdefault('legacy_exports',{})[key]=saved['outbox'].pop(key)
         state=self.store.read()
         from cancellation import held_item,blocked
-        ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1)
+        ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1 if pair[1]['kind'] in ('partial_sign_result','broadcast_result') else 2)
         items=[{'id':key,**row} for key,row in ordered if not held_item(state,row)][:8]
         body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_rename_v1']}
         if time.monotonic()-getattr(self,'address_checked',-60)>=30:
             self.address=local_ipv6();self.address_checked=time.monotonic()
         address=getattr(self,'address',None)
         if address:body['node_info']={'ipv6':address}
+        from activity_log import event
+        for item in items:
+            if item['kind']=='partial_sign_result' and item['id'] not in getattr(self,'signing_sent',set()):
+                self.signing_sent=(getattr(self,'signing_sent',set()) if len(getattr(self,'signing_sent',set()))<128 else set())|{item['id']}
+                event('transaction.delivery','Sending signed result · request='+item['payload']['request_hash'][:12])
         self.phase='http'
         try:r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)
         except HTTPFailure as error:
@@ -53,6 +58,16 @@ class Exchange:
         if not isinstance(r,dict) or set(r)!={'version','accepted','proposals'} or type(r['version']) is not int or r['version']!=1 or not isinstance(r['accepted'],list) or not isinstance(r['proposals'],list) or len(r['proposals'])>16:raise ValueError('Invalid Dashboard exchange response.')
         sent={i['id'] for i in items}
         if any(not isinstance(k,str) or k not in sent for k in r['accepted']):raise ValueError('Dashboard acknowledged an item that was not sent.')
+        # A valid acknowledgement is independent of unrelated proposals in this
+        # response. Record delivery before processing a new proposal can fail.
+        with self.store.edit() as saved:
+            for key in r['accepted']:
+                item=saved['outbox'].pop(key,None)
+                if item and item['kind']=='transaction_builder_psbt':saved.setdefault('delivered_artifacts',{})[key]=item
+                if item and item['kind']=='partial_sign_result':
+                    request=item['payload']['request_hash'];record=saved['completed'].get(request)
+                    if record and record.get('outbox_id')==key:record.update(delivery='acknowledged',acknowledged_at=time.time())
+                    event('transaction.delivery','Dashboard acknowledged signed result · request='+request[:12])
         # List membership belongs to Dashboard. Signed previews never grant local authority.
         from vault_policy import validate_proposal
         proposals=[]
@@ -110,9 +125,6 @@ class Exchange:
         if previews:self.prepare_preview()
         self.phase='acknowledgement';self.proposal_kind='none'
         with self.store.edit() as s:
-            for key in r['accepted']:
-                item=s['outbox'].pop(key,None)
-                if item and item['kind']=='transaction_builder_psbt':s.setdefault('delivered_artifacts',{})[key]=item
             self.preview_ready=not s.get('sync_batch') and not s.get('active_transfer') and any(row['proposal']['kind']=='wallet_transfer' and row['proposal']['direction']=='send' and row['proposal'].get('preview_challenge') and key not in s.get('transfer_previews',{}) for key,row in s['pending'].items())
             s['sync']='Dashboard exchange connected. Pending changes require local authorisation.';s['last_exchange']=time.time();s.pop('exchange_error',None)
     def prepare_preview(self):
@@ -161,6 +173,15 @@ class Exchange:
             return ConnectionFailure('dashboard','exchange_'+reason,'Agent rejected Dashboard exchange data at '+self.phase+' ('+self.proposal_kind+'); category '+reason+'. Queued data retained. Compare the Dashboard protocol log; no rejected request authorised a wallet operation.')
         return failure
     def run(self,stop):
+        # A temporary local-store/diagnostic failure outside the normal HTTP
+        # try block must not silently kill the only result-delivery thread.
+        while not stop.is_set() and not self.unsupported and not self.cancelled():
+            try:self._run(stop)
+            except Exception:
+                from activity_log import event
+                event('dashboard.exchange','Exchange worker interrupted by a local failure; queued results retained. Retrying data delivery only; no wallet operation is replayed.')
+                stop.wait(2)
+    def _run(self,stop):
         transport_delay=1
         while not stop.is_set() and not self.unsupported and not self.cancelled():
             delay=2

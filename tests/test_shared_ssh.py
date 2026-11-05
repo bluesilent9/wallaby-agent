@@ -9,7 +9,7 @@ from runtime import monitor
 class SharedSSH(unittest.TestCase):
  def test_master_login_has_no_initial_tunnel_or_remote_command(self):
   c=Config().values;c['hostname']='server.test';args=ssh_command(c,None,None,'/tmp/master.sock')
-  self.assertNotIn('-L',args);self.assertIn('-N',args);self.assertIn('-6',args);self.assertIn('StrictHostKeyChecking=yes',args)
+  self.assertNotIn('-L',args);self.assertIn('-N',args);self.assertNotIn('-6',args);self.assertTrue(any('server_connector.py' in arg for arg in args));self.assertIn('StrictHostKeyChecking=yes',args)
  def test_forward_add_cancel_share_socket_without_starting_another_login(self):
   with tempfile.TemporaryDirectory() as root:
    c=Config(root).values;c['hostname']='server.test';sock=Path(root)/'ssh-test.sock';sock.touch();(Path(root)/'master.json').write_text(json.dumps({'control':str(sock),'config_hash':fingerprint(c)}))
@@ -34,12 +34,12 @@ class SharedSSH(unittest.TestCase):
    def wait(self,d):self.count+=1;return self.is_set()
   stop=Stop()
   with tempfile.TemporaryDirectory() as root:
-   c=Config(root).values;c['hostname']='server.test';master=Mock();master.alive.side_effect=lambda:stop.count==0;master.process.poll.return_value=255;master.info.return_value={'control':str(Path(root)/'ssh-test.sock'),'config_hash':fingerprint(c)}
+   c=Config(root).values;c['hostname']='server.test';master=Mock();master.family.return_value='IPv4';master.alive.side_effect=lambda:stop.count==0;master.process.poll.return_value=255;master.info.return_value={'control':str(Path(root)/'ssh-test.sock'),'config_hash':fingerprint(c)}
    from diagnostics import ConnectionFailure
    master.failure.return_value=ConnectionFailure('ssh','transport','SSH connection dropped.')
    with patch('runtime.retire_jellyfin'),patch('runtime.ctl'),patch('runtime.signal.signal'),patch('runtime.threading.Event',return_value=stop),patch('runtime.Config') as cfg,patch('runtime.runtime_dir',return_value=Path(root)),patch('runtime.MasterConnection',return_value=master) as connect,patch('runtime.notify_approvals'),patch('runtime.write_status') as status:
     cfg.return_value.values=c;monitor()
-   connect.assert_called_once();master.start.assert_called_once();self.assertEqual(status.call_args_list[0].args[1],'amber');colors=[a.args[1] for a in status.call_args_list];self.assertIn('green',colors);self.assertIn('red',colors);self.assertFalse((Path(root)/'master.json').exists())
+   connect.assert_called_once();master.start.assert_called_once();self.assertEqual(status.call_args_list[0].args[1],'amber');colors=[a.args[1] for a in status.call_args_list];self.assertIn('green',colors);self.assertTrue(any('over IPv4' in str(a.args) for a in status.call_args_list));self.assertIn('red',colors);self.assertFalse((Path(root)/'master.json').exists())
  def test_ping_is_removed(self):
   import transport,runtime
   self.assertFalse(hasattr(transport,'ping'));self.assertFalse(hasattr(runtime,'ping'))
@@ -55,7 +55,7 @@ class SharedSSH(unittest.TestCase):
     return self.is_set()
   stop=Stop()
   with tempfile.TemporaryDirectory() as td:
-   root=Path(td);c=Config(root).values;c['hostname']='server.test';master=Mock();master.alive.return_value=True;master.info.return_value={'control':str(root/'ssh-test.sock'),'config_hash':fingerprint(c)}
+   root=Path(td);c=Config(root).values;c['hostname']='server.test';master=Mock();master.family.return_value='IPv6';master.alive.return_value=True;master.info.return_value={'control':str(root/'ssh-test.sock'),'config_hash':fingerprint(c)}
    with patch('runtime.retire_jellyfin'),patch('runtime.ctl'),patch('runtime.signal.signal'),patch('runtime.threading.Event',return_value=stop),patch('runtime.Config') as cfg,patch('runtime.runtime_dir',return_value=root),patch('runtime.MasterConnection',return_value=master) as connect,patch('runtime.notify_approvals'),patch('runtime.write_status'):
     cfg.return_value.values=c;monitor()
    connect.assert_called_once();master.start.assert_called_once()

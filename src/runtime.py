@@ -87,7 +87,7 @@ def worker(kind):
                 support=node_support(config)
                 if not support['available']:raise ConnectionFailure('configuration','node_prerequisites',support['message'])
             stage='ssh'
-            publish('amber','Connecting SSH over IPv6…',tunnel=False,stage=stage)
+            publish('amber','Opening an IPv6 service forward over the server SSH connection…',tunnel=False,stage=stage)
             tunnel=Tunnel(config,kind,runtime_dir());tunnel.start()
             deadline=time.monotonic()+16
             while not stop.is_set() and not tunnel.alive():
@@ -144,7 +144,7 @@ def worker(kind):
 
 def monitor():
     retire_jellyfin()
-    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev54','pid':os.getpid()}))
+    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev55','pid':os.getpid()}))
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     from node_lifecycle import Lifecycle
     lifecycle=Lifecycle()
@@ -176,7 +176,7 @@ def monitor():
             if not cfg['hostname']:
                 status=('red','Enter your server hostname or domain.');extra={}
             elif master is None and now>=due:
-                status=('amber','Authenticating SSH over IPv6…');extra={}
+                status=('amber','Connecting to server · IPv6 preferred, IPv4 fallback…');extra={}
                 write_status('server',*status,tunnel=False)
                 master=MasterConnection(cfg,runtime_dir());attempt_started=now
                 try:master.start()
@@ -189,13 +189,13 @@ def monitor():
                         fd,name=tempfile.mkstemp(dir=runtime_dir())
                         with os.fdopen(fd,'w') as f:json.dump(master.info(),f)
                         os.replace(name,meta)
-                    status=('green','Authenticated server SSH connection established.');extra={};delay=15
+                    status=('green','Authenticated server SSH connection established over '+master.family()+'.');extra={'address_family':master.family()};delay=15
                 elif master.process.poll() is not None or (runtime_dir()/'master.json').exists() or now-attempt_started>16:
                     failure=master.failure();status=('red',str(failure)+' Retrying automatically.')
                     extra={'stage':failure.stage,'code':failure.code,'retry_at':time.time()+delay}
                     master.close();master=None;(runtime_dir()/'master.json').unlink(missing_ok=True)
                     due=now+(2 if cfg['enabled']['node'] else delay)+random.uniform(0,.3 if cfg['enabled']['node'] else 3);delay=min(300,delay*2)
-                else:status=('amber','Authenticating SSH over IPv6…')
+                else:status=('amber','Connecting to server · IPv6 preferred, IPv4 fallback…')
             write_status('server',*status,tunnel=status[0]=='green',**extra)
             notify_approvals();stop.wait(1)
     finally:

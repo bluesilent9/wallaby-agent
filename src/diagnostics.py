@@ -69,6 +69,8 @@ def ssh_failure(lines, port, exit_code=None):
         if 'wallaby_resolver '+code+':' in text:return ConnectionFailure('ssh',code,message)
     for code in ('refused','timeout','ipv6_route'):
         if 'wallaby_connect '+code+':' in text:return ConnectionFailure('ssh',code,{'refused':'The server refused the IPv6 SSH connection. Check its SSH port and listener.','timeout':'The IPv6 SSH connection timed out. Check the server port and network reachability.','ipv6_route':'SSH has no working IPv6 route to the server. Check this computer’s IPv6 network connection.'}[code])
+    if 'wallaby_connect server_unreachable:' in text:
+        return ConnectionFailure('ssh','server_unreachable','Could not connect to the server over IPv6 or IPv4. Check its hostname, SSH port and network connection.')
     if 'administratively prohibited' in text:
         return ConnectionFailure('ssh_forward', 'forward_denied', f'SSH login succeeded, but the server denied forwarding to [::1]:{port}. Check PermitOpen and the key/account forwarding restrictions.')
     if 'open failed' in text and 'connection refused' in text:

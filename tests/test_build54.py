@@ -67,6 +67,14 @@ class RealSigning(unittest.TestCase):
  tearDownClass=classmethod(fixtures.RealCoreVault.tearDownClass.__func__)
  setUp=fixtures.RealCoreVault.setUp
  build=fixtures.RealCoreVault.build
+ def test_core_returning_unsigned_psbt_cannot_be_reported_as_signed(self):
+  built=self.build();p={'kind':'sign_psbt_partial','request_id':'b'*64,'wallet':self.source,'chain':'regtest','psbt':built['psbt']};self.store.receive(p);key=digest(p);self.ops.prepare_request(key)
+  original=rpc
+  def no_signature(core,method,params=None,wallet=None,timeout=30):
+   if method=='walletprocesspsbt' and isinstance(params,dict) and params.get('sign'):return {'psbt':params['psbt']}
+   return original(core,method,params,wallet,timeout)
+  with patch('wallet_ops.rpc',side_effect=no_signature),self.assertRaises(LocalActionFailure) as error:self.ops.sign(key,'regtest-password','partial',True)
+  self.assertEqual(error.exception.code,'transaction_no_signature');self.assertEqual(self.store.read()['pending'][key]['state'],'pending');self.assertFalse(self.store.read()['outbox']);self.assertEqual(rpc(self.c,'getwalletinfo',[],self.source)['unlocked_until'],0)
  def test_expiry_preserves_request_and_explicit_review_again_signs_same_transaction(self):
   built=self.build();p={'kind':'sign_psbt_partial','request_id':'a'*64,'wallet':self.source,'chain':'regtest','psbt':built['psbt']};self.store.receive(p);key=digest(p)
   reviewed=self.ops.prepare_request(key);self.assertGreater(reviewed['review_seconds_remaining'],590);self.assertLessEqual(reviewed['review_seconds_remaining'],600)

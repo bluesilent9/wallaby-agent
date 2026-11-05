@@ -26,4 +26,14 @@
   tick();if(!sign.disabled)timer=window.setInterval(tick,1000);
   return {expire,current:()=>{tick();return !sign.disabled;},clear:window.clearTransactionReviewTimer};
  };
+ window.renderTransactionDeliveries=function(w){
+  const root=document.querySelector('#transaction-deliveries');if(!root)return;
+  root.replaceChildren(...(w.transaction_deliveries||[]).map(row=>el('section',{class:'proof transaction-delivery',role:'status'},el('h3',{},row.state==='acknowledged'?'Dashboard acknowledged signed transaction':'Signed · waiting for Dashboard'),el('strong',{},row.wallet),el('p',{},row.state==='acknowledged'?'Dashboard acknowledged receipt of this signing result. Continue in Transaction Builder. No transaction was broadcast by signing.':'The signature result is queued in this protected workspace. Keep it open. The Agent retries delivery of this same result; do not sign again.'),el('small',{},'Request '+row.id.slice(0,12)))));
+ };
+ let etaTimer=null,etaSample=null,etaStarted=0;
+ window.trackDiscEta=function(b){
+  if(!b||!['burning','verifying'].includes(b.phase)){etaSample=null;if(etaTimer!==null)window.clearInterval(etaTimer);etaTimer=null;return;}
+  etaSample={};for(const key of ['phase','estimated_remaining_seconds','eta_waiting_for_progress','writer_status','written_bytes','total_bytes'])etaSample[key]=b[key];etaStarted=window.transactionClock();
+  if(etaTimer===null&&typeof window.setInterval==='function')etaTimer=window.setInterval(()=>{const node=document.querySelector('[data-burn-eta]');if(!node||!etaSample)return;const shown={...etaSample},seconds=shown.estimated_remaining_seconds;if(seconds!==null&&seconds!==undefined)shown.estimated_remaining_seconds=Math.max(0,seconds-(window.transactionClock()-etaStarted)/1000);node.textContent=discEta(shown);},1000);
+ };
 })();

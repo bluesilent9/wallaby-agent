@@ -24,6 +24,7 @@ window.renderWalletApproval=function(r,box){
 };
 const burnOutcomeSeen=new Set();
 window.updateBurnResults=function(b){
+ window.trackDiscEta?.(b);
  for(const result of b?.outcomes||[]){if(burnOutcomeSeen.has(result.id))continue;burnOutcomeSeen.add(result.id);if(burnOutcomeSeen.size>128)burnOutcomeSeen.delete(burnOutcomeSeen.values().next().value);
  const message={verified:'Verification Successful',verification_failed:'Verification Failed',verification_interrupted:'Verification could not finish. Keep the workspace open and retry the written disc.',burn_failed:'Burning the disc failed',preparation_failed:'Disc preparation failed',completion_failed:'Disc verified, but recording completion failed. Keep the protected workspace open.'}[result.kind];
  if(message&&typeof window.alert==='function')window.alert(message);
@@ -32,12 +33,11 @@ window.updateBurnResults=function(b){
 function discEta(b){
  if(!['burning','verifying'].includes(b.phase))return '';
  if(b.phase==='burning'&&(b.writer_status==='closing'||Number(b.written_bytes)>=Number(b.total_bytes)))return 'Finishing the disc write; waiting for the drive to close the session.';
- if(b.eta_waiting_for_progress)return 'Estimated time remaining for this stage: waiting for fresh drive progress…';
  const seconds=b.estimated_remaining_seconds;
  if(seconds===null||seconds===undefined)return 'Estimated time remaining for this stage: calculating from progress…';
  if(seconds<=0)return 'Estimated time remaining for this stage: finishing this stage…';
  const n=Math.ceil(seconds),hours=Math.floor(n/3600),minutes=Math.floor(n%3600/60),rest=n%60;
- return 'Estimated time remaining for this stage: '+(hours?hours+' hr ':'')+(hours||minutes?minutes+' min ':'')+rest+' sec (approximate)';
+ return 'Estimated time remaining for this stage: '+(hours?hours+' hr ':'')+(hours||minutes?minutes+' min ':'')+rest+' sec (approximate'+(b.eta_waiting_for_progress?'; waiting for fresh drive progress':'')+')';
 }
 let discSelection=null;
 function selectionFor(b){

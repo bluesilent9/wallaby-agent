@@ -2,7 +2,7 @@
 import json,os,secrets,socket,struct,time
 from protected_memory import root,enforce
 
-VERSION='2.0.0~dev54'
+VERSION='2.0.0~dev55'
 PROTOCOL=1
 REQUEST='upgrade-request.json'
 RESULT='upgrade-result.json'

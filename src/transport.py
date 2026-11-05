@@ -1,4 +1,4 @@
-"""One authenticated IPv6 OpenSSH master; services add/cancel multiplexed forwards."""
+"""One authenticated server OpenSSH master (IPv6 preferred, IPv4 fallback); services add/cancel multiplexed forwards."""
 import errno, hashlib, json, os, socket, shlex, subprocess, time, threading, uuid
 from collections import deque
 from pathlib import Path
@@ -11,11 +11,11 @@ def fingerprint(config):
 
 def ssh_command(config,kind,local_port,control):
     host=hostname(config['hostname'])
-    args=['ssh','-6','-F','/dev/null','-N','-T','-M','-S',str(control),'-p',str(config['ssh_port']),'-l',config['ssh_user'],
+    args=['ssh','-F','/dev/null','-N','-T','-M','-S',str(control),'-p',str(config['ssh_port']),'-l',config['ssh_user'],
           '-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ExitOnForwardFailure=yes',
           '-o','ConnectTimeout=12','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=2',
           '-o','ControlPersist=no','-o','GatewayPorts=no','-o','ForwardAgent=no','-o','ForwardX11=no']
-    proxy='/usr/bin/python3 -I -B '+shlex.quote(str(Path(__file__).with_name('ipv6_resolver.py'))) +' %h %p'
+    proxy='/usr/bin/python3 -I -B '+shlex.quote(str(Path(__file__).with_name('server_connector.py'))) +' %h %p'
     args+=['-o','ProxyCommand='+proxy,'-o','ProxyUseFdpass=yes']
     if kind is not None:args+=['-L',f'[::1]:{local_port}:[::1]:{SERVICES[kind]}']
     if config['identity_file']:args+=['-i',str(Path(config['identity_file']).expanduser()),'-o','IdentitiesOnly=yes']
@@ -51,7 +51,9 @@ class MasterConnection:
     def alive(self):
         try:return bool(self.process is not None and self.process.poll() is None and self.control.exists() and subprocess.run(control_command(self.config,self.control,'check'),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=3).returncode==0)
         except (OSError,subprocess.TimeoutExpired):return False
-    def info(self):return {'control':str(self.control),'config_hash':fingerprint(self.config)}
+    def family(self):
+        return 'IPv4' if any('WALLABY_SERVER IPv4:' in line for line in self.errors) else 'IPv6'
+    def info(self):return {'control':str(self.control),'config_hash':fingerprint(self.config),'address_family':self.family()}
     def close(self):
         if self.process and self.process.poll() is None:
             self.process.terminate()

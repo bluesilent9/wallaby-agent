@@ -41,7 +41,7 @@ def intents(ops,p,review):
     if int(review['fee_sats'])<required_fee:raise ValueError('The final transaction reduced the fixed vault fee.')
 
 
-def has_signatures(psbt):
+def signature_maps(psbt):
     """Bounded BIP174 input-map scan for upgrade quarantine, without Core or signing."""
     import base64,io
     from vendor.embit.transaction import Transaction
@@ -69,9 +69,11 @@ def has_signatures(psbt):
             result[key]=value
     global_map=fields()
     if b'\x00' not in global_map:raise ValueError('PSBT v0 is required.')
-    tx=Transaction.parse(global_map[b'\x00']);signed=False
+    tx=Transaction.parse(global_map[b'\x00']);signatures=[]
     for _ in tx.vin:
-        scope=fields();signed=bool(signed or any(k[0] in (2,7,8,19,20) for k in scope))
+        scope=fields();signatures.append({k:v for k,v in scope.items() if k[0] in (2,7,8,19,20)})
     for _ in tx.vout:fields()
     if stream.read(1):raise ValueError('Unexpected trailing PSBT data.')
-    return signed
+    return signatures
+
+def has_signatures(psbt):return any(signature_maps(psbt))

@@ -256,6 +256,22 @@ class WalletOps:
             signed_psbt=psbt_text(signed['psbt']);after=self.review(signed_psbt,p['wallet'],p['chain'])
             if after['tx_hash']!=current['tx_hash']:raise ValueError('Core changed the approved transaction; it was not broadcast.')
             if p['kind']=='sign_psbt_partial':
-                self.store.queue('partial_sign_result',{'request_hash':key,'status':'signed','psbt':signed_psbt})
-                with self.store.edit() as state:state['completed'][key]={'kind':p['kind'],'at':time.time(),'proposal':{k:v for k,v in p.items() if k not in ('review','created','created_monotonic')},'artifact_psbt':signed_psbt};state['pending'].pop(key,None)
-                return {'queued':True,'message':'Approved signatures returned to Dashboard. No transaction was broadcast.'}
+                from transaction_requests import signature_maps
+                before=signature_maps(p['psbt']);returned=signature_maps(signed_psbt)
+                indices=[i for i,row in enumerate(current['inputs']) if p['wallet'] in row['wallets']]
+                added=sum(1 for i in indices for field,value in returned[i].items() if value and before[i].get(field)!=value)
+                if not added:
+                    with self.store.edit() as state:state['pending'][key]['state']='pending'
+                    raise LocalActionFailure('transaction_no_signature','Bitcoin Core returned no new signature for this signing account. Nothing was sent to Dashboard. Review the local signing keys and this transaction again.')
+                payload={'request_hash':key,'status':'signed','psbt':signed_psbt};item={'kind':'partial_sign_result','payload':payload};outbox_id=digest(item)
+                from approval_store import MAX_ITEMS
+                with self.store.edit() as state:
+                    if len(state['outbox'])>=MAX_ITEMS:raise ValueError('Dashboard outbox is full; connect and synchronise first.')
+                    # Publish the immutable result and its local receipt together;
+                    # exchange may acknowledge it immediately on another thread.
+                    state['outbox'][outbox_id]=item
+                    state['completed'][key]={'kind':p['kind'],'at':time.time(),'proposal':{k:v for k,v in p.items() if k not in ('review','created','created_monotonic')},'artifact_psbt':signed_psbt,'outbox_id':outbox_id,'delivery':'queued','signature_fields_added':added}
+                    state['pending'].pop(key,None)
+                from activity_log import event
+                event('transaction.sign','Signature result queued · request='+key[:12]+' · added_fields='+str(added))
+                return {'queued':True,'request_hash':key,'delivery':'queued','message':'Transaction signed locally. Waiting for Dashboard acknowledgement; do not sign again. No transaction was broadcast.'}

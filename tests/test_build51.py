@@ -13,7 +13,7 @@ class Estimates(unittest.TestCase):
     self.assertIsNone(b.state()['estimated_remaining_seconds'])
     clock[0]=6;writer(100);self.assertEqual(b.state()['estimated_remaining_seconds'],54)
     clock[0]=8;self.assertEqual(b.state()['estimated_remaining_seconds'],52)
-    clock[0]=40;self.assertTrue(b.state()['eta_waiting_for_progress']);self.assertIsNone(b.state()['estimated_remaining_seconds'])
+    clock[0]=40;self.assertTrue(b.state()['eta_waiting_for_progress']);self.assertEqual(b.state()['estimated_remaining_seconds'],20)
     j['phase']='verifying';verify=StageProgress(j,'verified_bytes','verifying');self.assertEqual(j['verified_bytes'],0);self.assertIsNone(b.state()['estimated_remaining_seconds'])
     clock[0]=46;verify(500);self.assertEqual(b.state()['estimated_remaining_seconds'],6)
     self.assertEqual(j['written_bytes'],100);self.assertEqual(j['verified_bytes'],500)

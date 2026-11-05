@@ -374,7 +374,7 @@ class Burner:
         if result.get('phase')==result.get('eta_stage'):
             age=max(0,time.time()-(result.get('eta_last_progress_at') or time.time()))
             result['eta_waiting_for_progress']=age>=30
-            result['estimated_remaining_seconds']=max(0,int(__import__('math').ceil(result['eta_seconds']-max(0,time.time()-result['eta_updated_at'])))) if result.get('eta_seconds') is not None and not result['eta_waiting_for_progress'] else None
+            result['estimated_remaining_seconds']=max(0,int(__import__('math').ceil(result['eta_seconds']-max(0,time.time()-result['eta_updated_at'])))) if result.get('eta_seconds') is not None else None
         result['completed_sets']=list(self.completed_sets)
         result['outcomes']=list(self.outcomes)
         result['queue']=[]
