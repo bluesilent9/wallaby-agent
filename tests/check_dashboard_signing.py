@@ -57,4 +57,4 @@ for case in ('single','multiple_recipients','multisig'):
    finally:server.shutdown();server.server_close();thread.join()
   results.append({'case':case,'dashboard_all_signed':view['all_signed'],'agents':reports})
  finally:fixture.doCleanups()
-print(json.dumps({'Dashboard':int(dash.name.rsplit('build',1)[1]),'Agent':55,'live_wallets_accessed':False,'cases':results},indent=2))
+print(json.dumps({'Dashboard':int(dash.name.rsplit('build',1)[1]),'Agent':56,'live_wallets_accessed':False,'cases':results},indent=2))

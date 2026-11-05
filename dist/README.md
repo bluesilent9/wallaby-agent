@@ -1,5 +1,7 @@
-# Development Build 55
+# Development Build 56
 
-Install wallaby-agent_2.0.0~dev55_amd64.deb on Ubuntu 26.04 amd64 after finishing protected work and closing normally. Verify SHA256SUMS.txt.
+Install Dashboard Build 64 or later first. Complete protected work and close the Agent workspace normally before upgrading.
 
-Includes explicit signing delivery receipts, signature-presence checks and delivery safeguards; continuing disc ETA; IPv6-preferred server SSH with IPv4 fallback. Local RPC/listeners and peer synchronisation remain IPv6-only. Pair with Dashboard Build 62 for the new handoff logs. See ../AGENT_BUILD55_DELIVERY_SERVER.md for investigation limits and validation.
+Download wallaby-agent_2.0.0~dev56_amd64.deb, then install with your package installer or `sudo apt install ./wallaby-agent_2.0.0~dev56_amd64.deb`.
+
+Signing returns signatures only. Later Dashboard broadcast requests submit completed transactions automatically without a second approval.

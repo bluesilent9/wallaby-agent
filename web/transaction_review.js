@@ -28,7 +28,11 @@
  };
  window.renderTransactionDeliveries=function(w){
   const root=document.querySelector('#transaction-deliveries');if(!root)return;
-  root.replaceChildren(...(w.transaction_deliveries||[]).map(row=>el('section',{class:'proof transaction-delivery',role:'status'},el('h3',{},row.state==='acknowledged'?'Dashboard acknowledged signed transaction':'Signed · waiting for Dashboard'),el('strong',{},row.wallet),el('p',{},row.state==='acknowledged'?'Dashboard acknowledged receipt of this signing result. Continue in Transaction Builder. No transaction was broadcast by signing.':'The signature result is queued in this protected workspace. Keep it open. The Agent retries delivery of this same result; do not sign again.'),el('small',{},'Request '+row.id.slice(0,12)))));
+  root.replaceChildren(...(w.transaction_deliveries||[]).map(row=>{
+   const broadcast=row.kind==='broadcast_transaction',error=broadcast&&row.status==='error',heading=error?'Broadcast needs attention':broadcast?(row.state==='acknowledged'?'Dashboard acknowledged broadcast':'Core confirmed broadcast · waiting for Dashboard'):(row.state==='acknowledged'?'Dashboard acknowledged signed transaction':'Signed · waiting for Dashboard');
+   const message=error?row.message:broadcast?'The completed transaction was submitted or independently found on Core. Continue tracking its TXID on Dashboard.':row.state==='acknowledged'?'Dashboard acknowledged receipt of this signing result. Continue in Transaction Builder. No transaction was broadcast by signing.':'The signature result is queued in this protected workspace. Keep it open. The Agent retries delivery of this same result; do not sign again.';
+   return el('section',{class:'proof transaction-delivery',role:'status'},el('h3',{},heading),el('strong',{},row.wallet),el('p',{},message),broadcast&&row.txid?el('code',{},row.txid):null,el('small',{},'Request '+row.id.slice(0,12)));
+  }));
  };
  let etaTimer=null,etaSample=null,etaStarted=0;
  window.trackDiscEta=function(b){

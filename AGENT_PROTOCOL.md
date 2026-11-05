@@ -146,3 +146,10 @@ See [AGENT_BUILD31_CANCELLATION.md](AGENT_BUILD31_CANCELLATION.md) for wallet_ar
 ## Build 32 local rename recovery
 
 The Dashboard wallet_rename_v1 protocol is unchanged. Build 32 fixes the local rename-helper mount policy, performs an authenticated helper preflight before unloading and exposes a locally authorised reconciliation action. Error receipts may include fixed stage/error_code, original_wallet_restored and reconciled fields. An unresolved attempt still reports attempted=true/outcome_uncertain=true; a verified restored original reports error with attempted=false/outcome_uncertain=false. A verified already-moved wallet reports complete with the actual expected new_wallet. No online message authorises retries, rollback renames or file overwrites. See AGENT_BUILD32_RENAME.md.
+
+
+## Build 56: deferred automatic broadcast
+
+`automatic_broadcast_v1` supplements `broadcast` and is required for Dashboard's no-second-approval flow (Dashboard 64+). Signing still returns only a partial signing result and never submits a transaction. A later `broadcast_transaction` proposal supplies the completed PSBT, exact TXID and network. The protected worker automatically validates/finalizes the PSBT, checks the TXID and network locally, tests mempool acceptance, and submits the finalized bytes. It neither unlocks wallets nor creates signatures.
+
+The existing `broadcast_result` payload binds `request_hash`, `status` (`broadcast` or `error`) and `txid`; errors include fixed safe text. Core-confirmed success is queued for Dashboard acknowledgement, which clears delivery work. An uncertain send is never automatically repeated. Read-only mempool/confirmed-transaction probes may establish a successful outcome after an interrupted reply. Signing and broadcast receipts remain distinct.

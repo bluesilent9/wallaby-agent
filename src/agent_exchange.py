@@ -8,6 +8,7 @@ import time,threading
 LOCAL_CANCELLATIONS=None
 LOCAL_RETIREMENT=None
 LOCAL_ARCHIVES=None
+LOCAL_BROADCASTS=None
 from peer_wallet import local_ipv6,active
 from approval_store import Store
 from node_client import http_json,HTTPFailure
@@ -35,16 +36,16 @@ class Exchange:
         from cancellation import held_item,blocked
         ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1 if pair[1]['kind'] in ('partial_sign_result','broadcast_result') else 2)
         items=[{'id':key,**row} for key,row in ordered if not held_item(state,row)][:8]
-        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_rename_v1']}
+        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','automatic_broadcast_v1','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_rename_v1']}
         if time.monotonic()-getattr(self,'address_checked',-60)>=30:
             self.address=local_ipv6();self.address_checked=time.monotonic()
         address=getattr(self,'address',None)
         if address:body['node_info']={'ipv6':address}
         from activity_log import event
         for item in items:
-            if item['kind']=='partial_sign_result' and item['id'] not in getattr(self,'signing_sent',set()):
+            if item['kind'] in ('partial_sign_result','broadcast_result') and item['id'] not in getattr(self,'signing_sent',set()):
                 self.signing_sent=(getattr(self,'signing_sent',set()) if len(getattr(self,'signing_sent',set()))<128 else set())|{item['id']}
-                event('transaction.delivery','Sending signed result · request='+item['payload']['request_hash'][:12])
+                event('transaction.delivery','Sending '+('signed result' if item['kind']=='partial_sign_result' else 'broadcast result')+' · request='+item['payload']['request_hash'][:12])
         self.phase='http'
         try:r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)
         except HTTPFailure as error:
@@ -64,10 +65,10 @@ class Exchange:
             for key in r['accepted']:
                 item=saved['outbox'].pop(key,None)
                 if item and item['kind']=='transaction_builder_psbt':saved.setdefault('delivered_artifacts',{})[key]=item
-                if item and item['kind']=='partial_sign_result':
+                if item and item['kind'] in ('partial_sign_result','broadcast_result'):
                     request=item['payload']['request_hash'];record=saved['completed'].get(request)
                     if record and record.get('outbox_id')==key:record.update(delivery='acknowledged',acknowledged_at=time.time())
-                    event('transaction.delivery','Dashboard acknowledged signed result · request='+request[:12])
+                    event('transaction.delivery','Dashboard acknowledged '+('signed result' if item['kind']=='partial_sign_result' else 'broadcast result')+' · request='+request[:12])
         # List membership belongs to Dashboard. Signed previews never grant local authority.
         from vault_policy import validate_proposal
         proposals=[]
@@ -122,6 +123,7 @@ class Exchange:
             elif p['kind']=='node_identity':
                 if address:self.store.queue('node_identity',{'ipv6':address})
             elif p['kind'] not in ('wallet_sync_queue','wallet_archive_queue','wallet_rename_queue'):self.store.receive(p)
+        if LOCAL_BROADCASTS is not None and LOCAL_BROADCASTS.store.path==self.store.path:LOCAL_BROADCASTS.start()
         if previews:self.prepare_preview()
         self.phase='acknowledgement';self.proposal_kind='none'
         with self.store.edit() as s:
