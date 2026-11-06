@@ -59,7 +59,7 @@ def matches(core,store,address,known=None):
             labels=rpc(core,'getaddressinfo',[address0],monitor).get('labels',[])
             setup_monitor=bool(re.fullmatch(r'Wallaby policy [0-9a-f]{20}',monitor))
             ready=not any(label.startswith(PENDING) for label in labels) and (not setup_monitor or any(label.startswith(READY) for label in labels))
-            result.append({k:v for k,v in parsed.items() if k!='keys'}|{'wallets':wallets,'monitor_wallet':monitor,'setup_ready':ready})
+            result.append({k:v for k,v in parsed.items() if k!='keys'}|{'wallets':wallets,'monitor_wallet':monitor,'setup_ready':ready,'descriptor':desc})
     known['addresses'][address]=result
     return result
 

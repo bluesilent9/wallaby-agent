@@ -163,6 +163,9 @@ class Archives:
                         try:
                             rpc(c,'walletpassphrase',[password,120],'archive-key')
                             verify_private_role(node,'archive-key',contribution,[[r['recovery']['receive_descriptor'],r['recovery']['change_descriptor']]]+[[ext['receive_descriptor'],ext['change_descriptor']] for ext in r['recovery'].get('policy_extensions',[])])
+                            if r['recovery'].get('retired_policy_hashes'):
+                                from policy_refresh_cancel import restore_retired
+                                restore_retired(node,'archive-key',r['recovery'])
                         finally:
                             password=None;rpc(c,'walletlock',[],'archive-key')
                 if not descriptors(wanted)<=descriptors(rpc(c,'listdescriptors',[False],'archive-key')):raise ValueError('Archived private wallet public account does not match the approved recovery policy.')
@@ -175,6 +178,9 @@ class Archives:
                 else:requests=[{'desc':r['recovery'][k],'timestamp':'now','active':True,'internal':bool(i),'range':[0,999]} for i,k in enumerate(('receive_descriptor','change_descriptor'))]
                 for ext in r['recovery'].get('policy_extensions',[]):
                     requests.extend({'desc':desc,'timestamp':'now','active':False,'internal':bool(i),'range':[0,999]} for i,desc in enumerate((ext['receive_descriptor'],ext['change_descriptor'])))
+                if r['recovery'].get('retired_policy_hashes'):
+                    effective=__import__('policy_refresh').validate_extensions(r['recovery'])
+                    for request in requests:request['active']=request['desc'] in effective
                 result=rpc(c,'importdescriptors',[requests],'archive-policy')
                 if any(not x.get('success') for x in result):raise ValueError('Could not load the complete public archive policy in RAM.')
                 if r.get('generic') and r['recovery'].get('policy_labels'):

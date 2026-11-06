@@ -43,18 +43,28 @@ def roots(recovery):
 def validate_extensions(recovery):
     extensions=recovery.get('policy_extensions',[])
     if not isinstance(extensions,list) or len(extensions)>128:raise ValueError('Too many public policy revisions.')
+    retired=recovery.get('retired_policy_hashes',[])
+    available={digest([item.get('receive_descriptor'),item.get('change_descriptor')]) for item in extensions if isinstance(item,dict)}
+    if not isinstance(retired,list) or len(retired)!=len(set(retired)) or any(not isinstance(v,str) or not re.fullmatch('[0-9a-f]{64}',v) or v not in available for v in retired):raise ValueError('Invalid retired policy history.')
     known=roots(recovery)
     for item in extensions:
-        if not isinstance(item,dict) or set(item)!={'previous_descriptors','receive_descriptor','change_descriptor','timestamp'}:raise ValueError('Invalid archived policy revision.')
+        base={'previous_descriptors','receive_descriptor','change_descriptor','timestamp'}
+        if not isinstance(item,dict) or not base<=set(item)<=base|{'retired'} or ('retired' in item and (item['retired'] is not True or digest([item['receive_descriptor'],item['change_descriptor']]) not in retired)):raise ValueError('Invalid archived policy revision.')
         transition(item)
         if item['previous_descriptors']!=known:raise ValueError('Archived policy history is discontinuous or replaces keys.')
-        known=[item['receive_descriptor'],item['change_descriptor']]
+        if digest([item['receive_descriptor'],item['change_descriptor']]) not in retired:known=[item['receive_descriptor'],item['change_descriptor']]
     return known
 
 class Refresh:
     def __init__(self,core,store,archives):self.core=core;self.store=store;self.archives=archives;self.reviews={}
     def review(self,key):
-        p=validate(self.store.read()['pending'][key]['proposal'])
+        from policy_refresh_group import review
+        if self.store.read()['pending'][key]['state']=='awaiting_backups':
+            from policy_refresh_backups import review as backup_review
+            return backup_review(self,key)
+        if self.store.read()['pending'][key]['state']!='pending':raise ValueError('This policy installation was attempted. Reconcile locally before retrying.')
+        return review(self,key,validate(self.store.read()['pending'][key]['proposal']))
+    def review_single(self,key,p):
         if rpc(self.core,'getblockchaininfo')['chain']!=p['chain']:raise ValueError('Policy network differs from the local node.')
         raw=rpc(self.core,'listdescriptors',[False],p['wallet'])
         first=rpc(self.core,'deriveaddresses',[p['previous_descriptors'][0],[0,0]])[0]
@@ -84,50 +94,11 @@ class Refresh:
         from vault_time import estimates
         return {'kind':p['kind'],'id':key,'refresh':facts,'unlock_estimates':estimates(self.core,[facts['height']],expected_chain=facts['chain'])}
     def approve(self,key):
-        reviewed=self.reviews.get(key)
-        if not reviewed or time.monotonic()-reviewed[2]>600:raise ValueError('Review the refreshed public policy again.')
-        p=validate(self.store.read()['pending'][key]['proposal'])
-        if p!=reviewed[0]:raise ValueError('Public policy request changed.')
-        old=rpc(self.core,'listdescriptors',[False],p['wallet'])
-        if not descriptors({'wallet_name':'old','descriptors':[{'desc':d} for d in p['previous_descriptors']]})<=descriptors(old):raise ValueError('Local policy changed after review.')
-        record=next((r for r in self.archives.loaded.values() if p['wallet'] in r['routes']),None)
-        target_core=record['node'].core if record else self.core;target=record['routes'][p['wallet']] if record else p['wallet']
-        if record:
-            # Before any import, prove the archive can preserve this transition.
-            latest=validate_extensions(record['recovery'])
-            if latest!=p['previous_descriptors']:raise ValueError('Refresh does not extend this loaded archive\'s approved policy history.')
-        chain=rpc(self.core,'getblockchaininfo')
-        from wallet_recovery import history_missing,staging_timestamp
-        unfunded_future=not reviewed[1]['funded_outputs'] and reviewed[1]['height']>chain['blocks']
-        missing=bool(not record and not unfunded_future and history_missing(self.core,p['timestamp']))
-        import_time=staging_timestamp(self.core) if missing else 'now' if record or unfunded_future else p['timestamp']
-        with self.store.edit() as saved:saved['pending'][key]['state']='attempted'
-        private_target=rpc(target_core,'getwalletinfo',[],target).get('private_keys_enabled') is True
-        if private_target:
-            from combined_wallet import extend
-            read_private=(lambda:record['node'].private_descriptors(target)) if record else None
-            extend(target_core,target,[p['receive_descriptor'],p['change_descriptor']],import_time,getattr(self,'environment',{}),read_private)
-            monitor_route=p['wallet']
-        else:
-            # Public-only wallets can retain all generations in the same wallet.
-            monitor_route=p['wallet']
-            requests=[{'desc':p[k],'timestamp':import_time,'active':True,'internal':bool(i),'range':[0,999]} for i,k in enumerate(('receive_descriptor','change_descriptor'))]
-            result=rpc(target_core,'importdescriptors',{'requests':requests},target,timeout=86400)
-            if len(result)!=2 or any(not r.get('success') for r in result):raise ValueError('Core did not import both public policies. Reconcile before retrying.')
-        if not descriptors({'wallet_name':'new','descriptors':[{'desc':p[k]} for k in ('receive_descriptor','change_descriptor')]})<=descriptors(rpc(target_core,'listdescriptors',[False],target)):raise ValueError('Imported policy verification failed.')
-        address=rpc(target_core,'deriveaddresses',[p['receive_descriptor'],[0,0]])[0]
-        rpc(target_core,'setlabel',[address,'Wallaby setup ready:'+reviewed[1]['policy_hash']],target)
-        if record:record['recovery'].setdefault('policy_extensions',[]).append(transition(p))
-        if missing:
-            from wallet_recovery import require
-            raw=rpc(target_core,'listdescriptors',[False],target)
-            for row in raw['descriptors']:row['timestamp']=min(row.get('timestamp',p['timestamp']),p['timestamp'])
-            require(self.store,key,target,{'public_wallet':raw,'chain':p['chain'],'funded_outputs':reviewed[1]['funded_outputs']})
-        from setup_messages import sign
-        self.store.queue('wallet_policy_refresh_result',sign(self.store,{'version':1,'request_hash':key,'request_id':p['request_id'],'status':'history_required' if missing else 'approved','wallet':p['wallet'],'monitor_wallet':monitor_route,'policy_hash':reviewed[1]['policy_hash'],'receive_descriptor':p['receive_descriptor'],'change_descriptor':p['change_descriptor'],'previous_descriptors':p['previous_descriptors']}))
-        with self.store.edit() as saved:
-            saved['pending'].pop(key,None);saved['completed'][key]={'kind':p['kind'],'at':time.time()};saved.setdefault('public_policy_updates',{})[reviewed[1]['policy_hash']]=transition(p)
-        return {'message':'Public policy approved. Existing signing keys and old policies retained.'+(' Blockchain history recovery is required; balances are not yet complete.' if missing else ''),'history_required':missing}
+        from policy_refresh_group import approve
+        return approve(self,key)
+    def deny(self,key):
+        from policy_refresh_group import deny
+        return deny(self,key)
 
 def validate_output_policies(rows):
     from vault_policy import text

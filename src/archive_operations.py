@@ -115,7 +115,8 @@ class Operations:
     def covers(self,new,old):
         if identity(new)!=identity(old):return False
         a=old.get('policy_extensions',[]);b=new.get('policy_extensions',[])
-        if b[:len(a)]!=a:return False
+        from policy_refresh import transition
+        if [transition(v) for v in b[:len(a)]]!=[transition(v) for v in a]:return False
         if old.get('kind')=='node_wallet':
             if not {digest(v) for v in old.get('labels',[])}<={digest(v) for v in new.get('labels',[])}:return False
             old_raw=old.get('public_policies',old['public_wallet']);new_raw=new.get('public_policies',new['public_wallet'])
@@ -125,8 +126,14 @@ class Operations:
     def complete(self,key,image_sha256,notify_cancel=True):
         row=self.jobs[key];job=self.setup.burner.job;container=job['recovery'];members=sorted(identity(r) for i,w,r in job.get('_members') or [(key,None,row['recovery'])])
         replacements=container.get('replaces',[])
-        for old in replacements:self.verified_replacements[old]={'image_sha256':image_sha256,'members':members,'old_policies_retained':True,'readback_verified':True}
+        from policy_refresh import validate_extensions
+        policies={identity(r):digest(validate_extensions(r)) for _,_,r in (job.get('_members') or [(key,None,row['recovery'])]) if r.get('policy_extensions')}
+        for old in replacements:self.verified_replacements[old]={'image_sha256':image_sha256,'members':members,'member_policies':policies,'old_policies_retained':True,'readback_verified':True}
         evidence={'members':__import__('archive_inventory').evidence(job),'archive_id':job.get('archive_id'),'disc_count':job['disc_count'],'attempted_disc_count':job.get('_attempts',job['disc_count']),'readback_verified':True,'image_sha256':image_sha256,'archive_members':members,'replacements':[{ 'archive_id':old,**self.verified_replacements[old]} for old in replacements]}
+        if evidence.get('archive_id'):
+            with self.store.edit() as saved:saved.setdefault('verified_archive_discs',{})[evidence['archive_id']]={'members':evidence['members'],'disc_count':job['disc_count'],'image_sha256':image_sha256,'retired_members':{identity(recovery):recovery.get('retired_policy_hashes',[]) for _,_,recovery in job.get('_members') or [(key,None,row['recovery'])]}}
+        from policy_refresh_backups import verified
+        verified(self,[r for _,_,r in job.get('_members') or [(key,None,row['recovery'])]],image_sha256)
         if row['request']:receipt=result(self.store,row['request'],'complete',**evidence)
         else:
             from setup_messages import sign
@@ -154,6 +161,8 @@ class Operations:
                         if not old or not new or not all(k in new and self.covers(new[k],v) for k,v in old.items()):raise ValueError('Read the original and replacement discs here and verify full coverage before accepting another Agent replacement proof.')
                         local.update(creator_confirmation_required=True,creator_fingerprint=fingerprint(creator))
         if not local or local.get('image_sha256')!=p['replacement_image_sha256'] or local.get('old_policies_retained') is not True or local.get('readback_verified') is not True or not local.get('members'):raise ValueError('No locally verified full replacement covers this old disc. Do not destroy it.')
+        from policy_refresh_backups import check_destruction
+        check_destruction(self,p['archive_id'],local)
         return local
     def destroyed(self,key,confirmed,creator_pin=None):
         self.enforce();p=validate_task(self.store.read()['pending'][key]['proposal'])
@@ -163,5 +172,7 @@ class Operations:
         if proof.get('creator_confirmation_required') and creator_pin!=proof['creator_fingerprint']:raise ValueError('Independently compare the original replacement Agent fingerprint before recording destruction.')
         result(self.store,p,'complete',destruction_confirmed_locally=True,archive_id=p['archive_id'],image_sha256=p['replacement_image_sha256'])
         with self.store.edit() as s:s['pending'].pop(key,None);s['completed'][key]={'kind':'destroy_disc','at':time.time()}
+        from policy_refresh_backups import destroyed
+        destroyed(self,p['archive_id'])
         return {'message':'Physical disc destruction recorded from your local confirmation.'}
     def busy(self):return any(v['phase']!='complete' for v in self.jobs.values())

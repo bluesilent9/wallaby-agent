@@ -153,6 +153,16 @@ class WalletOps:
         for row in tx['vout']:
             spk=row['scriptPubKey'];address=spk.get('address','');local,change=owners(address);amount=sats(row['value'])
             outputs.append({'n':row['n'],'sats':str(amount),'address':address or 'Script '+spk['hex'],'wallets':local,'change':change,'script':spk['hex'],'traits':local_traits(self.core,local,address,cache=trait_cache)})
+        # Recognise destination vaults from actual local descriptor ownership,
+        # even if Dashboard omitted its advisory output-policy bindings.
+        from wallet_setup_signing import matches
+        for output in outputs:
+            if not output['wallets']:continue
+            policies=[v for v in matches(self.core,self.store,output['address'],shared_inventory) if v.get('setup_ready') and v.get('height')]
+            facts={(v['height'],v['threshold'],v['total']) for v in policies}
+            if len(facts)==1:
+                height,threshold,total_signers=next(iter(facts));output['vault_policy']={'height':height,'threshold':threshold,'total':total_signers,'source':'Local Core policy','descriptors':sorted({v['descriptor'] for v in policies})}
+                output['traits'].update(vault=True,multisig=threshold>1)
         fee=total-sum(int(o['sats']) for o in outputs)
         if (require_owned and not own) or fee<0 or fee>MAX_SATS:raise ValueError('No locally controlled signing input, or invalid transaction fee.')
         if 'fee' in decoded and sats(decoded['fee'])!=fee:raise ValueError('PSBT fee differs from the independently verified fee.')
@@ -166,6 +176,8 @@ class WalletOps:
         if p['kind']=='vault_sync':return {'kind':'vault_sync','id':key,'vault':p['vault'],'proof':verify_vault(self.core,p['vault'])}
         if p['kind'] not in ('sign_psbt_partial','broadcast_transaction'):raise ValueError('This request requires the Synchronisation page or an updated Dashboard.')
         wallet=p.get('wallet');review=self.review(p['psbt'],wallet,p['chain'],require_owned=p['kind']=='sign_psbt_partial')
+        from policy_refresh_backups import guard
+        guard(self.store,review)
         from transaction_requests import intents
         intents(self,p,review)
         if p['kind']=='broadcast_transaction':
@@ -193,6 +205,8 @@ class WalletOps:
             if p['kind']=='broadcast_transaction' and action!='broadcast':raise ValueError('Review and authorise broadcast locally.')
             if p['kind'] not in ('sign_psbt_partial','broadcast_transaction'):raise ValueError('This retired local builder operation is unavailable.')
             current=self.review(p['psbt'],p['wallet'],p['chain'],require_owned=p['kind']!='broadcast_transaction')
+            from policy_refresh_backups import guard
+            guard(self.store,current)
             from policy_refresh import verify_output_policies
             verify_output_policies(self,p,current)
             for i in current['inputs']:

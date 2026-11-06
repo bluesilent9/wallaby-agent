@@ -91,7 +91,7 @@ class ReadbackAndCoverage(unittest.TestCase):
   raw=public();old={'kind':'node_wallet','public_wallet':raw,'chain':'regtest','public_policies':raw,'policy_extensions':[],'policy_labels':[{'address':'trusted','label':'Owner'}]};new=copy.deepcopy(old);new['policy_labels']=[]
   o=Operations.__new__(Operations);self.assertFalse(o.covers(new,old));self.assertTrue(o.covers(old,old))
  def test_destroy_request_requires_local_verified_replacement_evidence(self):
-  o=Operations.__new__(Operations);o.verified_replacements={};p={'archive_id':'b'*64,'replacement_image_sha256':'c'*64}
+  o=Operations.__new__(Operations);o.store=type('LocalStore',(),{'read':lambda self:{'pending':{}}})();o.verified_replacements={};p={'archive_id':'b'*64,'replacement_image_sha256':'c'*64}
   with self.assertRaisesRegex(ValueError,'Do not destroy'):o.destruction_proof(p)
   o.verified_replacements[p['archive_id']]={'image_sha256':'c'*64,'members':['d'*64],'readback_verified':True,'old_policies_retained':True};self.assertTrue(o.destruction_proof(p)['readback_verified'])
 
@@ -100,7 +100,7 @@ class RealVaultRefresh(unittest.TestCase):
   from decimal import Decimal
   from vendor.embit.descriptor.checksum import checksum
   from wallet_ops import WalletOps
-  node=Regtest();self.addCleanup(node.close);core=node.core;tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup);root=Path(tmp.name);store=Store(root/'state');setup=WalletSetup(core,store,binary=BINARY);pool=Archives(core,store,BINARY,lambda:None);archive_ops=Operations(core,store,setup,pool,lambda:None);manager=Refresh(core,store,pool)
+  node=Regtest();self.addCleanup(node.close);core=node.core;tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup);root=Path(tmp.name);store=Store(root/'state');setup=WalletSetup(core,store,binary=BINARY);pool=Archives(core,store,BINARY,lambda:None);archive_ops=Operations(core,store,setup,pool,lambda:None);manager=Refresh(core,store,pool);manager.archive_ops=archive_ops
   import node_client
   def cleanup():
    node_client.LOCAL_ROUTER=None
@@ -124,6 +124,12 @@ class RealVaultRefresh(unittest.TestCase):
     # A new, independently scanned and unfunded future policy needs no old
     # blocks: preserve pruning and avoid an unnecessary genesis rescan.
     with patch('wallet_recovery.history_missing',side_effect=AssertionError('Unfunded future policy must not require old blocks')):manager.approve(k)
+    # Physical I/O is covered separately; complete this fixture's local handoff.
+    for source,required in store.read()['pending'][k].get('backup_discs',{}).items():
+     archive_ops.verified_replacements[source]={'image_sha256':'1'*64,'members':required['members'],'member_policies':{member:digest(new) for member in required['updated_members']},'readback_verified':True,'old_policies_retained':True}
+     __import__('policy_refresh_backups').destroyed(archive_ops,source)
+    setup.burner.cancel_members(set(archive_ops.jobs))
+    archive_ops.jobs.clear()
     response=next(v['payload']['message'] for v in reversed(list(store.read()['outbox'].values())) if v['kind']=='wallet_policy_refresh_result' and v['payload']['message']['request_id']==proposal['request_id'])
     if alias==archive_monitor:next_archive_monitor=response['monitor_wallet']
     else:next_persistent_monitor=response['monitor_wallet']
@@ -145,7 +151,7 @@ class RealVaultRefresh(unittest.TestCase):
   from policy_refresh import validate_extensions
   self.assertEqual(validate_extensions(record['recovery']),old)
   # A second-generation recovery package preserves both earlier policies and keys.
-  archive_ops.queue_loaded([reviews[0]['id']],True);second=setup.burner.pending[-1];wallets,recovery=bundle([second]);path=pack(root/'second-disc',wallets,recovery,'fixture-backup-password')/'recovery.wallaby';pool.unload(reviews[0]['id']);folder=root/'second-read';folder.mkdir();again=pool.inspect_package(path,'fixture-backup-password',folder)['entries'][0];self.assertEqual(len(again['additional_policies']),2);pool.load(again['id'],True);loaded=next(iter(pool.loaded.values()));self.assertEqual(validate_extensions(loaded['recovery']),old);self.assertTrue(rpc(core,'getaddressinfo',[first_address],loaded['monitor']).get('ismine') or rpc(core,'getaddressinfo',[first_address],loaded['monitor']).get('iswatchonly'))
+  archive_ops.queue_loaded([reviews[0]['id']],True);second=setup.burner.pending[-1] if setup.burner.pending else (setup.burner.job['id'],setup.burner.job['wallets'],setup.burner.job['recovery']);wallets,recovery=bundle([second]);path=pack(root/'second-disc',wallets,recovery,'fixture-backup-password')/'recovery.wallaby';pool.unload(reviews[0]['id']);folder=root/'second-read';folder.mkdir();again=pool.inspect_package(path,'fixture-backup-password',folder)['entries'][0];self.assertEqual(len(again['additional_policies']),2);pool.load(again['id'],True);loaded=next(iter(pool.loaded.values()));self.assertEqual(validate_extensions(loaded['recovery']),old);self.assertTrue(rpc(core,'getaddressinfo',[first_address],loaded['monitor']).get('ismine') or rpc(core,'getaddressinfo',[first_address],loaded['monitor']).get('iswatchonly'))
 
 class PolicyOutputBindings(unittest.TestCase):
  def test_script_amount_index_and_local_approval_cannot_be_replaced(self):

@@ -1,5 +1,6 @@
 'use strict';
 window.renderCancellation=function(r,box){
+ if(r.cancellation.policy_refresh){window.renderPolicyCancellation(r,box);return;}
  const c=r.cancellation,wallet=c.builder==='wallet',noun=wallet?'Wallet':'Transaction';
  box.append(el('p',{class:'eyebrow'},'DASHBOARD REQUEST · LOCAL AUTHORISATION'),el('h2',{},'Cancel '+noun+' Build'),el('p',{},'The Dashboard has requested that this '+noun.toLowerCase()+' build be cancelled. If you were expecting this request, choose Delete and Cancel. If something is wrong, choose Backup and Cancel to preserve all locally held '+(wallet?'wallet files and recovery policies':'PSBTs')+' before cleanup.'),el('p',{class:'hint'},'The Dashboard received only a delivery receipt. No local wallet or PSBT has been deleted. Backup and Cancel asks for a local encryption passphrase and a folder inside your home. Plaintext stays in protected RAM. Existing discs and unrelated wallets are unaffected.'));
  if(!wallet){box.append(el('p',{class:c.broadcast_detected?'warning broadcast-detected':'status-line',role:'status'},c.broadcast_detected?'Broadcast PSBTs from this Transaction Build have been detected':'No broadcast PSBTs from this Transaction Build have been detected'));if(c.broadcast_incomplete)box.append(el('p',{class:'warning'},'Some broadcast history could not be established by this node. Absence of a detected transaction does not prove it was never broadcast.'));for(const tx of c.broadcasts)box.append(el('p',{},tx.txid+' · '+(tx.detected?tx.location:'Not detected')));}
@@ -11,4 +12,17 @@ window.renderCancellation=function(r,box){
  box.append(el('p',{class:'hint'},'Delete and Cancel removes the listed local artifacts without making a backup.'));
  async function finish(action){const result=await api('authorise/cancel-build',{id:r.id,action});notify({message:result.message+(result.backup?' Encrypted backup: '+result.backup.path:'')});$('#approval-review').replaceChildren();approvalSignature='';}
  const del=button('Delete and Cancel','cancel-delete',()=>finish('delete')),backup=button('Backup and Cancel','cancel-backup',()=>finish('backup'));del.disabled=backup.disabled=!!c.active_disc_write;if(c.active_disc_write)box.append(el('p',{class:'warning'},'An optical write or read-back is active. Wait for it to finish; the writer will not be killed.'));box.append(el('div',{class:'actions'},del,backup));$('#approval-review').replaceChildren(box);
+};
+
+window.renderPolicyCancellation=function(r,box){
+ const c=r.cancellation;
+ box.append(el('p',{class:'eyebrow'},'LOCAL VAULT REFRESH CANCELLATION'),el('h2',{},'Cancel unused vault policy'),el('p',{},'Signing wallets and keys will be retained. The new policy is retired from active receiving use; Core keeps its descriptors for recovery. The previous receiving policy is restored.'));
+ for(const policy of c.policies)box.append(el('article',{class:'public-fact'},el('code',{},policy.policy_hash),el('p',{},policy.funded?'Funded — cancellation is not allowed':'No confirmed or unconfirmed funding detected'),el('p',{},'Checked receive/change indices '+policy.scan_range.join('–')),el('p',{},policy.wallets.map(w=>w.wallet).join(' · '))));
+ if(c.active_disc_write)box.append(el('p',{class:'warning'},'Wait for the active disc operation.'));
+ async function act(action){const result=await api('authorise/cancel-build',{id:r.id,action});notify({message:result.message});$('#approval-review').replaceChildren();approvalSignature='';await refresh(true);}
+ if(c.funded)box.append(button('Keep funded policy and dismiss cleanup','secondary',()=>act('retain')));
+ if(!c.retired){const cancel=button('Retire unused policy and cancel','cancel-delete',()=>act('delete'));cancel.disabled=c.funded||c.active_disc_write;box.append(cancel);}
+ else{box.append(el('p',{},'The unused receiving policy is retired. Complete the disc steps below before cancellation finishes.'));for(const disc of c.discs){if(c.destroyed_archives.includes(disc.archive_id))continue;const destroy=button('I physically destroyed all original copies','danger',()=>act('destroy:'+disc.archive_id));destroy.disabled=!disc.replacement_verified||c.funded||c.active_disc_write;const replace=button('Prepare replacement disc','',()=>act('replace:'+disc.archive_id));replace.disabled=c.funded||c.active_disc_write;box.append(el('article',{class:'public-fact'},el('code',{},disc.archive_id),el('p',{},disc.names.join(' · ')),el('p',{},'Preserve every member on a read-back-verified replacement before destroying all '+disc.copies+' original copy/copies.'),replace,destroy));}}
+
+ $('#approval-review').replaceChildren(box);
 };

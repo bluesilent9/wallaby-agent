@@ -43,7 +43,7 @@ def metadata(value):
 
 class Cancellations:
     def __init__(self,core,store,setup,ops,environment=None):
-        self.core=core;self.store=store;self.setup=setup;self.ops=ops;self.environment=environment or {};self.reviews={}
+        self.core=core;self.store=store;self.setup=setup;self.ops=ops;self.environment=environment or {};self.reviews={};self.archives=None;self.archive_ops=None
     def receive(self,p):
         p=validate(p);key=digest(p)
         with self.store.edit() as s:
@@ -149,6 +149,8 @@ class Cancellations:
         return {'builder':p['builder'],'request_hashes':sorted(keys),'operations':p['operations'],'wallets':wallet_facts,'psbts':[{'sha256':hashlib.sha256(v.encode()).hexdigest(),'bytes':len(v)} for v in psbts],'broadcasts':checks,'broadcast_detected':any(r['detected'] for r in checks),'broadcast_incomplete':unknown,'active_disc_write':busy,'untracked_exports':[e['outbox_id'] for e in p.get('exports',[]) if e['outbox_id'] not in {**saved.get('legacy_exports',{}),**saved.get('delivered_artifacts',{}),**saved['outbox']}],'untracked_operations':[x for x in p['operations'] if p['builder']=='wallet' and x not in sessions]}
     def review(self,key):
         row=self.store.read()['pending'][key]
+        from policy_refresh_cancel import handles,review
+        if handles(self,row['proposal']):return review(self,key)
         if row['state']!='pending':raise ValueError('Cancellation was already attempted; reconcile the local outcome before retrying.')
         p=validate(row['proposal']);facts=self._facts(p);self.reviews[key]=(digest(facts),time.time())
         return {'kind':'builder_cancel','id':key,'cancellation':facts}
@@ -202,6 +204,8 @@ class Cancellations:
             return export_bundle(directory,manifest,psbts,wallets,self.store.root,password)
         finally:password=None
     def confirm(self,key,action):
+        from policy_refresh_cancel import handles,confirm
+        if handles(self,self.store.read()['pending'][key]['proposal']):return confirm(self,key,action)
         if action not in ('delete','backup'):raise ValueError('Choose Delete and Cancel or Backup and Cancel locally.')
         saved=self.store.read();row=saved['pending'][key];p=validate(row['proposal']);review=self.reviews.get(key)
         if row['state']!='pending' or not review or time.time()-review[1]>600:raise ValueError('Review this cancellation again before deleting or backing up artifacts.')

@@ -67,6 +67,7 @@ class Workspace:
             from archive_operations import Operations
             from policy_refresh import Refresh
             self.archive_ops=Operations(self.ops.core,self.store,self.setup,self.archives,enforce);self.refresh_ops=Refresh(self.ops.core,self.store,self.archives)
+            self.refresh_ops.archive_ops=self.archive_ops
             from rename_requests import Renames
             self.renames=Renames(self.ops.core,self.store,self.archives,self.archive_ops,self.rename_guard,self.rename_reconcile_guard)
             from local_wallets import LocalWallets
@@ -74,6 +75,7 @@ class Workspace:
             self.messages=Messages(self.ops.core,self.store,lambda prompt:secret_dialog(prompt,self.environment))
             from cancellation import Cancellations
             self.cancellations=Cancellations(self.ops.core,self.store,self.setup,self.ops,self.environment)
+            self.cancellations.archives=self.archives;self.cancellations.archive_ops=self.archive_ops
             import agent_exchange
             agent_exchange.LOCAL_CANCELLATIONS=self.cancellations
             agent_exchange.LOCAL_RETIREMENT=self.retirement
@@ -134,6 +136,10 @@ class Workspace:
                 if isinstance(raw.get('result'),dict):
                     metadata=classify(self.store.read(),wallet,raw['result'])
                     if metadata:result['result']['wallaby_managed']=metadata
+                retired=[key for key,row in self.store.read().get('retired_policies',{}).items() if wallet in row.get('wallets',[])]
+                for record in getattr(self.archives,'loaded',{}).values():
+                    if wallet in record['routes']:retired+=record['recovery'].get('retired_policy_hashes',[])
+                if retired:result['result']['wallaby_retired_policies']=sorted(set(retired))
             return result
         finally:self.lock.release()
     def public_busy_notice(self,reason):
@@ -326,14 +332,14 @@ class Workspace:
                 raise ValueError('Node connection recovery is in progress. Protected operations are paused; no operation was started.')
             if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
             saved=self.store.read()
-            changing=method in ('rename.approve','rename.reconcile','wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm','cancel.reconcile')
+            changing=method in ('refresh.destroyed','rename.approve','rename.reconcile','wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm','cancel.reconcile')
             if changing and args:
                 from cancellation import blocked
                 candidate=saved['pending'].get(args[0],{}).get('proposal') or getattr(self.ops,'prepared',{}).get(args[0])
                 if candidate and blocked(saved,candidate):raise ValueError('This build is cancelled. Review its local cancellation on Authorise; no signing or wallet action was started.')
             if changing and (saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning')):raise ValueError('Finish the active transfer or history recovery first.')
             if method in ('wallet.sign','setup.participate','authorise.approve','message.sign','cancel.confirm','cancel.reconcile') and self.archives and self.archives.reading:raise ValueError('Wait for optical restoration to finish before signing or changing wallets.')
-            if saved.get('setup_active') and method in ('wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','authorise.history','authorise.review'):
+            if saved.get('setup_active') and method in ('refresh.destroyed','wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','authorise.history','authorise.review'):
                 candidate=saved['pending'].get(args[0],{}).get('proposal',{}) if args else {}
                 independent_archive=candidate.get('kind')=='archive_wallet' and method in ('authorise.review','authorise.approve') and not self.busy(public_reads=True)
                 if not independent_archive and candidate.get('kind')!='builder_cancel' and (candidate.get('kind')!='wallet_setup_policy' or digest(candidate['proposal'])!=saved['setup_active']):raise ValueError('Finish the current wallet setup and its physical backups first.')
@@ -387,6 +393,7 @@ class Workspace:
                 p=self.store.read()['pending'][args[0]]['proposal']
                 if p['kind']=='archive_cancel':raise ValueError('Archive cancellation requires its local disc cleanup checklist; it cannot be denied or silently deleted.')
                 if p['kind']=='wallet_rename':return self.renames.deny(args[0])
+                if p['kind']=='wallet_policy_refresh':return self.refresh_ops.deny(args[0])
                 if p['kind']=='builder_cancel':raise ValueError('Choose Delete and Cancel or Backup and Cancel after reviewing this cancellation.')
                 if p['kind'].startswith('wallet_setup'):self.setup.decline(args[0])
                 else:self.store.deny(*args)
@@ -419,6 +426,9 @@ class Workspace:
                 return (stage if method=='archive.retire_stage' else destroyed)(self.archive_ops,*args)
             if method=='archive.delete':return self.archive_ops.delete(*args)
             if method=='archive.destroyed':return self.archive_ops.destroyed(*args)
+            if method=='refresh.destroyed':
+                from policy_refresh_backups import confirm
+                return confirm(self.refresh_ops,*args)
             if method in ('disc.read','disc.status','disc.probe') and (self.archives.reading or self.setup.burner.thread and self.setup.burner.thread.is_alive()):
                 from diagnostics import LocalActionFailure
                 raise LocalActionFailure('optical_busy','Another optical read, burn or verification is active. Wait for it to finish before checking or reading the disc.')

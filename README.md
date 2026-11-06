@@ -2,9 +2,11 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** Private keys and passphrases are never sent to the Dashboard. Policy installation and refresh temporarily handle private descriptors inside the protected local worker; signing unlocks the selected Core wallet. Those protections do not remove the risk of a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 57
+# Wallaby Agent V2 — Development Build 58
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
+
+Build 58 adds a signed receipt for vault refresh requests and one local approval covering all related local signers, loaded-disc roles and policy monitors. Dashboard 80 can wait for acknowledged receipt and independently verify every updated wallet before returning to Transaction Builder. Loaded disc signers are queued for replacement backups; full verification and locally confirmed old-disc destruction precede funding. Funded policies cannot be retired, and locally recognised destination vaults show their unlock height plus estimated UTC/local times. [Grouped approval, receipts and failure handling](AGENT_BUILD58_GROUPED_REFRESH.md).
 
 Build 57 fixes recovery of encrypted signer backups containing multiple vault policy generations. Receive/change branches are verified from the actual private derivation and approved policy history, including inactive historical descriptors whose branch flag Core omits. Wallet and signer names remain unchanged. No archive format or Dashboard protocol change is needed. [Recovery fix and validation](AGENT_BUILD57_REFRESH_RECOVERY.md).
 

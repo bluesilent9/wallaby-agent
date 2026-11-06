@@ -16,7 +16,7 @@ def identity(recovery):
 
 def validate_node(recovery):
     required={'version','kind','chain','name','policy_hash','public_wallet','labels'}
-    if not isinstance(recovery,dict) or not required<=set(recovery)<=required|{'policy_extensions','public_policies','policy_labels','display_name'} or recovery['version']!=1 or recovery['kind']!='node_wallet':raise ValueError('Invalid node-wallet recovery record.')
+    if not isinstance(recovery,dict) or not required<=set(recovery)<=required|{'policy_extensions','public_policies','policy_labels','display_name','retired_policy_hashes'} or recovery['version']!=1 or recovery['kind']!='node_wallet':raise ValueError('Invalid node-wallet recovery record.')
     from vault_policy import NETWORK,text
     if recovery['chain'] not in NETWORK:raise ValueError('Invalid archive network.')
     text(recovery['name'],256);descriptors(recovery['public_wallet'])

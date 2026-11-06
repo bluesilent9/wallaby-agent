@@ -123,21 +123,25 @@ def extend(core,name,new_descriptors,timestamp,environment,read_private=None):
     try:
         rpc(core,'walletpassphrase',[password,120],name)
         rows=(read_private or (lambda:local_private_descriptors(core,name)))()
-        requests=[]
-        for branch,public in enumerate(new_descriptors):
-            new=Descriptor.from_string(public);body=str(new);replaced=set()
-            for old in rows:
-                for key in Descriptor.from_string(old['desc']).keys:
-                    if not key.is_private:continue
-                    for wanted in new.keys:
-                        try:private=account_key(key,str(wanted))
-                        except ValueError:continue
-                        text=str(wanted)
-                        if text not in replaced:
-                            body=body.replace(text,str(private));replaced.add(text)
-            if not replaced:raise ValueError('The refreshed policy has no matching local signing role. No public-only policy was imported into a private wallet.')
-            requests.append({'desc':body+'#'+checksum(body),'timestamp':timestamp,'active':True,'internal':bool(branch),'range':[0,999]})
+        requests=extension_requests(rows,new_descriptors,timestamp)
         result=rpc(core,'importdescriptors',[requests],name,timeout=86400)
         if len(result)!=2 or any(not r.get('success') for r in result):raise ValueError('Core could not confirm the additive signing-policy refresh. Inspect locally before retrying.')
     finally:
         password=None;rows=None;requests=None;rpc(core,'walletlock',[],name)
+
+def extension_requests(rows,new_descriptors,timestamp):
+    requests=[]
+    for branch,public in enumerate(new_descriptors):
+        new=Descriptor.from_string(public);body=str(new);replaced=set()
+        for old in rows:
+            for key in Descriptor.from_string(old['desc']).keys:
+                if not key.is_private:continue
+                for wanted in new.keys:
+                    try:private=account_key(key,str(wanted))
+                    except ValueError:continue
+                    text=str(wanted)
+                    if text not in replaced:
+                        body=body.replace(text,str(private));replaced.add(text)
+        if not replaced:raise ValueError('The refreshed policy has no matching local signing role. No public-only policy was imported into a private wallet.')
+        requests.append({'desc':body+'#'+checksum(body),'timestamp':timestamp,'active':True,'internal':bool(branch),'range':[0,999]})
+    return requests

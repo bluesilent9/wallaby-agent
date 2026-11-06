@@ -61,7 +61,8 @@ class RealRepeatedRecovery(unittest.TestCase):
   from disc_restore import Archives
   from policy_refresh import Refresh,validate_extensions
   from archive_operations import Operations
-  a=self.agents[1];job=a.burner.job;recovery=copy.deepcopy(job['recovery']);root=Path(self.tmp.name)
+  a=self.agents[1];from setup_completion import mark
+  mark(a.core,next(iter(a.store.read()['approved_wallets'].values())),True);job=a.burner.job;recovery=copy.deepcopy(job['recovery']);root=Path(self.tmp.name)
   pool=Archives(a.core,a.store,a.binary,lambda:None);pool.environment={}
   self.addCleanup(lambda:[pool.unload(k) for k in list(pool.loaded)])
   serial=[0]
@@ -72,6 +73,9 @@ class RealRepeatedRecovery(unittest.TestCase):
    pool.staged[ident]=row
    with patch('disc_restore.secret_dialog',return_value=PASSWORD):pool.load(ident,True)
    return ident,pool.loaded[ident]
+  operations=Operations(a.core,a.store,a,pool,lambda:None)
+  from archive_format import identity
+  pool.catalogs['f'*64]={identity(recovery):copy.deepcopy(recovery)}
   ident,record=load(next(iter(job['wallets'].values())),recovery);alias=record['keys'][0];role=copy.deepcopy(record['role']);original=copy.deepcopy(recovery['proposal']);old=self.descs
   miner_core=self.nodes[0].core;rpc(miner_core,'createwallet',{'wallet_name':'fixture miner'});miner=rpc(miner_core,'getnewaddress',[],'fixture miner');rpc(miner_core,'generatetoaddress',[101,miner],timeout=120)
   with patch('node_client.LOCAL_ROUTER',pool):
@@ -79,8 +83,13 @@ class RealRepeatedRecovery(unittest.TestCase):
     new=[]
     for desc in old:
      body=re.sub(r'after\([0-9]+\)','after('+str(height)+')',desc.split('#')[0]);new.append(body+'#'+checksum(body))
-    p={'kind':'wallet_policy_refresh','version':1,'request_id':digest({'cycle':height}),'chain':'regtest','wallet':alias,'previous_descriptors':old,'receive_descriptor':new[0],'change_descriptor':new[1],'timestamp':int(time.time()),'expires_at':int(time.time())+3600};key=digest(p);a.store.receive(p);ops=Refresh(a.core,a.store,pool);ops.review(key)
+    p={'kind':'wallet_policy_refresh','version':1,'request_id':digest({'cycle':height}),'chain':'regtest','wallet':alias,'previous_descriptors':old,'receive_descriptor':new[0],'change_descriptor':new[1],'timestamp':int(time.time()),'expires_at':int(time.time())+3600};key=digest(p);a.store.receive(p);ops=Refresh(a.core,a.store,pool);ops.archive_ops=operations;ops.review(key)
     with patch('wallet_setup.secret_dialog',return_value=PASSWORD):ops.approve(key)
+    # Fixture models the separately tested burn/verify/destruction handoff.
+    operations.verified_replacements['f'*64]={'image_sha256':'1'*64,'members':list(pool.catalogs['f'*64]),'member_policies':{k:digest(new) for k in pool.catalogs['f'*64]},'readback_verified':True,'old_policies_retained':True}
+    __import__('policy_refresh_backups').destroyed(operations,'f'*64)
+    a.burner.cancel_members(set(operations.jobs))
+    operations.jobs.clear()
     updated=copy.deepcopy(record['recovery']);self.assertEqual(validate_extensions(updated),new)
     # Back up the actual refreshed private wallet, including inactive history.
     backup=root/('live-'+str(height)+'.dat');rpc(record['node'].core,'backupwallet',[str(backup)],'archive-key')
