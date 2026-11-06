@@ -162,7 +162,7 @@ class Archives:
                         password=secret_dialog('Unlock archived signing role: '+r['role']['name']+' · '+r['review']['name'],getattr(self,'environment',{}))
                         try:
                             rpc(c,'walletpassphrase',[password,120],'archive-key')
-                            verify_private_role(node,'archive-key',contribution)
+                            verify_private_role(node,'archive-key',contribution,[[r['recovery']['receive_descriptor'],r['recovery']['change_descriptor']]]+[[ext['receive_descriptor'],ext['change_descriptor']] for ext in r['recovery'].get('policy_extensions',[])])
                         finally:
                             password=None;rpc(c,'walletlock',[],'archive-key')
                 if not descriptors(wanted)<=descriptors(rpc(c,'listdescriptors',[False],'archive-key')):raise ValueError('Archived private wallet public account does not match the approved recovery policy.')

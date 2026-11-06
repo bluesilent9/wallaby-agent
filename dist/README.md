@@ -1,7 +1,7 @@
-# Development Build 56
+# Development Build 57
 
-Install Dashboard Build 64 or later first. Complete protected work and close the Agent workspace normally before upgrading.
+Fixes restoring encrypted signer wallets containing several vault refresh generations. Wallet and signer names remain unchanged. Existing archive files and approved histories remain supported.
 
-Download wallaby-agent_2.0.0~dev56_amd64.deb, then install with your package installer or `sudo apt install ./wallaby-agent_2.0.0~dev56_amd64.deb`.
+Use Dashboard Build 64 or later (Build 69 includes the related Dashboard naming fix). Finish protected work and close the workspace normally before upgrading. Install wallaby-agent_2.0.0~dev57_amd64.deb using the package installer or `sudo apt install ./wallaby-agent_2.0.0~dev57_amd64.deb`.
 
-Signing returns signatures only. Later Dashboard broadcast requests submit completed transactions automatically without a second approval.
+See AGENT_BUILD57_REFRESH_RECOVERY.md for the cause, validation and recovery compatibility.

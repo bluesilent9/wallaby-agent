@@ -72,16 +72,37 @@ def role_wallet(setup,session,role,facts,destination=None,target=None):
         password=None;private=None;requests=None;branches=None
         rpc(core,'walletlock',[],source)
 
-def verify_private_role(node,name,contribution):
-    """After local unlock, verify a combined disc wallet contains only this role."""
+def private_branch(key,contribution):
+    """Bind actual private derivation/account to exactly one approved branch."""
+    matches=[]
+    for branch,field in enumerate(('receive_key','change_key')):
+        try:account_key(key,contribution[field])
+        except ValueError:continue
+        matches.append(bool(branch))
+    if len(matches)!=1:raise ValueError('The archived private signing role differs from the approved disc role.')
+    return matches[0]
+
+def verify_private_role(node,name,contribution,policies):
+    """Verify every retained generation, even when Core omits inactive flags."""
+    approved={}
+    for pair in policies:
+        if len(pair)!=2:raise ValueError('Both approved policy branches are required.')
+        for branch,desc in enumerate(pair):
+            canonical=next(iter(descriptors({'wallet_name':'approved','descriptors':[{'desc':desc}]})))
+            approved[canonical]=bool(branch)
     rows=node.private_descriptors(name)
     try:
         seen=set()
         for row in rows:
-            branch=bool(row.get('internal'));wanted=contribution['change_key' if branch else 'receive_key']
-            private=[k for k in Descriptor.from_string(row['desc']).keys if k.is_private]
+            desc=Descriptor.from_string(row['desc']);private=[k for k in desc.keys if k.is_private]
             if len(private)!=1:raise ValueError('The archived private signing role differs from the approved disc role.')
-            account_key(private[0],wanted)
+            branch=private_branch(private[0],contribution)
+            # An absent flag is normal for inactive historical Core descriptors.
+            # A supplied flag must still agree with the verified derivation.
+            if 'internal' in row and (type(row['internal']) is not bool or row['internal']!=branch):raise ValueError('The archived descriptor branch contradicts its approved signing derivation.')
+            public=str(desc).replace(str(private[0]),contribution['change_key' if branch else 'receive_key'])
+            canonical=next(iter(descriptors({'wallet_name':'approved','descriptors':[{'desc':public+'#'+checksum(public)}]})))
+            if canonical not in approved or approved[canonical]!=branch:raise ValueError('The archived signing policy is not in its approved recovery history.')
             seen.add(branch)
         if seen!={False,True}:raise ValueError('The archived signing role lacks a complete receive/change policy.')
     finally:rows=None
@@ -106,7 +127,6 @@ def extend(core,name,new_descriptors,timestamp,environment,read_private=None):
         for branch,public in enumerate(new_descriptors):
             new=Descriptor.from_string(public);body=str(new);replaced=set()
             for old in rows:
-                if bool(old.get('internal'))!=bool(branch):continue
                 for key in Descriptor.from_string(old['desc']).keys:
                     if not key.is_private:continue
                     for wanted in new.keys:
