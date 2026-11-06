@@ -22,3 +22,5 @@ box=new E('section',{});c.window.renderWalletApproval({kind:'wallet_setup',id:'u
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/archives.js'),'utf8'),c);
 box=new E('section',{});c.window.renderArchiveApproval({kind:'wallet_policy_refresh',id:'refresh',refresh:{wallet:'Vault',height:100,threshold:1,total:1,policy_hash:'local',samples:[],scan_range:[0,999],funded_outputs:[],previous_descriptors:[],receive_descriptor:'receive',change_descriptor:'change'},unlock_estimates:[row]},box);assert(text(box).includes('Vault unlock · local estimate'));assert(text(box).includes('AEDT'));
 console.log('Wallet Builder initial/final approvals and policy refresh: visible UTC/local estimates, plain wallets and unavailable-header states passed.');
+
+c.rows=[{...row,height:974781,first_spend_block:974782}];result=text(vm.runInContext("vaultTimes(rows)",c));assert(result.includes("974,781"));assert(result.includes("974,782"));assert.equal(vm.runInContext("blockHeight(1000000)",c),"1,000,000");assert.equal(vm.runInContext("blockHeight(999)",c),"999");

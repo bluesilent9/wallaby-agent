@@ -27,8 +27,24 @@ def transition(value):
 
 def validate(p):
     from vault_policy import NETWORK,text
-    if not isinstance(p,dict) or set(p)!=FIELDS or p['kind']!='wallet_policy_refresh' or type(p['version']) is not int or p['version']!=1 or not re.fullmatch('[0-9a-f]{64}',str(p['request_id'])) or p['chain'] not in NETWORK or type(p['expires_at']) is not int or not time.time()<p['expires_at']<=time.time()+86400:raise ValueError('Invalid or expired public policy refresh.')
-    text(p['wallet'],256);transition(p);return p
+    if not isinstance(p,dict) or not FIELDS<=set(p)<=FIELDS|{'receiving_address'} or p['kind']!='wallet_policy_refresh' or type(p['version']) is not int or p['version']!=1 or not re.fullmatch('[0-9a-f]{64}',str(p['request_id'])) or p['chain'] not in NETWORK or type(p['expires_at']) is not int or not time.time()<p['expires_at']<=time.time()+86400:raise ValueError('Invalid or expired public policy refresh.')
+    text(p['wallet'],256);transition(p)
+    if 'receiving_address' in p:
+        target=p['receiving_address']
+        if not isinstance(target,dict) or set(target)!={'index','address'} or type(target['index']) is not int or not 0<=target['index']<=999:raise ValueError('Invalid proposed vault receiving address index.')
+        text(target['address'],128)
+        verify_receiving_address(p)
+    return p
+
+def verify_receiving_address(proposal,core=None):
+    """The claimed destination is untrusted; derive it from the reviewed policy."""
+    target=proposal.get('receiving_address')
+    if target is None:return None
+    index=target['index'];desc=proposal['receive_descriptor']
+    address=Descriptor.from_string(desc).derive(index).script_pubkey().address(NETWORKS[proposal['chain']])
+    if address!=target['address']:raise ValueError('The proposed receiving address does not match the new vault policy and index. No policy was approved.')
+    if core is not None and rpc(core,'deriveaddresses',[desc,[index,index]])!=[address]:raise ValueError('Local independent receiving address derivation differs from Core.')
+    return {'index':index,'address':address}
 
 def roots(recovery):
     if recovery.get('kind')=='node_wallet':
@@ -71,12 +87,14 @@ class Refresh:
         labels=rpc(self.core,'getaddressinfo',[first],p['wallet']).get('labels',[])
         if any(v.startswith('Wallaby setup pending:') for v in labels) or re.fullmatch('Wallaby policy [0-9a-f]{20}',p['wallet']) and not any(v.startswith('Wallaby setup ready:') for v in labels):raise ValueError('Finish and verify the original wallet setup before refreshing its vault policy.')
         if not descriptors({'wallet_name':'old','descriptors':[{'desc':d} for d in p['previous_descriptors']]})<=descriptors(raw):raise ValueError('The old policy is not present in the selected local wallet.')
+        destination=verify_receiving_address(p,self.core)
         parsed=restricted(p['receive_descriptor']);samples=[]
         for branch,desc in enumerate((p['receive_descriptor'],p['change_descriptor'])):
             canonical=rpc(self.core,'getdescriptorinfo',[desc])
             if canonical.get('hasprivatekeys'):raise ValueError('Only public policy information may be refreshed.')
             d=Descriptor.from_string(desc)
-            for index in (0,1):
+            start=destination['index'] if destination is not None else 0
+            for index in range(start,min(start+3,1000)):
                 local=d.derive(index).script_pubkey().address(NETWORKS[p['chain']])
                 if rpc(self.core,'deriveaddresses',[desc,[index,index]])!=[local]:raise ValueError('Local independent policy derivation differs from Core.')
                 samples.append({'branch':'Receive' if branch==0 else 'Change','index':index,'address':local})
@@ -90,6 +108,8 @@ class Refresh:
             address=Script(bytes.fromhex(row['scriptPubKey'])).address(NETWORKS[p['chain']]);header=rpc(self.core,'getblockheader',[rpc(self.core,'getblockhash',[row['height']])])
             outputs.append({'address':address,'txid':row['txid'],'vout':row['vout'],'amount_sats':str(sats(row['amount'])),'time_received':header['time'],'blockheight':row['height'],'confirmations':actual['confirmations']})
         facts={'wallet':p['wallet'],'chain':p['chain'],'height':parsed['height'],'threshold':parsed['threshold'],'total':parsed['total'],'policy_hash':digest(transition(p)),'previous_descriptors':p['previous_descriptors'],'receive_descriptor':p['receive_descriptor'],'change_descriptor':p['change_descriptor'],'samples':samples,'funded_outputs':outputs,'scan_range':[0,999],'old_policies_retained':True}
+        facts['sample_start_index']=destination['index'] if destination is not None else 0
+        if destination is not None:facts['receiving_address']=destination
         self.reviews[key]=(copy.deepcopy(p),facts,time.monotonic())
         from vault_time import estimates
         return {'kind':p['kind'],'id':key,'refresh':facts,'unlock_estimates':estimates(self.core,[facts['height']],expected_chain=facts['chain'])}

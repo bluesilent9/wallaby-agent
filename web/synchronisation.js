@@ -50,10 +50,10 @@ function renderWallet(t){
  if(t.details){
   box.append(el('h3',{},receive?'Funded outputs in the sender’s signed preview':'Funded outputs verified by your local Core'));
   const table=el('table',{class:'transfer-history'},el('thead',{},el('tr',{},...['Address / output','Amount','Time received (UTC)','Block height'].map(x=>el('th',{},x))))),body=el('tbody');
-  for(const r of t.details.funded_outputs)body.append(el('tr',{},el('td',{},r.address,el('small',{},r.txid+':'+r.vout)),el('td',{},pipe(r.amount_sats)),el('td',{},r.time_received?new Date(r.time_received*1000).toISOString():'Unknown'),el('td',{},r.blockheight??'Unconfirmed')));table.append(body);box.append(table);
+  for(const r of t.details.funded_outputs)body.append(el('tr',{},el('td',{},r.address,el('small',{},r.txid+':'+r.vout)),el('td',{},pipe(r.amount_sats)),el('td',{},r.time_received?new Date(r.time_received*1000).toISOString():'Unknown'),el('td',{},r.blockheight===null||r.blockheight===undefined?'Unconfirmed':blockHeight(r.blockheight))));table.append(body);box.append(table);
   const labels=t.details.address_labels||[];if(labels.length){const section=el('details',{},el('summary',{},'Addresses and labels ('+labels.length+')'));for(const row of labels)section.append(el('div',{class:'node-address'},el('code',{},row.address),el('span',{},row.label||'No label')));box.append(section);}
   if(!t.details.funded_outputs.length)box.append(el('p',{},'No current funded outputs.'));
-  for(const v of t.details.vaults||[])box.append(el('section',{class:'proof'},el('h3',{},'Vault · block '+v.height),el('p',{},'Address: '+v.address),el('pre',{class:'policy-code'},v.descriptor),el('p',{},'Public key derivation is checked against this wallet. The height condition and monitoring data accompany either transfer mode.')));
+  for(const v of t.details.vaults||[])box.append(el('section',{class:'proof'},el('h3',{},'Vault · block '+blockHeight(v.height)),el('p',{},'Address: '+v.address),el('pre',{class:'policy-code'},v.descriptor),el('p',{},'Public key derivation is checked against this wallet. The height condition and monitoring data accompany either transfer mode.')));
  }
  if(t.route)box.append(el('h3',{},'Direct connection route'),el('p',{},t.route.message));
  if(receive&&setup){
@@ -87,7 +87,7 @@ function batchControls(t,rows){
 function recoveryCard(r){
  const box=el('section',{class:'server-card result-card node-recovery '+r.colour},el('h3',{},'This Node'));
  for(const [title,colour]of [['Synchronised','green'],['Requires Rescan','amber'],['Requires Blockchain Download','red']])box.append(el('p',{class:'recovery-status '+(r.status===title?colour+' active':'inactive')},el('span',{class:'dot '+(r.status===title?colour:'muted')}),title));
- box.append(el('p',{role:'status'},r.message));if(r.blocks!==undefined)box.append(el('p',{},'Blocks: '+r.blocks.toLocaleString()+' / '+r.headers.toLocaleString()));if(r.job?.message)box.append(el('p',{},r.job.message));
+ box.append(el('p',{role:'status'},r.message));if(r.blocks!==undefined)box.append(el('p',{},'Blocks: '+blockHeight(r.blocks)+' / '+blockHeight(r.headers)));if(r.job?.message)box.append(el('p',{},r.job.message));
  const refresh=button('↻','secondary recovery-refresh',async()=>{const plan=await api('synchronisation/recovery-plan',{}),dialog=el('dialog',{'aria-label':'Authorise local history recovery'},el('h2',{},'Recover this node’s history'),el('p',{},plan.message));dialog.append(el('p',{},plan.pruning?.pruned?'Pruning stays enabled at your existing setting and storage limit.':'This node’s existing pruning setting remains unchanged.'));dialog.append(el('p',{},'Only your local approval can start this. Dashboard cannot start a rescan or restart Core.'),el('div',{class:'actions'},button('Cancel','secondary',()=>{dialog.close();dialog.remove();}),button('Authorise','',async()=>{dialog.close();dialog.remove();await api('synchronisation/recovery-start',{id:plan.id});transferSignature='';})));document.body.append(dialog);dialog.showModal();});
  refresh.setAttribute('aria-label','Recover node history');refresh.title='Review and authorise rescan or blockchain recovery';refresh.disabled=!r.can_refresh||r.running||r.status==='Synchronised';box.append(refresh);return box;
 }

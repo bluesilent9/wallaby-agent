@@ -136,6 +136,15 @@ def confirm(c,key,action):
     if row['state']!='pending' or action!='delete' or not checked or time.time()-checked[1]>600:raise ValueError('Review this policy cancellation again before retiring it.')
     shown={**current,'retired':False,'destroyed_archives':row.get('destroyed_archives',[])}
     if digest(shown)!=checked[0]:raise ValueError('Local policy, funding or disc facts changed. Review the cancellation again.')
+    # No installed generation or physical backup exists to retire. A fresh
+    # funding check above is sufficient; do not run it two more times around
+    # an empty mutation plan. Recheck local installations before acknowledging.
+    if not current['discs'] and all(not w['installed'] for policy in current['policies'] for w in policy['wallets']):
+        for request,proposal in original.items():
+            expected=next(v['wallets'] for v in current['policies'] if v['request_hash']==request)
+            actual=[{'wallet':w['wallet'],'installed':w['installed']} for w in wallets(c,proposal)]
+            if actual!=expected:raise ValueError('Local policy installation changed. Review the cancellation again.')
+        return complete(c,key,p,original,[])
     plans=[];started=False
     try:
         for request,proposal in original.items():
