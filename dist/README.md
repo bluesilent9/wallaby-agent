@@ -1,5 +1,5 @@
-# Development Build 58
+# Development Build 59
 
-Install wallaby-agent_2.0.0~dev58_amd64.deb on Ubuntu 26.04 amd64 after finishing protected work and closing the workspace normally. Pair with Dashboard Build 80 or later.
+Ubuntu 26.04 amd64. Finish protected work and close the workspace normally before installing wallaby-agent_2.0.0~dev59_amd64.deb. Compatible with Dashboard 80+ (including 83).
 
-One approval updates related node and loaded-disc signers. Updated discs must be burned, fully verified and their old copies locally confirmed destroyed before funding continues. Funded policies cannot be retired. Old keys and descriptor history are retained.
+Long policy/cancellation reviews run in the background with visible progress. Status and public inventory remain available; approval, funding checks, keys and safe-close requirements are preserved.

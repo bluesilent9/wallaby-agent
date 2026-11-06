@@ -28,7 +28,7 @@ class IdleDiscReads(unittest.TestCase):
  def test_pending_cleanup_transfer_and_history_guards_are_unchanged(self):
   for kind in ('destroy_disc','archive_cancel','builder_cancel'):
    with self.w.store.edit() as s:s['pending']={'task':{'proposal':{'kind':kind},'state':'pending'}}
-   self.assertIn('error',self.query())
+   self.assertIn('result',self.query());self.assertTrue(self.w.busy(),'pending cleanup still prevents closure')
   with self.w.store.edit() as s:s['pending']={}
   for key,value in [('setup_active','unknown-setup'),('active_transfer','transfer'),('sync_batch',{'ids':['a']}),('history_jobs',{'history':{}}),('recovery',{'state':'downloading'})]:
    with self.w.store.edit() as s:s[key]=value
