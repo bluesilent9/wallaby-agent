@@ -9,7 +9,7 @@ class Preparation(unittest.TestCase):
   from test_startup_authorisation import AuthorisationFlow
   self.f=AuthorisationFlow();self.f.setUp();self.addCleanup(self.f.doCleanups)
  def test_unprepared_restricted_ui_uses_authorised_systemd_ipc_not_setuid(self):
-  current={'worker_version':'2.0.0~dev62','worker_protocol':1,'protected':{'running':True}}
+  current={'worker_version':'2.0.0~dev63','worker_protocol':1,'protected':{'running':True}}
   with patch('secure_bridge.call',side_effect=WorkspaceFailure('worker_unreachable','Absent')),patch('secure_bridge.ram_prepared',return_value=False),patch('secure_bridge.subprocess.run',return_value=Mock(returncode=0)) as run,patch('secure_bridge.wait_ready',return_value=current):self.assertEqual(start(),current)
   cmd=run.call_args.args[0];self.assertEqual(cmd,['/usr/bin/systemctl','start','wallaby-agent-prepare@'+str(os.getuid())+'.service']);self.assertNotIn('--no-ask-password',cmd);self.assertNotIn('pkexec',' '.join(cmd))
  def test_failure_names_preparation_unit_without_logging_raw_responses(self):

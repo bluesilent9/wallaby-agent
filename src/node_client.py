@@ -31,7 +31,7 @@ def exchange_http_reason(data):
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev62'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev63'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -126,8 +126,13 @@ class NodeClient:
         self.pool=concurrent.futures.ThreadPoolExecutor(max_workers=2,thread_name_prefix='core-rpc')
         self.pending=threading.BoundedSemaphore(2);self.threads=[]
     def check_core(self):
-        try:self.core.ready()
-        except Exception as error:raise describe('rpc',error) from None
+        if getattr(self,'planned_core_restart',lambda:False)():return False
+        try:self.core.ready();return True
+        except Exception as error:
+            # The authorised restart may have begun while this health request
+            # was in flight. Recheck ownership before declaring a connection loss.
+            if getattr(self,'planned_core_restart',lambda:False)():return False
+            raise describe('rpc',error) from None
     def post(self,path,body,timeout=30):
         try:return http_json(self.port,'/agent/v1/'+path,body,self.token,timeout)
         except ValueError:raise protocol_failure('json_'+path,'The '+path+' endpoint did not return valid, bounded JSON.') from None
@@ -211,14 +216,16 @@ class NodeClient:
     def heartbeat(self):
         while not self.stop.wait(5) and not self.failed.is_set():
             try:
-                self.check_core()
+                core_ready=self.check_core()
                 if self.stop.is_set() or self.failed.is_set():return
                 self.consume(self.control_post('heartbeat',{},timeout=5))
-                if not self.stop.is_set() and not self.failed.is_set():self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
+                if not self.stop.is_set() and not self.failed.is_set():
+                    self.status('green' if core_ready else 'amber','Tunnel, Bitcoin Core and Dashboard connected.' if core_ready else 'Planned Bitcoin Core restart. Waiting for local RPC; protected workspace retained.')
             except Exception as error:self.fail(error)
     def run(self):
         try:
-            self.check_core()
+            while self.check_core() is False:
+                if self.stop.wait(.5):return
             if self.stop.is_set():return
             self.status('amber','Local Bitcoin Core RPC connected. Registering with Wallaby Dashboard…')
             try:mac=adapter_mac()

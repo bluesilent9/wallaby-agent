@@ -169,11 +169,17 @@ class Workspace:
         self._service_snapshot=dict(result);return result
     def recovery_state(self):
         return self.recovery.snapshot() if hasattr(self,'recovery') else {}
+    def planned_core_restart(self):
+        recovery=getattr(getattr(self,'transfer',None),'recovery',None)
+        return bool(recovery and recovery.restart_window())
     def connection_lost(self,error):
         from diagnostics import describe
         from activity_log import event
         with self.recovery.lock:
             failure=describe('dashboard',error);before=self.recovery_state()
+            if failure.stage=='rpc' and self.planned_core_restart():
+                self.node_status={'color':'amber','message':'Planned Bitcoin Core restart. Waiting for local RPC; protected workspace retained.'}
+                return
             self.recovery.lost(failure);state=self.recovery_state()
             if state.get('active'):
                 event('node.recovery',('Retry failed' if before.get('active') else 'Started')+' · '+failure.stage+' · '+failure.code+' · budget_seconds=15 · remaining='+str(state['remaining']))
@@ -227,7 +233,7 @@ class Workspace:
                         self.node_status={'color':color,'message':message}
                 def degraded(error,current=current):
                     if current():self.connection_lost(error)
-                client=NodeClient(self.ops.core.config,port,stop,status);client.on_failure=failure;client.on_degraded=degraded
+                client=NodeClient(self.ops.core.config,port,stop,status);client.on_failure=failure;client.on_degraded=degraded;client.planned_core_restart=self.planned_core_restart
                 try:client.run()
                 except Exception as error:failure(error)
                 if not self.recovery_state().get('active'):return

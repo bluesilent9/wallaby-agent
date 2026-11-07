@@ -79,6 +79,7 @@ class PrunedRecovery(unittest.TestCase):
             except Exception as error:replayed.append(error)
         def launch(command,*args,**kwargs):
             if command[:3]==['/usr/bin/systemctl','--user','show-environment']:return Mock(returncode=0)
+            if command[0]=='/usr/bin/systemd-run' and command[-1]=='/usr/bin/true':return Mock(returncode=0)
             if command[0]=='/usr/bin/systemd-run':
                 receiver.process.wait(timeout=10);arguments=command[command.index('--')+1:];launched.append(arguments)
                 # The fixture uses a historical clock to make a genuine >2-hour

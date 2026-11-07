@@ -136,7 +136,7 @@ def lock_released(netdir):
 
 
 class Recovery:
-    def __init__(self,core,store):self.core=core;self.store=store;self.thread=None;self.lock=threading.Lock();self.cached=None;self.cache_at=0
+    def __init__(self,core,store):self.core=core;self.store=store;self.thread=None;self.lock=threading.Lock();self.cached=None;self.cache_at=0;self.restart_deadline=0
     def state(self):
         if self.cached and time.monotonic()-self.cache_at<5:return self.cached
         saved=self.store.read();job=saved.get('recovery',{});requirements=saved.get('history_jobs',{})
@@ -207,13 +207,43 @@ class Recovery:
     def update(self,state,message):
         with self.store.edit() as s:s['recovery'].update(state=state,message=message)
         self.cache_at=0
+    def restart_window(self):
+        # Only this live, locally authorised restart owns the longer Core grace.
+        # A saved flag after a crash, Dashboard input or a failed launch cannot
+        # suppress the ordinary 15-second connection failure handling.
+        return bool(self.restart_deadline and time.monotonic()<self.restart_deadline and self.thread and self.thread.is_alive())
+    def launch_command(self,launch,args,unit,wait=False):
+        command=['/usr/bin/systemd-run','--user','--quiet','--service-type=exec','--slice=app.slice','--unit='+unit,'--working-directory='+launch['cwd']]
+        if wait:command+=['--wait','--collect']
+        command+=['--setenv='+k+'='+v for k,v in launch['env'].items()]
+        # The desktop user manager lives outside the protected service's mount
+        # namespace. Do not make its ability to launch Core depend on opening a
+        # log file in that private workspace. Core keeps its usual debug.log;
+        # service launch failures are also available in the user's journal.
+        return command+['--property=StandardOutput=journal','--property=StandardError=journal','--']+args
     def restart(self,launch,extra):
+        try:return self.restart_checked(launch,extra)
+        finally:self.restart_deadline=0
+    def restart_checked(self,launch,extra):
         if any(arg.split('=',1)[0].lstrip('-')=='prune' for arg in extra):raise ValueError('Recovery cannot override pruning settings.')
         # Ensure the original process still owns the same lock. Never kill Core.
         current=process_launch(self.core)
         if current['pid']!=launch['pid'] or current['started']!=launch['started']:raise ValueError('Core process changed; automatic restart stopped.')
         chain=rpc(self.core,'getblockchaininfo')['chain']
-        self.update('stopping','Waiting for Bitcoin Core to shut down cleanly.')
+        unit='wallaby-core-recovery-'+str(time.time_ns())
+        # Exercise the SAME manager, cwd, environment and output configuration
+        # before Core is touched. This catches namespace, permission and manager
+        # failures which show-environment alone cannot detect.
+        try:
+            probe=subprocess.run(self.launch_command(launch,['/usr/bin/true'],unit+'-check',wait=True),capture_output=True,timeout=30)
+        except (OSError,subprocess.TimeoutExpired):
+            raise ValueError('The separate Core restart service could not be checked. Core was not stopped. Check the desktop user service manager before retrying.') from None
+        if probe.returncode:raise ValueError('The separate Core restart service failed its launch check. Core was not stopped. Check the desktop user journal before retrying.')
+        self.restart_deadline=time.monotonic()+900
+        with self.store.edit() as saved:saved['recovery']['restart_unit']=unit
+        from activity_log import event
+        event('history.restart','Independent service preflight passed; locally authorised Core restart · grace_seconds=900')
+        self.update('stopping','Planned Bitcoin Core restart: waiting for a clean shutdown. The protected workspace stays open while Core restarts.')
         rpc(self.core,'stop')
         for _ in range(600):
             if not Path('/proc',str(launch['pid'])).exists() and lock_released(launch['netdir']):break
@@ -224,25 +254,43 @@ class Recovery:
             except OSError:pass
             time.sleep(.5)
         else:raise ValueError('Core has not finished shutting down. It was not killed or restarted.')
-        log=self.store.root/'core-recovery.log'
         # Separate user service: upgrading/restarting the Agent must never kill Core.
         # The RPC cookie directory's held lock was matched above; bind the restart
         # to that same data root even when Snap changes HOME while launching.
         netdir=Path(launch['netdir']);data_root=netdir if chain=='main' else netdir.parent
         args=list(launch['argv'])+['-datadir='+str(data_root)]+extra
         if Path(launch['executable']).name=='bitcoind':args.append('-daemon=0')
-        command=['/usr/bin/systemd-run','--user','--collect','--quiet','--service-type=exec','--slice=app.slice','--unit=wallaby-core-recovery-'+str(time.time_ns()), '--working-directory='+launch['cwd']]
-        command+=['--setenv='+k+'='+v for k,v in launch['env'].items()]
-        command+=['--property=StandardOutput=append:'+str(log),'--property=StandardError=append:'+str(log),'--']+args
-        log.touch(mode=0o600,exist_ok=True);log.chmod(0o600)
-        result=subprocess.run(command,capture_output=True,timeout=30)
-        if result.returncode:raise ValueError('Core shut down cleanly, but its separate user service could not start. Restart Core manually with the reviewed recovery options. Agent will not launch duplicates.')
-        self.update('downloading','Core restarted. Waiting for RPC and blockchain recovery; keep the Agent running.')
-    def wait_rpc(self,timeout=600):
-        for _ in range(timeout):
-            try:return rpc(self.core,'getblockchaininfo')
-            except Exception:time.sleep(1)
-        raise ValueError('Core did not become available. Check its recovery log; the Agent will not launch duplicates.')
+        command=self.launch_command(launch,args,unit)
+        try:result=subprocess.run(command,capture_output=True,timeout=30)
+        except (OSError,subprocess.TimeoutExpired):
+            event('history.restart','Separate Core launch outcome uncertain; no duplicate launch requested')
+            raise ValueError('Core shut down, but its separate restart service did not confirm startup. Check the user journal and Core debug.log before starting Core manually; no second launch was attempted.') from None
+        if result.returncode:
+            event('history.restart','Separate Core launch refused · exit_code='+str(result.returncode))
+            raise ValueError('Core shut down cleanly, but its separate user service could not start. Check the user journal and Core debug.log. No duplicate Core was launched and history recovery has not completed.')
+        event('history.restart','Separate Core service launched; waiting for local RPC readiness')
+        self.update('starting','Core restart service launched. Waiting for local RPC; protected workspace retained.')
+        ready=self.wait_rpc(startup_unit=unit)
+        if ready['chain']!=chain:raise ValueError('Restarted Core is on a different chain. Recovery stopped; no wallet restoration was attempted.')
+        event('history.restart','Local Core RPC ready; normal connection timeout restored')
+        self.update('downloading','Core is responding. Preparing the reviewed blockchain recovery.')
+    def wait_rpc(self,timeout=600,startup_unit=None):
+        deadline=time.monotonic()+timeout
+        while time.monotonic()<deadline:
+            try:return rpc(self.core,'getblockchaininfo',timeout=5)
+            except Exception:pass
+            if startup_unit:
+                try:
+                    result=subprocess.run(['/usr/bin/systemctl','--user','show',startup_unit,'--property=ActiveState','--property=ExecMainStatus'],capture_output=True,text=True,timeout=3)
+                    fields=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line) if result.returncode==0 and isinstance(result.stdout,str) else {}
+                except (OSError,subprocess.TimeoutExpired):fields={}
+                if fields.get('ActiveState') in ('failed','inactive'):
+                    code=fields.get('ExecMainStatus','unknown');code=code if code.isdecimal() else 'unknown'
+                    from activity_log import event
+                    event('history.restart','Core service stopped before RPC readiness · exit_status='+code)
+                    raise ValueError('The Core restart service stopped before RPC became ready (exit status '+code+'). Check its desktop user journal and Core debug.log. Recovery stopped without launching a second Core.')
+            time.sleep(1)
+        raise ValueError('Core did not become available. Check Core debug.log and the desktop user journal; the Agent will not launch duplicates.')
     def check_wallet(self,name,job):
         info=rpc(self.core,'getwalletinfo',[],name)
         if bool(info.get('private_keys_enabled'))!=job.get('expected_private_keys',bool(job.get('staged'))) or (job.get('staged') and ('unlocked_until' not in info or info['unlocked_until']!=0)):
@@ -343,7 +391,9 @@ class Recovery:
             self.update('complete','History recovery completed. Wallet and vault history is stored in Core. The original pruning settings were kept throughout.')
             with self.store.edit() as saved:saved['recovery']['finished']=time.time()
         except Exception as error:
-            self.update('error',str(error) if isinstance(error,ValueError) else 'History recovery stopped with an uncertain result. Inspect Core and the private recovery log. No wallet operation was automatically repeated and no pruning setting was changed.')
+            from activity_log import event
+            event('history.recovery','Stopped · exception='+type(error).__name__+' · state='+self.store.read().get('recovery',{}).get('state','unknown'))
+            self.update('error',str(error) if isinstance(error,ValueError) else 'History recovery stopped with an uncertain result. Inspect Core debug.log and the desktop user journal. No wallet operation was automatically repeated and no pruning setting was changed.')
     def resume_monitor(self):
         # A UI-service restart cannot repeat shutdown, reindex, import or restore.
         job=self.store.read().get('recovery',{})

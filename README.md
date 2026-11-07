@@ -2,9 +2,11 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** Private keys and passphrases are never sent to the Dashboard. Policy installation and refresh temporarily handle private descriptors inside the protected local worker; signing unlocks the selected Core wallet. Those protections do not remove the risk of a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 62
+# Wallaby Agent V2 — Development Build 63
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
+
+Build 63 preflights the independent Core restart service before stopping Core, retains the protected connection during a bounded locally authorised restart, and reports startup failures without launching duplicate Core processes. Pruning settings and history verification remain unchanged. [Restart findings and validation](AGENT_BUILD63_CORE_RESTART.md).
 
 Build 62 fixes extinction history preparation on pruned nodes: stage only missing addresses without rescanning, retain prepared recovery jobs, preserve labels, and recognise complete archived history before requesting further recovery. Repeated imports are tested not to duplicate transactions. Bitcoin Pipe notation matches Dashboard grouping and unpadded satoshis. [Findings and continuation](AGENT_BUILD62_EXTINCTION_HISTORY.md).
 
