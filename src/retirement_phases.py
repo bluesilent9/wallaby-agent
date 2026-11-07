@@ -67,6 +67,16 @@ def existing_archive(core,wallet):
     if info.get('private_keys_enabled') is not False or info.get('scanning') or not address_only(raw):raise ValueError('The existing Extinct wallet must be a non-scanning address-only watch wallet.')
     return raw
 
+def local_archives(core):
+    """Same address-only watch-wallet criteria used by Core public inventory."""
+    result=[]
+    for wallet in rpc(core,'listwallets'):
+        raw=rpc(core,'listdescriptors',[False],wallet)
+        if not address_only(raw):continue
+        info=rpc(core,'getwalletinfo',[],wallet)
+        if info.get('private_keys_enabled') is False and not info.get('scanning'):result.append(wallet)
+    return sorted(result)
+
 def internal(p,wallet,targets):
     q={'kind':'wallet_retire','version':2,'nonce':p['nonce'],'wallet':wallet,'public_wallet':p['public_wallet'],'archive_label':p['archive_label'],'require_zero_balance':True,'delete_wallet':True,'delete_wallets':targets};q['request_id']=digest(q);return q
 
@@ -137,7 +147,7 @@ def review(core,store,p):
         local_transactions={digest(r) for r in facts['transaction_records']} if facts else set()
         if facts is None or not {(r['address'],r['label']) for r in p['manifest']['addresses']}<=local_addresses or not {digest(r) for r in p['manifest']['transactions']}<=local_transactions:verify_public(core,p)
         return {'phase':'preserve','wallet':p['public_wallet'].get('wallet_name','Retiring wallet'),'archive':p['wallet'],'addresses':p['manifest']['addresses'],'transactions':len(p['manifest']['transactions']),'blocks':chain['blocks'],'manifest_hash':p['manifest_hash'],'delete_wallet':False,'local_wallets':[],'retained_signers':[]}
-    facts=local_facts(core,store,p);facts.update(phase='delete',archive=None,manifest_hash=p['manifest_hash'],preservation_fingerprint=receipt(store,p),preservation_archive=p['preservation']['archive_wallet'],preservation_node=p['preservation']['node_id']);return facts
+    facts=local_facts(core,store,p);available=local_archives(core);facts.update(phase='delete',archive=None,manifest_hash=p['manifest_hash'],preservation_fingerprint=receipt(store,p),preservation_archive=p['preservation']['archive_wallet'],preservation_node=p['preservation']['node_id'],local_extinct_wallets=available,history_elsewhere_confirmation_required=not bool(available));return facts
 
 def imports(core,p):
     existing_archive(core,p['wallet']);requests=[]
@@ -158,13 +168,15 @@ def readback(core,p):
         tx=rpc(core,'gettransaction',[r['txid'],True],p['wallet'])
         if tx.get('confirmations',0)<=0 or tx.get('blockhash')!=r['blockhash']:raise ValueError('Extinct transaction readback failed. Recover complete history before preservation can complete.')
 
-def approve(owner,key,fingerprint_value=None):
+def approve(owner,key,fingerprint_value=None,history_elsewhere_confirmed=False):
+    if type(history_elsewhere_confirmed) is not bool:raise ValueError('Confirm preservation on another node explicitly before deletion.')
     p=validate(owner.store.read()['pending'][key]['proposal']);old=owner.reviews.get(key)
     if not old or time.time()-old[1]>600 or owner.store.read()['pending'][key]['state']!='pending':raise ValueError('Review this phased extinction request again.')
     facts=review(owner.core,owner.store,p)
     # A new block is harmless; any changed wallet/evidence/path needs new review.
     if {k:v for k,v in facts.items() if k not in ('blocks','tip')}!={k:v for k,v in old[0].items() if k not in ('blocks','tip')}:raise ValueError('Retirement data changed since review.')
     if p['phase']=='delete' and fingerprint_value!=facts['preservation_fingerprint']:raise ValueError('Independently compare the preserving Agent fingerprint before deletion.')
+    if p['phase']=='delete' and facts['history_elsewhere_confirmation_required'] and not history_elsewhere_confirmed:raise ValueError('No Extinct wallet is loaded on this node. Confirm that the reviewed transaction history is already preserved in another node’s Extinct wallet before deleting local copies.')
     from activity_log import event
     event('extinction.'+p['phase'],'Local approval accepted · addresses='+str(len(p['manifest']['addresses']))+' · transactions='+str(len(p['manifest']['transactions'])))
     with owner.store.edit() as s:s['pending'][key]['state']='attempted'
@@ -181,7 +193,7 @@ def approve(owner,key,fingerprint_value=None):
             # Repeat all local balances, associated policies, transaction and path
             # checks immediately before unloading the exact approved group.
             fresh=review(owner.core,owner.store,p)
-            for f in ('addresses','transaction_records','deletion','local_wallets','retained_signers'):
+            for f in ('addresses','transaction_records','deletion','local_wallets','retained_signers','local_extinct_wallets','history_elsewhere_confirmation_required'):
                 if fresh[f]!=facts[f]:raise ValueError('Local wallet changed before deletion. No deletion authorised.')
             if owner.store.read().get('retirement_cancel_pending',{}).get(key):return owner._cancel_result(key)
             for item in fresh['deletion']:rpc(owner.core,'unloadwallet',{'wallet_name':item['wallet'],'load_on_startup':False})

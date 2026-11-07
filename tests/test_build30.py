@@ -41,6 +41,9 @@ class RealPhasedRetirement(unittest.TestCase):
    def proof(p,key,result):return {'node_id':'1'*32,'request_hash':key,'archive_wallet':'Wallaby Extinct','manifest_hash':p['manifest_hash'],'verified_utc':'2026-11-03T00:00:00Z','receipt':result['archive_receipt']}
    coldtargets=[{'wallet':'Watch','public_wallet':rpc(remote,'listdescriptors',[False],'Watch'),'private_keys_enabled':False}]
    deletion=proposal(raw,p['manifest'],'delete','Watch',coldtargets,proof(p,key,first));other.receive(deletion);r=Retirement(remote,other);k=digest(deletion);facts=r.review(k)['retirement'];pin=facts['preservation_fingerprint']
+   self.assertTrue(facts['history_elsewhere_confirmation_required']);self.assertEqual(facts['local_extinct_wallets'],[])
+   with self.assertRaisesRegex(ValueError,'No Extinct wallet'):r.approve(k,pin)
+   self.assertEqual(other.read()['pending'][k]['state'],'pending')
    with self.assertRaisesRegex(ValueError,'fingerprint'):r.approve(k)
    # A new unconfirmed deposit is sufficient to stop a reviewed deletion.
    txid=rpc(core,'sendtoaddress',[address,'0.01'],'Destination');tx=rpc(core,'gettransaction',[txid], 'Destination');rpc(remote,'sendrawtransaction',[tx['hex']])
@@ -60,7 +63,7 @@ class RealPhasedRetirement(unittest.TestCase):
     self.assertEqual(run.returncode,0,run.stderr);evidence=json.loads(run.stdout);self.assertTrue(all(evidence.values()));print('Dashboard/Agent live-Core preservation interoperability:',json.dumps(evidence),flush=True)
    deletion=proposal(raw,p['manifest'],'delete','Watch',coldtargets,saved,operation='d'*64);k=digest(deletion);other.receive(deletion);facts=r.review(k)['retirement']
    def local_remove(request):return remove(request,[Path(request['path']).parent])
-   with patch('wallet_deletion.delete',side_effect=local_remove):r.approve(k,facts['preservation_fingerprint'])
+   with patch('wallet_deletion.delete',side_effect=local_remove):r.approve(k,facts['preservation_fingerprint'],history_elsewhere_confirmed=True)
    self.assertNotIn('Watch',rpc(remote,'listwallets'));self.assertNotIn('Watch',[w['name'] for w in rpc(remote,'listwalletdir')['wallets']]);self.assertNotIn('Wallaby Extinct',[w['name'] for w in rpc(remote,'listwalletdir')['wallets']])
    deletion=proposal(raw,p['manifest'],'delete','Old',targets,saved,operation='d'*64);k=digest(deletion);store.receive(deletion);facts=ret.review(k)['retirement']
    with patch('wallet_deletion.delete',side_effect=local_remove):ret.approve(k,facts['preservation_fingerprint'])
@@ -74,7 +77,7 @@ class RealPhasedRetirement(unittest.TestCase):
    # completion of the earlier deletion cannot hide or authorise this one.
    before_archive=rpc(remote,'listdescriptors',[False],'Existing Archive');rpc(remote,'createwallet',{'wallet_name':'Old_watch','disable_private_keys':True,'blank':True});rpc(remote,'importdescriptors',[[dict(d,timestamp=0) for d in raw['descriptors']]],'Old_watch')
    later_targets=[{'wallet':'Old_watch','public_wallet':rpc(remote,'listdescriptors',[False],'Old_watch'),'private_keys_enabled':False}];later=proposal(raw,p['manifest'],'delete','Old_watch',later_targets,saved,operation='d'*64);later['nonce']='f'*64;later['request_id']=digest({k:v for k,v in later.items() if k!='request_id'});lk=digest(later);self.assertTrue(other.receive(later));r.review(lk)
-   with patch('wallet_deletion.delete',side_effect=local_remove):r.approve(lk,pin)
+   with patch('wallet_deletion.delete',side_effect=local_remove):r.approve(lk,pin,history_elsewhere_confirmed=True)
    self.assertNotIn('Old_watch',[w['name'] for w in rpc(remote,'listwalletdir')['wallets']]);self.assertEqual(rpc(remote,'listdescriptors',[False],'Existing Archive'),before_archive);self.assertFalse(other.receive(later))
 
 class PhaseSchema(unittest.TestCase):

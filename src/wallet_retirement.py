@@ -175,12 +175,12 @@ class Retirement:
             state['pending'].pop(key,None);state.setdefault('cancelled_requests',{})[key]='retirement';state['completed'][key]={'kind':'wallet_retire','at':time.time(),'result':result};state.get('retirement_cancel_pending',{}).pop(key,None)
         self.reviews.pop(key,None)
         return {'message':result['message']}
-    def approve(self,key,fingerprint=None):
+    def approve(self,key,fingerprint=None,history_elsewhere_confirmed=False):
         self.active.add(key)
         try:
             if self.store.read()['pending'][key]['proposal'].get('version')==3:
                 from retirement_phases import approve
-                return approve(self,key,fingerprint)
+                return approve(self,key,fingerprint,history_elsewhere_confirmed)
             return self._approve(key)
         finally:self.active.discard(key)
     def _approve(self,key):
