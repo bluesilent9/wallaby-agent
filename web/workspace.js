@@ -4,7 +4,7 @@ function el(tag,props={},...children){const e=document.createElement(tag);for(co
 function button(label,klass,action){const b=el('button',{type:'button',class:klass},label);b.addEventListener('click',()=>run(action));return b;}
 async function run(action){if(working)return;working=true;notify();try{await action();}catch(error){notify(error);}finally{working=false;await refresh(true);}}
 function blockHeight(value){return Number.isSafeInteger(value)&&value>=0?value.toLocaleString('en-AU',{useGrouping:true,maximumFractionDigits:0}):String(value);}
-function pipe(value){let n=BigInt(value),neg=n<0n;n=neg?-n:n;return(neg?'−':'')+'₿ '+(n/100000000n)+'.'+String(n/1000000n%100n).padStart(2,'0')+' | '+String(n%1000000n).padStart(6,'0')+' sats';}
+function pipe(value){let n=BigInt(value),neg=n<0n;n=neg?-n:n;const whole=n/100000000n,cents=String(n/1000000n%100n).padStart(2,'0'),tail=n%1000000n;return(neg?'−':'')+'₿'+whole.toLocaleString('en-AU')+'.'+cents+' | '+tail.toLocaleString('en-AU')+' sats';}
 function showPage(next){if(workspace?.protected?.viewer&&workspace?.recovery?.active)return;if(workspace?.protected?.viewer?next==='services':next!=='services')return;page=next;for(const p of ['services','authorise','synchronisation','burn','message']){$('#page-'+p).hidden=p!==next;document.querySelector('[data-page="'+p+'"]').classList.toggle('current',p===next);}if(next==='authorise'){renderApprovals();window.loadLocalWallets?.();}updateNotices();if(next==='burn')window.renderBurn?.();if(next==='message'&&!$('#message-wallets').children.length&&typeof loadMessageWallets==='function')run(loadMessageWallets);}
 for(const b of document.querySelectorAll('[data-page]'))b.addEventListener('click',()=>showPage(b.dataset.page));
 function renderProtection(w){

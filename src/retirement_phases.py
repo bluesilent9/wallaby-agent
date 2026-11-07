@@ -104,7 +104,7 @@ def check_chain(core,p):
         if rpc(core,'getblockheader',[record['blockhash']]).get('confirmations',0)<=0:raise ValueError('Retirement history is outside the active local chain.')
     return chain
 
-def verify_public(core,p,verify_transactions=True):
+def verify_public(core,p,verify_transactions=True,transaction_wallet=None):
     """Prove membership from public descriptors and chain records, never labels alone."""
     from wallet_retirement import MissingHistory
     allowed=set()
@@ -122,8 +122,12 @@ def verify_public(core,p,verify_transactions=True):
     if not verify_transactions:return
     txs=[];outpoints=set();found=set()
     for record in p['manifest']['transactions']:
-        try:tx=rpc(core,'getrawtransaction',[record['txid'],True,record['blockhash']])
-        except Exception:raise MissingHistory('Local retained blocks cannot verify the complete proposed archive history. Authorise history preparation and recovery with pruning unchanged.') from None
+        try:
+            if transaction_wallet is None:tx=rpc(core,'getrawtransaction',[record['txid'],True,record['blockhash']])
+            else:
+                saved=rpc(core,'gettransaction',[record['txid'],True],transaction_wallet)
+                tx=rpc(core,'decoderawtransaction',[saved['hex']]);tx.update(blockhash=saved.get('blockhash'),confirmations=saved.get('confirmations',0))
+        except ValueError:raise MissingHistory('The Extinct wallet does not yet contain the complete confirmed history. Prepare and authorise local history recovery; no wallet was deleted.') from None
         if tx.get('txid')!=record['txid'] or tx.get('blockhash')!=record['blockhash'] or tx.get('confirmations',0)<=0:raise ValueError('Core did not verify the exact archival transaction in the active chain.')
         txs.append(tx)
         for output in tx['vout']:
@@ -142,20 +146,38 @@ def receipt(store,p):
 def review(core,store,p):
     validate(p);chain=check_chain(core,p)
     if p['phase']=='preserve':
-        existing_archive(core,p['wallet']);facts=local_facts(core,store,p,True)
+        existing_archive(core,p['wallet'])
+        # Read back an already preserved manifest before asking an old source
+        # wallet on a pruned node to establish broader historical coverage.
+        try:
+            readback(core,p)
+            verify_public(core,p,transaction_wallet=p['wallet'])
+            preserved=True
+        except ValueError:preserved=False
+        if not preserved and chain.get('pruned') and chain.get('pruneheight',0):
+            from wallet_retirement import MissingHistory
+            raise MissingHistory('The Extinct wallet is missing required historical transactions on this pruned node. Prepare local history recovery, then authorise This Node on Synchronisation. No original wallet was deleted.')
+        facts=None if preserved else local_facts(core,store,p,True)
         local_addresses={(r['address'],r['label']) for r in facts['addresses']} if facts else set()
         local_transactions={digest(r) for r in facts['transaction_records']} if facts else set()
-        if facts is None or not {(r['address'],r['label']) for r in p['manifest']['addresses']}<=local_addresses or not {digest(r) for r in p['manifest']['transactions']}<=local_transactions:verify_public(core,p)
+        if not preserved and (facts is None or not {(r['address'],r['label']) for r in p['manifest']['addresses']}<=local_addresses or not {digest(r) for r in p['manifest']['transactions']}<=local_transactions):verify_public(core,p)
         return {'phase':'preserve','wallet':p['public_wallet'].get('wallet_name','Retiring wallet'),'archive':p['wallet'],'addresses':p['manifest']['addresses'],'transactions':len(p['manifest']['transactions']),'blocks':chain['blocks'],'manifest_hash':p['manifest_hash'],'delete_wallet':False,'local_wallets':[],'retained_signers':[]}
     facts=local_facts(core,store,p);available=local_archives(core);facts.update(phase='delete',archive=None,manifest_hash=p['manifest_hash'],preservation_fingerprint=receipt(store,p),preservation_archive=p['preservation']['archive_wallet'],preservation_node=p['preservation']['node_id'],local_extinct_wallets=available,history_elsewhere_confirmation_required=not bool(available));return facts
 
-def imports(core,p):
+def imports(core,p,timestamp=0,only_missing=False):
     existing_archive(core,p['wallet']);requests=[]
     for r in p['manifest']['addresses']:
         info=rpc(core,'getaddressinfo',[r['address']],p['wallet']);labels=info.get('labels',[])
         if labels and labels!=[r['label']]:raise ValueError('Existing Extinct labels conflict with the proposed history; reconcile without overwriting them.')
-        body='addr('+r['address']+')';requests.append({'desc':body+'#'+checksum(body),'timestamp':0,'label':r['label']})
+        if only_missing and (info.get('ismine') or info.get('iswatchonly')):
+            if labels!=[r['label']]:rpc(core,'setlabel',[r['address'],r['label']],p['wallet'])
+            continue
+        body='addr('+r['address']+')';requests.append({'desc':body+'#'+checksum(body),'timestamp':timestamp,'label':r['label']})
+    if not requests:return
+    from activity_log import event
+    event('extinction.history','Public address import · mode='+('non_rescanning_staging' if only_missing else 'historical_rescan')+' · addresses='+str(len(requests)))
     results=rpc(core,'importdescriptors',{'requests':requests},p['wallet'],timeout=86400)
+    event('extinction.history','Public address import returned · successful='+str(sum(r.get('success') is True for r in results))+' · requested='+str(len(requests)))
     if len(results)!=len(requests) or not all(r.get('success') for r in results):raise ValueError('Historical import was incomplete; no wallet was deleted.')
 
 def readback(core,p):
@@ -183,7 +205,10 @@ def approve(owner,key,fingerprint_value=None,history_elsewhere_confirmed=False):
     try:
         if owner.store.read().get('retirement_cancel_pending',{}).get(key):return owner._cancel_result(key)
         if p['phase']=='preserve':
-            imports(owner.core,p);readback(owner.core,p)
+            try:readback(owner.core,p);verify_public(owner.core,p,transaction_wallet=p['wallet']);complete_history=True
+            except ValueError:complete_history=False
+            if not complete_history:imports(owner.core,p)
+            readback(owner.core,p)
             if owner.store.read().get('retirement_cancel_pending',{}).get(key):return owner._cancel_result(key)
             from setup_messages import sign
             message={'version':1,'kind':'wallet_retirement_preservation','request_hash':key,'operation_id':p['operation_id'],'manifest_hash':p['manifest_hash'],'archive_wallet':p['wallet'],'address_count':len(p['manifest']['addresses']),'wallet_deleted':False}
@@ -214,17 +239,43 @@ def approve(owner,key,fingerprint_value=None,history_elsewhere_confirmed=False):
 
 def prepare_history(core,store,key,p):
     validate(p);check_chain(core,p);existing_archive(core,p['wallet']);verify_public(core,p,verify_transactions=False)
-    # This action has its own explicit local button. It imports public addresses
-    # only into an existing archive, then requests normal guarded history recovery.
-    imports(core,p)
+    ident=digest({'local_retirement_history':key});saved=store.read()
+    if ident in saved.get('history_jobs',{}):
+        from activity_log import event
+        event('extinction.history','Existing recovery job retained; no repeated import or rescan.')
+        return {'message':'History recovery is already prepared. Open Synchronisation and review This Node; repeated preparation will not rescan or replace the existing recovery job.','history_prepared':True}
+    try:
+        readback(core,p);verify_public(core,p,transaction_wallet=p['wallet'])
+    except ValueError:pass
+    else:return {'message':'This Extinct wallet already contains the verified history. Return to Authorise and review the preservation request; no rescan was needed.','history_ready':True}
+    # Do not start a doomed genesis rescan before the guarded recovery job exists.
+    from wallet_recovery import staging_timestamp,require
+    imports(core,p,timestamp=staging_timestamp(core),only_missing=True)
     from peer_wallet import wallet_details
     raw=rpc(core,'listdescriptors',[False],p['wallet'])
-    q={'public_wallet':raw,'source_has_private_keys':False,'transfer_version':1,'direction':'send'}
+    q={'public_wallet':raw,'source_has_private_keys':False,'transfer_version':2,'direction':'send'}
     details=wallet_details(core,q,store)
-    from wallet_recovery import require
-    ident=digest({'local_retirement_history':key});require(store,ident,p['wallet'],details)
-    with store.edit() as s:s['history_jobs'][ident].update(expected_private_keys=False,local_only=True)
-    return {'message':'Public history addresses staged in the existing Extinct wallet. Review and authorise This Node history recovery on Synchronisation. Pruning stays unchanged. No original wallet was deleted; preservation still needs a fresh review afterwards.'}
+    # Preserve original historical timestamps for explicit replay, even though
+    # newly staged descriptors use a future timestamp to avoid import rescans.
+    for row in details['public_wallet']['descriptors']:row['timestamp']=0
+    require(store,ident,p['wallet'],details)
+    with store.edit() as state:state['history_jobs'][ident].update(expected_private_keys=False,local_only=True)
+    # Recover the matching original wallets in the same explicitly authorised
+    # node replay, so their later deletion can verify complete local coverage.
+    for name in rpc(core,'listwallets'):
+        if name==p['wallet']:continue
+        public=rpc(core,'listdescriptors',[False],name)
+        if descriptors(public)!=descriptors(p['public_wallet']):continue
+        source_id=digest({'local_retirement_source_history':key,'wallet':name})
+        if source_id in store.read().get('history_jobs',{}):continue
+        private=rpc(core,'getwalletinfo',[],name).get('private_keys_enabled') is True
+        source_details=wallet_details(core,{'public_wallet':public,'source_has_private_keys':private,'transfer_version':2,'direction':'send'},store)
+        require(store,source_id,name,source_details)
+        with store.edit() as state:state['history_jobs'][source_id].update(expected_private_keys=private,local_only=True)
+
+    from activity_log import event
+    event('extinction.history','Public addresses staged; local recovery prepared; separate Synchronisation approval required.')
+    return {'message':'Missing public addresses staged without rescanning. Open Synchronisation and authorise This Node history recovery. Pruning stays unchanged. Then review preservation again; original wallets remain intact.','history_prepared':True}
 
 def require_current(p):
     if p.get('version')!=3:raise ValueError('This combined extinction request is obsolete. Deny it and use Dashboard Build 34 to request separate preservation and deletion. No wallet operation was started.')

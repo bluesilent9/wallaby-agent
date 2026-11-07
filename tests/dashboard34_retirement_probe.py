@@ -10,9 +10,9 @@ with __import__('tempfile').TemporaryDirectory() as root:
  config=Path(root)/'config.cfg';node='1'*32;p=data['proposal'];key=digest(p);row={'kind':'wallet_retire','node_id':node,'proposal':p,'delivered':True,'state':'pending'};state={'requests':{key:row}}
  result(state,node,data['result']);assert row['state']=='complete'
  def rpc(n,method,params=None,wallet=None):
-  password=Path(data['core']['cookie']).read_text().strip();url='http://127.0.0.1:'+str(data['core']['rpc_port'])+('/wallet/'+urllib.parse.quote(wallet,safe='') if wallet else '/')
+  password=Path(data['core']['cookie']).read_text().strip();url='http://[::1]:'+str(data['core']['rpc_port'])+('/wallet/'+urllib.parse.quote(wallet,safe='') if wallet else '/')
   request=urllib.request.Request(url,json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params or []}).encode(),{'Authorization':'Basic '+base64.b64encode(password.encode()).decode(),'Content-Type':'application/json'})
-  with urllib.request.urlopen(request,timeout=30) as response:value=json.load(response,parse_float=Decimal)
+  with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request,timeout=30) as response:value=json.load(response,parse_float=Decimal)
   if value.get('error'):raise ValueError('Fixture Core RPC failed')
   return value['result']
  hub=SimpleNamespace(config=config,caps={node:{CAPABILITY}},inventories={node:{'complete':True,'archive_wallets':['Wallaby Extinct']}},registry=SimpleNamespace(snapshot=lambda:{'nodes':[{'id':node,'hostname':'archive-fixture','rpc_ready':True,'blockchain':{'state':'ready'}}]},connections={'fixture':{'node_id':node}}),permissions=SimpleNamespace(current=lambda n:{'identity':data['result']['archive_receipt']['public_key']}),wallet_builder=SimpleNamespace(read=lambda:{'identities':{}}),utc=lambda:'2026-11-03T00:00:00Z',rpc=rpc)

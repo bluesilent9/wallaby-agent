@@ -129,7 +129,9 @@ class Retirement:
                 from retirement_phases import review
                 facts=review(self.core,self.store,p)
             else:facts=inventory(self.core,self.store,p)
-        except MissingHistory as error:return {'kind':'wallet_retire','id':key,'retirement':{'wallet':p['wallet'],'history_required':True,'history_preparation_imports':p.get('phase')=='preserve','message':str(error)}}
+        except MissingHistory as error:
+            ident=digest({'local_retirement_history':key});job=self.store.read().get('history_jobs',{}).get(ident)
+            return {'kind':'wallet_retire','id':key,'retirement':{'wallet':p['wallet'],'history_required':True,'history_preparation_imports':p.get('phase')=='preserve','history_prepared':job is not None,'message':'History recovery is prepared. Open Synchronisation and review This Node before returning to this request.' if job else str(error)}}
         self.reviews[key]=(facts,time.time());return {'kind':'wallet_retire','id':key,'retirement':facts}
     def prepare_history(self,key):
         p=self.store.read()['pending'][key]['proposal']
