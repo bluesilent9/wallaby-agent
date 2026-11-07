@@ -34,14 +34,14 @@ def validate(p):
     if p['request_id']!=digest({k:v for k,v in p.items() if k!='request_id'}):raise ValueError('Retirement proposal hash differs.')
     return p
 
-def inventory(core,store,p,collect_only=False):
+def inventory(core,store,p,collect_only=False,confirmed_manifest=None):
     validate(p);name=p['wallet'];chain=rpc(core,'getblockchaininfo');info=rpc(core,'getwalletinfo',[],name)
     if chain.get('initialblockdownload') or chain.get('blocks')!=chain.get('headers') or info.get('scanning') or info.get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('Complete local wallet history is required. Finish node download and rescan first.')
     from wallet_setup_signing import signers_for_policy
     if (p['version']==1 and not info.get('private_keys_enabled') and not signers_for_policy(core,p['public_wallet'])) or descriptors(rpc(core,'listdescriptors',[False],name))!=descriptors(p['public_wallet']):raise ValueError('The selected local wallet policy has no matching private signer or differs from the proposed public policy.')
     if chain.get('pruned') and chain.get('pruneheight',0):
         floor=rpc(core,'getblockheader',[rpc(core,'getblockhash',[chain['pruneheight']])])['time'];coverage=store.read().get('history_coverage',{}).get(name,{})
-        if info.get('birthtime',0)-7200<floor and coverage.get('identity')!=digest(sorted(descriptors(p['public_wallet']))):raise MissingHistory('This pruned node cannot establish complete address history from retained blocks. Locally recover wallet history with pruning unchanged before retiring it.')
+        if info.get('birthtime',0)-7200<floor and coverage.get('identity')!=digest(sorted(descriptors(p['public_wallet']))) and confirmed_manifest is None:raise MissingHistory('This pruned node cannot establish complete address history from retained blocks. Locally recover wallet history with pruning unchanged before retiring it.')
     def zero(wallet):
         balances=rpc(core,'getbalances',[],wallet)
         groups=[balances[key] for key in ('mine','watchonly') if key in balances]

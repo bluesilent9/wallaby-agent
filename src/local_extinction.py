@@ -1,0 +1,52 @@
+"""Durable local extinction decisions; no transaction history or signing authority."""
+from approval_store import digest
+from wallet_ops import rpc
+from build8_policy import descriptors
+from wallet_labels import address_only
+
+
+def prepare(store,p,names):
+    ident=digest(sorted(descriptors(p['public_wallet'])))
+    row={'policy_id':ident,'address_ids':sorted(digest({'address':r['address']}) for r in p['manifest']['addresses']),'wallet_names':sorted(names),'request_hash':digest(p),'operation_id':p['operation_id'],'state':'prepared'}
+    with store.edit() as saved:saved.setdefault('local_retirements',{})[ident]=row
+    return ident
+
+
+def complete(store,ident):
+    with store.edit() as saved:saved['local_retirements'][ident]['state']='complete'
+
+
+def eligible(core,store,raw):
+    from wallet_labels import fixed_address
+    addresses={fixed_address(r['desc']) for r in raw['descriptors']}
+    if None in addresses:raise ValueError('Automatic Extinct history synchronisation accepts fixed historical addresses only.')
+    wanted={digest({'address':a}) for a in addresses};records=store.read().get('local_retirements',{})
+    approved={a for row in records.values() if row['state']=='complete' for a in row['address_ids']}
+    if not wanted<=approved:raise ValueError('Extinct history deferred: these exact addresses have not completed extinction locally. Approve the local extinction request first; no history was imported.')
+    names={n for row in records.values() if row['state']=='complete' and set(row['address_ids'])&wanted for n in row['wallet_names']}
+    directories={r['name'] for r in rpc(core,'listwalletdir')['wallets']}
+    if names&directories:raise ValueError('Extinct history deferred: a previously retired local wallet exists again. Complete its local extinction before importing history.')
+    for name in rpc(core,'listwallets'):
+        policy=rpc(core,'listdescriptors',[False],name)
+        if address_only(policy):continue
+        for address in addresses:
+            info=rpc(core,'getaddressinfo',[address],name)
+            if info.get('ismine') or info.get('iswatchonly'):raise ValueError('Extinct history deferred: an active local wallet still owns these addresses. No history was imported.')
+    return True
+
+
+def restoration(store,raw):
+    """A local fact, never a Dashboard flag or permission to regenerate keys."""
+    if address_only(raw):return None
+    ident=digest(sorted(descriptors(raw)))
+    row=store.read().get('local_retirements',{}).get(ident)
+    return ident if row and row['state'] in ('prepared','complete') else None
+
+
+def restored_from_ssh(core,store,raw,wallet,*,validated_ssh=False):
+    ident=restoration(store,raw)
+    if not ident:return
+    if not validated_ssh:raise ValueError('Restore this extinct wallet through a Build 64 direct SSH synchronisation; a Dashboard request alone cannot restore it.')
+    actual=rpc(core,'listdescriptors',[False],wallet);info=rpc(core,'getwalletinfo',[],wallet);tip=rpc(core,'getblockchaininfo')
+    if descriptors(actual)!=descriptors(raw) or info.get('scanning') or info.get('lastprocessedblock',{}).get('height',-1)<tip['blocks']:raise ValueError('The SSH-restored wallet has not passed its local policy and current-chain checks.')
+    with store.edit() as saved:saved['local_retirements'][ident]['state']='restored'

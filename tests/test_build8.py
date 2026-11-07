@@ -133,7 +133,7 @@ class CoreBatch(unittest.TestCase):
         with socket.socket(socket.AF_UNIX) as sock:
             sock.settimeout(30);sock.connect(str(socket_path(self.store)));stream=sock.makefile('rwb',buffering=0)
             frame_write(stream,{'operation':'manifest','transfer_id':p['transfer_id'],'peer_ipv6':p['peer']['ipv6'],'details':facts[key],'watch_only':False})
-            self.assertEqual(frame_read(stream)['status'],'review_required');self.assertEqual(frame_read(stream),{'status':'ready','watch_only':True})
+            self.assertEqual(frame_read(stream)['status'],'review_required');self.assertEqual(frame_read(stream),{'status':'ready','watch_only':True,'features':['chain_sync_v1','core_history_v1']})
             frame_write(stream,{'operation':'public_wallet'});result=frame_read(stream);self.assertEqual(result['status'],'loaded',result);frame_write(stream,{'status':'confirmed'})
     t.thread.join(5);self.assertFalse(t.listener);self.assertFalse(self.store.read().get('sync_batch'));self.assertEqual(len(self.store.read()['completed']),2)
     for p in incoming:

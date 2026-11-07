@@ -56,6 +56,7 @@ def guard(core,p,store=None,actual_name=None):
     from wallet_setup_signing import restricted
     for name in (rpc(core,'listwallets') if isinstance(getattr(core,'config',None),dict) else []):
         local=rpc(core,'listdescriptors',[False],name)
+        if not local.get('descriptors'):continue # An empty public archive has no signing authority.
         if descriptors(local)!=wanted:continue
         if not rpc(core,'getwalletinfo',[],name).get('private_keys_enabled'):continue
         protected_policy=any((parsed:=restricted(row['desc'])) and (parsed['height'] is not None or parsed['total']>1) for row in local['descriptors'])

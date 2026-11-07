@@ -87,11 +87,15 @@ def clear_obsolete_denials(store):
     for row in matches:enable(store,row['policy_id'])
     return {'message':str(len(matches))+' obsolete child-wallet denial(s) removed. Other wallet denials are unchanged; the grouped Extinct request still requires local authorisation.'}
 
-def import_watch(core,store,key,p,details):
+def import_watch(core,store,key,p,details,native=False):
     """Keep one local archive; save exact merged recovery evidence before mutation."""
     from wallet_recovery import history_missing,earliest,require,staging_timestamp
     from wallet_labels import apply_labels
     group=grouped(p['public_wallet'])
+    if native and not group:raise ValueError('Native historical merging is restricted to Extinct archives.')
+    if group:
+        from local_extinction import eligible
+        eligible(core,store,p['public_wallet'])
     from wallet_rename import watch_name
     name=ARCHIVE if group else watch_name(details['public_wallet']['wallet_name'] or 'Default wallet')
     loaded=rpc(core,'listwallets');exists=any(w['name']==name for w in rpc(core,'listwalletdir')['wallets'])
@@ -114,7 +118,8 @@ def import_watch(core,store,key,p,details):
             else:rows[ident]=copy.deepcopy(row)
         merged['public_wallet']={'wallet_name':ARCHIVE,'descriptors':list(rows.values())}
         descriptors(merged['public_wallet']);merged['address_labels']=sorted(by_address.values(),key=lambda r:r['address'])
-    missing=history_missing(core,earliest(merged));require(store,key,name,merged)
+    missing=native or history_missing(core,earliest(merged))
+    if not native:require(store,key,name,merged)
     with store.edit() as state:state['pending'][key]['state']='attempted'
     if not exists:rpc(core,'createwallet',{'wallet_name':name,'disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':True})
     requests=[]
@@ -127,4 +132,4 @@ def import_watch(core,store,key,p,details):
     if len(result)!=len(requests) or any(not r.get('success') for r in result):raise ValueError('Core did not import all approved public addresses/descriptors. Inspect the watch archive; no operation will be replayed.')
     if rpc(core,'getwalletinfo',[],name).get('private_keys_enabled'):raise ValueError('Watch-only wallet unexpectedly permits private keys.')
     apply_labels(core,name,merged.get('address_labels',[]),write=True)
-    return name,missing,merged
+    return name,False if native else missing,merged

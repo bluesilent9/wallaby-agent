@@ -6,7 +6,7 @@ service accepts this exact schema and writes only its fixed state directory.
 import copy,fcntl,json,os,re,secrets,socket,socketserver,stat,struct,threading
 from pathlib import Path
 
-LIMIT=256*1024
+LIMIT=2*1024*1024
 HEX=re.compile('[0-9a-f]{64}')
 
 def initial():return {'version':1,'revision':0,'wallets':{}}
@@ -16,11 +16,24 @@ def label(value):
     return value
 
 def validate(data):
-    if not isinstance(data,dict) or set(data)!={'version','revision','wallets'} or type(data['version']) is not int or data['version']!=1 or type(data['revision']) is not int or not 0<=data['revision']<2**63:raise ValueError('Invalid persistent denial list.')
+    if not isinstance(data,dict) or not {'version','revision','wallets'}<=set(data)<={'version','revision','wallets','retirements','request_denials'} or type(data['version']) is not int or data['version']!=1 or type(data['revision']) is not int or not 0<=data['revision']<2**63:raise ValueError('Invalid persistent denial list.')
     records=data['wallets']
     if not isinstance(records,dict) or len(records)>128:raise ValueError('Denial list is full; remove an entry before adding another.')
     for key,row in records.items():
         if not isinstance(key,str) or not HEX.fullmatch(key) or not isinstance(row,dict) or set(row) not in ({'policy_id','wallet_name'},{'policy_id','wallet_name','purpose'}) or row.get('purpose','archive')!='archive' or row['policy_id']!=key:raise ValueError('Only disabled wallet identifiers and display names may be persisted.')
+        label(row['wallet_name'])
+    retired=data.get('retirements',{})
+    if not isinstance(retired,dict) or len(retired)>128:raise ValueError('Too many local extinction decisions.')
+    for key,row in retired.items():
+        if not HEX.fullmatch(str(key)) or not isinstance(row,dict) or set(row)!={'policy_id','address_ids','wallet_names','request_hash','operation_id','state'} or row['policy_id']!=key or row['state'] not in ('prepared','complete','restored'):raise ValueError('Invalid local extinction decision.')
+        if any(not HEX.fullmatch(str(row[f])) for f in ('request_hash','operation_id')):raise ValueError('Invalid local extinction identity.')
+        if not isinstance(row['address_ids'],list) or not 1<=len(row['address_ids'])<=10000 or len(set(row['address_ids']))!=len(row['address_ids']) or any(not isinstance(a,str) or not HEX.fullmatch(a) for a in row['address_ids']):raise ValueError('Invalid retired address identities.')
+        if not isinstance(row['wallet_names'],list) or len(row['wallet_names'])>128:raise ValueError('Invalid retired wallet names.')
+        for name in row['wallet_names']:label(name)
+    denied=data.get('request_denials',{})
+    if not isinstance(denied,dict) or len(denied)>128:raise ValueError('Too many lifecycle denials.')
+    for key,row in denied.items():
+        if not isinstance(key,str) or not HEX.fullmatch(key) or not isinstance(row,dict) or set(row)!={'policy_id','purpose','wallet_name'} or row['policy_id']!=key or row['purpose'] not in ('extinction','restoration'):raise ValueError('Invalid lifecycle denial.')
         label(row['wallet_name'])
     if len(json.dumps(data,allow_nan=False).encode())>LIMIT:raise ValueError('Denial list exceeds its storage limit.')
     return copy.deepcopy(data)
@@ -31,14 +44,18 @@ def display(p):
     return label(value)
 
 def project(state,revision):
-    return validate({'version':1,'revision':revision,'wallets':copy.deepcopy(state.get('sync_exclusions',{}))})
+    return validate({'version':1,'revision':revision,'wallets':copy.deepcopy(state.get('sync_exclusions',{})),**({'retirements':copy.deepcopy(state['local_retirements'])} if state.get('local_retirements') else {}),**({'request_denials':copy.deepcopy(state['request_denials'])} if state.get('request_denials') else {})})
 
 def overlay(state,data):
     data=validate(data)
+    state['request_denials']=copy.deepcopy(data.get('request_denials',{}))
+    state['local_retirements']=copy.deepcopy(data.get('retirements',{}))
     state['sync_exclusions']={k:v for k,v in data['wallets'].items() if v.get('purpose')!='archive'};state.pop('archive_exclusions',None);state['sync_preferences_revision']=data['revision']
     from sync_preferences import policy_id
     for key,row in list(state.get('pending',{}).items()):
         p=row['proposal']
+        from lifecycle_preferences import blocked
+        if row['state']=='pending' and blocked(state,p):state['pending'].pop(key);continue
         if row['state']=='pending' and p['kind']=='wallet_transfer' and p['direction']=='receive' and policy_id(p) in state['sync_exclusions']:
             state['pending'].pop(key);state.get('sync_choices',{}).pop(key,None);state.get('transfer_previews',{}).pop(key,None)
 

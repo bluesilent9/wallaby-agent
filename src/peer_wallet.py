@@ -41,7 +41,12 @@ def active(store):
 def frame_write(stream,value):
     raw=json.dumps(value,allow_nan=False,separators=(',',':')).encode()
     if len(raw)>MAX_HEADER:raise ValueError('Transfer header too large.')
-    stream.write(struct.pack('!I',len(raw))+raw);stream.flush()
+    view=memoryview(struct.pack('!I',len(raw))+raw)
+    while view:
+        count=stream.write(view)
+        if not count:raise ValueError('Direct SSH connection ended while sending a frame.')
+        view=view[count:]
+    stream.flush()
 
 def read_exact(stream,n):
     data=bytearray()
@@ -180,7 +185,7 @@ class Transfer:
     def state(self):
         
         key,row=active(self.store)
-        if self.listener and time.monotonic()>self.deadline:self.close();self.error='Receiving authorisation expired. Review and authorise again.'
+        if self.listener and not self.connection and time.monotonic()>self.deadline:self.close();self.error='Receiving authorisation expired. Review and authorise again.'
         preview=self.store.read().get('transfer_previews',{}).get(key) if key else None
         proof={}
         self.details=None
@@ -189,7 +194,7 @@ class Transfer:
             proof={'fingerprint':fingerprint(preview['public_key']),'preview_hash':digest(preview['preview'])}
             self.details={k:preview['preview'][k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels') if k in preview['preview']}
         from sync_queue import rows
-        return {'rows':rows(self.store),'batch':self.store.read().get('sync_batch'),'route':route_info(row['proposal']['peer']['ipv6']) if row else None,'initial_preview':preview,'preview_proof':proof,'preview_error':self.store.read().get('preview_errors',{}).get(key,''),'id':key,'proposal':row['proposal'] if row else None,'state':row['state'] if row else None,'ready':bool(self.listener),'sending':getattr(self,'sending',False),'firewall':self.firewall,'details':self.details,'error':self.error,'success_until':self.success_until,'setup':readiness(row['proposal']) if row else None}
+        return {'rows':rows(self.store),'batch':self.store.read().get('sync_batch'),'route':route_info(row['proposal']['peer']['ipv6']) if row else None,'initial_preview':preview,'preview_proof':proof,'preview_error':self.store.read().get('preview_errors',{}).get(key,''),'id':key,'proposal':row['proposal'] if row else None,'state':row['state'] if row else None,'ready':bool(self.listener),'sending':getattr(self,'sending',False),'firewall':self.firewall,'details':self.details,'error':self.error,'success_until':self.success_until,'setup':readiness(row['proposal']) if row else None,'chain_sync':self.store.read().get('chain_sync',{})}
     def review(self,key):
         with self.store.edit() as s:
             if key not in s['pending'] or s['pending'][key].get('withdrawn') or s['pending'][key]['proposal']['kind']!='wallet_transfer':raise ValueError('Wallet request was withdrawn.')
@@ -237,6 +242,10 @@ class Transfer:
         self.store.queue('wallet_transfer_result',{'request_hash':key,'status':'complete'})
         with self.store.edit() as s:s['pending'].pop(key,None);s['completed'][key]={'kind':'wallet_transfer','at':time.time()};s.pop('active_transfer',None)
         self.success_until=time.time()+5;self.details=None
+    def resume_network(self):
+        if self.connection:raise ValueError('Wait for the current SSH transfer before resuming Internet peers.')
+        from chain_sync import resume_network
+        return resume_network(self.core,self.store)
     def pending_recovery(self,key):
         with self.store.edit() as s:
             s['pending'][key]['state']='recovery_required';s.pop('active_transfer',None)
@@ -282,14 +291,37 @@ class Transfer:
             watch=not p['source_has_private_keys'] or option.get('watch_only',False) or header.get('watch_only',False)
             if type(header.get('watch_only',False)) is not bool:raise ValueError('Invalid watch-only choice.')
             if p.get('transfer_version')!=2 and watch:raise ValueError('Watch-only transfer requires the Build 8 direct protocol on both Agents.')
-            ready={'status':'ready'}
+            ready={'status':'ready','features':['chain_sync_v1','core_history_v1']}
             if p.get('transfer_version')==2:ready['watch_only']=watch
             frame_write(stream,ready)
-            if watch:
+            header=frame_read(stream)
+            native_peer=False
+            if header.get('operation')=='chain_sync':
+                from chain_sync import receive as receive_chain
+                receive_chain(self.core,self.store,stream,header,frame_read,frame_write,read_exact);native_peer=True
                 header=frame_read(stream)
-                if header!={'operation':'public_wallet'}:raise ValueError('Watch-only transfer cannot contain a wallet file.')
+            from local_extinction import restoration,restored_from_ssh
+            if restoration(self.store,p['public_wallet']) and not native_peer:raise ValueError('Restoring an extinct wallet requires direct SSH synchronisation with a Build 64 sending Agent.')
+            if watch:
+                if header.get('operation')!='public_wallet' or set(header) not in ({'operation'},{'operation','core_history'}):raise ValueError('Watch-only transfer cannot contain a wallet file.')
                 from wallet_recovery import verify_history
                 from extinct_sync import import_watch
+                if 'core_history' in header:
+                    from history_wire import receive as receive_history
+                    from core_history import install
+                    with tempfile.TemporaryDirectory(dir=work_dir(self.core)) as folder:
+                        packet=receive_history(self.core,self.store,p,details,header,stream,read_exact,folder)
+                        try:
+                            from local_extinction import eligible
+                            eligible(self.core,self.store,p['public_wallet'])
+                        except ValueError as error:
+                            frame_write(stream,{'status':'history_deferred','transfer_id':p['transfer_id'],'message':str(error)});frame_read(stream)
+                            from chain_sync import finish
+                            finish(self.core,self.store);self.error=str(error);return
+                        name,missing,details=import_watch(self.core,self.store,key,p,details,native=True)
+                        install(self.core,self.store,name,packet['records'],packet['manifest'])
+                    from chain_sync import finish
+                    self.complete(key);frame_write(stream,{'status':'loaded','transfer_id':p['transfer_id'],'wallet_identity':digest(sorted(wanted))});frame_read(stream);finish(self.core,self.store);return
                 name,missing,details=import_watch(self.core,self.store,key,p,details)
                 if missing:
                     self.pending_recovery(key)
@@ -297,8 +329,12 @@ class Transfer:
                 verify_history(self.core,name,details,self.store)
                 actual=descriptors(rpc(self.core,'listdescriptors',[False],name))
                 with self.store.edit() as state:state.get('history_jobs',{}).pop(key,None)
-                self.complete(key);frame_write(stream,{'status':'loaded','transfer_id':p['transfer_id'],'wallet_identity':digest(sorted(actual))});frame_read(stream);return
-            header=frame_read(stream)
+                restored_from_ssh(self.core,self.store,p['public_wallet'],name,validated_ssh=native_peer)
+                self.complete(key);frame_write(stream,{'status':'loaded','transfer_id':p['transfer_id'],'wallet_identity':digest(sorted(actual))});frame_read(stream)
+                if native_peer:
+                    from chain_sync import finish
+                    finish(self.core,self.store)
+                return
             if set(header)!={'size','sha256'} or type(header['size']) is not int or not 0<header['size']<=MAX_FILE or not re.fullmatch('[0-9a-f]{64}',header['sha256']):raise ValueError('Invalid encrypted wallet file header.')
             # Never overwrite a wallet, even if the server chose an existing name.
             for name in rpc(self.core,'listwallets'):
@@ -314,7 +350,7 @@ class Transfer:
             with self.store.edit() as s:s['pending'][key]['state']='attempted'
             name='Wallaby Sync '+p['transfer_id'][:24]
             from wallet_recovery import history_missing,earliest,require
-            if p.get('transfer_version')==2 and history_missing(self.core,earliest(details)):
+            if p.get('transfer_version')==2 and not native_peer and history_missing(self.core,earliest(details)):
                 # Preserve the one received encrypted file for an explicitly approved restore.
                 staged=root/('pending-'+p['transfer_id']+'.dat')
                 if staged.exists():raise ValueError('An encrypted file for this transfer is already staged. Inspect recovery status.')
@@ -336,9 +372,13 @@ class Transfer:
                 if not coin or str(__import__('wallet_ops').sats(coin['value']))!=output['amount_sats'] or coin['scriptPubKey'].get('address')!=output['address']:
                     raise ValueError('A funded output is missing or changed on the receiving node. Check blockchain synchronisation and wallet history before retrying; success was not recorded.')
                 rpc(self.core,'gettransaction',[output['txid'],True],name)
+            restored_from_ssh(self.core,self.store,p['public_wallet'],name,validated_ssh=native_peer)
             self.complete(key);frame_write(stream,{'status':'loaded','transfer_id':p['transfer_id'],'wallet_identity':digest(sorted(actual))})
             # Sender explicitly confirms learning the receiver loaded successfully.
             frame_read(stream)
+            if native_peer:
+                from chain_sync import finish
+                finish(self.core,self.store)
         except Exception as e:
             self.error=str(e) if isinstance(e,(ValueError,FileExistsError)) else 'Direct transfer failed or its outcome is uncertain. Inspect Core before retrying.'
             if conn:
@@ -348,6 +388,7 @@ class Transfer:
             if path:path.unlink(missing_ok=True)
             if conn:conn.close()
             self.connection=None
+            if not self.error:self.deadline=time.monotonic()+LIFETIME
             if self.listener is listener and not self.store.read().get('sync_batch'):self.close()
     def send(self,key,username,password,fingerprint):
         with self.lock:
@@ -401,7 +442,7 @@ class Transfer:
                             if len(errors)<8192:errors.extend(chunk[:8192-len(errors)])
                     threading.Thread(target=drain,daemon=True).start()
                     # Deadline covers peer review, file transfer and restoration; never replay automatically.
-                    timer=threading.Timer(LIFETIME,process.kill);timer.daemon=True;timer.start()
+                    timer=threading.Timer(86400,process.kill);timer.daemon=True;timer.start()
                     try:
                         manifest={'operation':'manifest','transfer_id':p['transfer_id'],'peer_ipv6':own,'details':details}
                         if p.get('transfer_version')==2:manifest['watch_only']=watch
@@ -411,12 +452,32 @@ class Transfer:
                         if reply.get('status')!='review_required':raise ValueError('Receiver did not accept this paired request. Authorise on the receiving Agent first.')
                         reply=frame_read(process.stdout)
                         if reply.get('status')!='ready':raise ValueError('Receiver did not approve the direct wallet history.')
+                        native_peer='chain_sync_v1' in reply.get('features',[])
+                        native_history='core_history_v1' in reply.get('features',[])
+                        if native_peer:
+                            from chain_sync import send as send_chain
+                            send_chain(self.core,process.stdin,lambda _:frame_read(process.stdout),frame_write)
                         effective_watch=reply.get('watch_only',False)
                         if type(effective_watch) is not bool or watch and not effective_watch:raise ValueError('Receiver did not honour watch-only mode. No private wallet file was created or sent.')
                         if effective_watch:
                             with self.store.edit() as state:state['pending'][key]['state']='attempted'
-                            frame_write(process.stdin,{'operation':'public_wallet'})
+                            if native_history and __import__('extinct_sync').grouped(p['public_wallet']):
+                                from history_wire import export
+                                file,history_header=export(self.core,self.store,p,details,root)
+                                frame_write(process.stdin,history_header)
+                                with file.open('rb') as f:
+                                    while True:
+                                        chunk=f.read(65536)
+                                        if not chunk:break
+                                        process.stdin.write(chunk)
+                                process.stdin.flush()
+                            else:frame_write(process.stdin,{'operation':'public_wallet'})
                             reply=frame_read(process.stdout)
+                            if reply.get('status')=='history_deferred' and reply.get('transfer_id')==p['transfer_id']:
+                                frame_write(process.stdin,{'status':'confirmed'})
+                                with self.store.edit() as state:state['pending'][key]['state']='pending'
+                                self.error='Extinct history deferred by the receiving Agent until local extinction completes. Core block catch-up completed; no archive import was reported.'
+                                return {'ok':True,'deferred':True}
                             if reply.get('status')=='recovery_required' and reply.get('transfer_id')==p['transfer_id']:
                                 frame_write(process.stdin,{'status':'confirmed'});self.pending_recovery(key);return {'ok':True,'recovery_required':True}
                             if reply.get('status')!='loaded' or reply.get('transfer_id')!=p['transfer_id'] or reply.get('wallet_identity')!=digest(sorted(descriptors(p['public_wallet']))):raise ValueError('Receiver did not confirm a matching watch wallet.')

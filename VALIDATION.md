@@ -1,3 +1,11 @@
+# Build 64 validation
+
+Isolated Core 31 fixtures cover complete incoming/final-outgoing transaction preservation, exact LOST labels, idempotent merges, pruned-node preservation and full reindex/replay, signed direct historical transfers, local extinction eligibility and encrypted original-wallet restoration. Failure checks cover loaded-database locks, replacement rollback, retained public-copy cleanup, malformed block hashes, a pruned sender gap and explicit Internet resume. The OpenSSH client also transferred Core-validated blocks over a pinned-key authenticated IPv6 connection to an isolated Python SSH fixture server. No real Core process, wallet, service or disc was changed.
+
+The accompanying Build 64 test log records the final focused and regression results. Six browser suites cover history preparation, exact pipe notation, lifecycle Deny/Cancel controls, protected-window status, cancellation feedback and disc selection/ETA. All 13 browser scripts parse. Native desktop password prompts are forbidden by the automated runner.
+
+No physical burner or production-system installation was tested for this history/synchronisation build. Core-native backup merging is explicitly restricted to Core 31, and unknown pre-upgrade local extinction decisions are not silently inferred. See [the implementation boundaries and Dashboard coordination](AGENT_BUILD64_HISTORY_AND_SSH.md).
+
 # Build 48 validation
 
 A real throttled xorriso stream now advances intermediate progress before writer

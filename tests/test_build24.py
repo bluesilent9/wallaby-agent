@@ -29,11 +29,11 @@ class ExchangeDiagnostics(unittest.TestCase):
   for text,code in [('Unsupported Agent capabilities.','capabilities'),('Update Wallaby Agent to V2 Development Build 8 or later.','agent_version'),('Resolve the node identity conflict first.','identity_conflict'),('Connection expired. Register again.','session_expired')]:
    reason=exchange_http_reason(json.dumps({'error':text}).encode());self.assertEqual(reason,code);failure=self.exchange.failure(HTTPFailure(400,reason));self.assertEqual(failure.code,'exchange_'+code)
   for raw in (b'{"error":"cookie=SECRET"}',b'not JSON',b'{"error":{"secret":"hidden"}}'):self.assertIsNone(exchange_http_reason(raw))
- def test_invalid_queued_proposal_has_its_kind_and_does_not_ack_outbox(self):
+ def test_invalid_queued_proposal_has_its_kind_without_losing_valid_ack(self):
   key=self.store.queue('node_identity',{'ipv6':'2001:db8::1'});p={'kind':'wallet_sync_queue','revision':1,'requests':[{'kind':'not_allowed'}]}
   with patch('agent_exchange.local_ipv6',return_value=None),patch('agent_exchange.http_json',return_value={'version':1,'accepted':[key],'proposals':[p]}):
    with self.assertRaises(ValueError) as raised:self.exchange.once()
-  failure=self.exchange.failure(raised.exception);self.assertIn('wallet_sync_queue',str(failure));self.assertEqual(self.exchange.phase,'proposal_validation');self.assertIn(key,self.store.read()['outbox']);self.assertFalse(self.store.read()['pending'])
+  failure=self.exchange.failure(raised.exception);self.assertIn('wallet_sync_queue',str(failure));self.assertEqual(self.exchange.phase,'proposal_validation');self.assertNotIn(key,self.store.read()['outbox']);self.assertFalse(self.store.read()['pending'])
  def test_success_clears_old_failure_and_true_is_not_a_protocol_version(self):
   with self.store.edit() as s:s['exchange_error']={'code':'old'}
   with patch('agent_exchange.local_ipv6',return_value=None),patch('agent_exchange.http_json',return_value={'version':1,'accepted':[],'proposals':[]}):self.exchange.once()
@@ -53,7 +53,10 @@ class GroupedExtinct(unittest.TestCase):
    address=rpc(self.core,'getnewaddress',[],'addresses24');body='addr('+address+')';rows.append({'desc':body+'#'+checksum(body),'timestamp':0,'label':label+' | LOST:02/01/2020 00:00:00 UTC'})
   rpc(self.core,'importdescriptors',{'requests':rows},ARCHIVE)
   p=paired(ARCHIVE);p['source_has_private_keys']=False;p['public_wallet']=rpc(self.core,'listdescriptors',[False],ARCHIVE)
-  facts=wallet_details(self.core,{**p,'direction':'send'},self.store);return p,facts,rows
+  facts=wallet_details(self.core,{**p,'direction':'send'},self.store)
+  from local_extinction import prepare,complete
+  ident=prepare(self.store,{'public_wallet':p['public_wallet'],'manifest':{'addresses':facts['address_labels']},'operation_id':'a'*64},['Original locally extinct wallet']);complete(self.store,ident)
+  return p,facts,rows
  def test_one_real_peer_transfer_creates_one_archive_with_two_children(self):
   p,facts,rows=self.fixture();self.assertTrue(grouped(p['public_wallet']));self.assertEqual([r['name'] for r in children(facts)],['Old SMSF','Old Treasury'])
   from test_build8 import CoreBatch

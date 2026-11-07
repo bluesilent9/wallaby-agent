@@ -106,7 +106,7 @@ class PhaseSchema(unittest.TestCase):
    with self.assertRaises(ValueError):validate(bad)
  def test_cancel_and_deny_outcomes_carry_phase_and_exact_manifest(self):
   with tempfile.TemporaryDirectory() as root:
-   store=Store(root);key='e'*64;p={'kind':'wallet_retire','version':3,'phase':'preserve','manifest_hash':'a'*64,'wallet':'Wallaby Extinct'}
+   store=Store(root);key='e'*64;p={'kind':'wallet_retire','version':3,'phase':'preserve','manifest_hash':'a'*64,'wallet':'Wallaby Extinct','public_wallet':public('Old')}
    with store.edit() as s:s['pending'][key]={'proposal':p,'state':'pending'}
    Retirement(Mock(),store).cancel_remote(key);result=next(iter(store.read()['outbox'].values()))['payload'];self.assertEqual(result['phase'],'preserve');self.assertEqual(result['manifest_hash'],'a'*64)
    with store.edit() as s:s['pending']['f'*64]={'proposal':p,'state':'pending'}

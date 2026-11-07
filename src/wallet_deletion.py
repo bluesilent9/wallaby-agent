@@ -96,7 +96,12 @@ class Handler(socketserver.BaseRequestHandler):
             size=int.from_bytes(receive(self.request,4),'big')
             if not 0<size<=4096:return
             request=json.loads(receive(self.request,size))
-            if isinstance(request,dict) and set(request)=={'export_directory','export_name'}:
+            if isinstance(request,dict) and set(request)=={'archive_swap'}:
+                from archive_swap import exchange
+                value=request['archive_swap']
+                if not isinstance(value,dict) or set(value)!={'archive','stage'}:raise ValueError('Invalid archive exchange.')
+                reply=exchange(value['archive'],value['stage'])
+            elif isinstance(request,dict) and set(request)=={'export_directory','export_name'}:
                 from cancel_backup import create_export
                 import array
                 fd=create_export(request)
@@ -106,7 +111,7 @@ class Handler(socketserver.BaseRequestHandler):
                     if sent<len(packet):self.request.sendall(packet[sent:])
                 finally:os.close(fd)
                 return
-            if isinstance(request,dict) and set(request)=={'preflight','manual'} and type(request['manual']) is bool:reply=remove(request['preflight'],allow_extinct=request['manual'],check_only=True)
+            elif isinstance(request,dict) and set(request)=={'preflight','manual'} and type(request['manual']) is bool:reply=remove(request['preflight'],allow_extinct=request['manual'],check_only=True)
             elif isinstance(request,dict) and set(request)=={'local_user_delete'}:reply=remove(request['local_user_delete'],allow_extinct=True)
             else:reply=remove(request)
         except Exception:reply={'deleted':False}

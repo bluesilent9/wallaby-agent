@@ -70,7 +70,8 @@ class Store:
         key=digest(p)
         with self.edit() as s:
             from cancellation import blocked
-            if blocked(s,p):return False
+            from lifecycle_preferences import blocked as lifecycle_blocked
+            if blocked(s,p) or lifecycle_blocked(s,p):return False
             if p['kind']=='wallet_transfer' and p['direction']=='receive':
                 from sync_preferences import policy_id
                 if policy_id(p) in s.get('sync_exclusions',{}):return False
@@ -80,6 +81,9 @@ class Store:
             s['pending'][key]={'proposal':p,'received':time.time(),'state':'pending'}
         return True
     def deny(self,key):
+        if self.read()['pending'][key]['proposal']['kind']=='wallet_retire':
+            from lifecycle_preferences import deny
+            return deny(self,key)
         with self.edit() as s:
             if s['pending'][key]['proposal']['kind']=='archive_cancel':raise ValueError('Archive cancellation requires local disc cleanup confirmation.')
             if s['pending'][key]['proposal']['kind']=='builder_cancel':raise ValueError('Choose Delete and Cancel or Backup and Cancel locally.')

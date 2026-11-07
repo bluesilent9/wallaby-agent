@@ -117,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
             from activity_log import DiagnosticLog
             try:return self.reply(200,DiagnosticLog().text().encode('utf-8'),'text/plain; charset=utf-8')
             except (OSError,ValueError):return self.reply(500,{'error':'Diagnostic log storage is unavailable. Check its ownership and permissions.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev63'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev64'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
@@ -201,7 +201,7 @@ class Handler(BaseHTTPRequestHandler):
                 from protected_memory import required
                 if required():
                     from secure_bridge import call
-                    endpoints={'review':('transfer.review',('id',)),'selection':('transfer.selection',('id','selected','watch_only')),'authorise-batch':('transfer.authorise_batch',('fingerprints',)),'end-receiving':('transfer.stop_receiving',()),'recovery-plan':('recovery.plan',()),'recovery-start':('recovery.start',('id',)),'send-batch':('transfer.send_batch',('credentials',)),'firewall':('transfer.firewall',('id',))}
+                    endpoints={'review':('transfer.review',('id',)),'selection':('transfer.selection',('id','selected','watch_only')),'authorise-batch':('transfer.authorise_batch',('fingerprints',)),'end-receiving':('transfer.stop_receiving',()),'resume-network':('transfer.resume_network',()),'recovery-plan':('recovery.plan',()),'recovery-start':('recovery.start',('id',)),'send-batch':('transfer.send_batch',('credentials',)),'firewall':('transfer.firewall',('id',))}
                     action=self.path.rsplit('/',1)[1]
                     if action not in endpoints:raise ValueError('Invalid synchronisation action.')
                     method,fields=endpoints[action]
@@ -217,6 +217,7 @@ class Handler(BaseHTTPRequestHandler):
                     choose(t.store,body['id'],body['selected'],body['watch_only']);result={'ok':True}
                 elif self.path=='/api/synchronisation/authorise-batch' and set(body)=={'fingerprints'}:result=t.authorise_batch(body['fingerprints'])
                 elif self.path=='/api/synchronisation/end-receiving' and not body:result=t.stop_receiving()
+                elif self.path=='/api/synchronisation/resume-network' and not body:result=t.resume_network()
                 elif self.path=='/api/synchronisation/recovery-plan' and not body:result=t.recovery.plan()
                 elif self.path=='/api/synchronisation/recovery-start' and set(body)=={'id'}:
                     if getattr(t,'sending',False):raise ValueError('Finish the sending batch before recovering history.')
@@ -239,7 +240,7 @@ class Handler(BaseHTTPRequestHandler):
                 from protected_memory import required
                 if required():
                     from secure_bridge import call
-                    actions={'refresh-destroyed':('refresh.destroyed',('id','archive_id','token','confirmed')),'cancel-archive-bind':('archive.cancel_bind',('id','archive_id','confirmed','fingerprint')),'cancel-archive-check':('archive.cancel_check',('id','confirmed','fingerprint')),'cancel-archive-stage':('archive.cancel_stage',('id','confirmed','fingerprint')),'cancel-archive-confirm':('archive.cancel_confirm',('id','confirmed','no_disc','destroyed_disc_count','fingerprint')),'retire-disc':('archive.retire_stage',('id','confirmed','fingerprint','creator_fingerprint')),'destroy-retired-disc':('archive.retire_destroyed',('id','confirmed','fingerprint','creator_fingerprint')),'retire':('retirement.approve',('id','fingerprint','history_elsewhere_confirmed')),'local-wallets':('local_wallets.list',()),'delete-wallet-review':('local_wallets.review',('wallet',)),'delete-wallet':('local_wallets.delete',('token','confirmed')),'reconcile-cancellation':('cancel.reconcile',('id','confirmed')),'reconcile-rename':('rename.reconcile',('id','confirmed')),'rename':('rename.approve',('id','skip_archive')),'clear-extinct-denials':('sync.clear_obsolete',()),'archive-delete':('archive.delete',('id',)),'destroy-disc':('archive.destroyed',('id','confirmed','creator_fingerprint')),'cancel-build':('cancel.confirm',('id','action')),'disable-sync':('sync.disable',('id',)),'enable-sync':('sync.enable',('id',)),'cancel-sync':('sync.cancel',('id',)),'cancel-setup':('setup.cancel',('id',)),'history':('authorise.history',('id',)),'review':('authorise.review',('id',)),'approve':('authorise.approve',('id',)),'deny':('authorise.deny',('id',)),'forget':('authorise.forget',('id',)),'participate':('setup.participate',('id','pins')),'sign':('wallet.sign',('id','action','fee_ack'))}
+                    actions={'deny-lifecycle':('lifecycle.deny',('id',)),'cancel-lifecycle':('lifecycle.cancel',('id',)),'enable-lifecycle':('lifecycle.enable',('id',)),'refresh-destroyed':('refresh.destroyed',('id','archive_id','token','confirmed')),'cancel-archive-bind':('archive.cancel_bind',('id','archive_id','confirmed','fingerprint')),'cancel-archive-check':('archive.cancel_check',('id','confirmed','fingerprint')),'cancel-archive-stage':('archive.cancel_stage',('id','confirmed','fingerprint')),'cancel-archive-confirm':('archive.cancel_confirm',('id','confirmed','no_disc','destroyed_disc_count','fingerprint')),'retire-disc':('archive.retire_stage',('id','confirmed','fingerprint','creator_fingerprint')),'destroy-retired-disc':('archive.retire_destroyed',('id','confirmed','fingerprint','creator_fingerprint')),'retire':('retirement.approve',('id','fingerprint','history_elsewhere_confirmed')),'local-wallets':('local_wallets.list',()),'delete-wallet-review':('local_wallets.review',('wallet',)),'delete-wallet':('local_wallets.delete',('token','confirmed')),'reconcile-cancellation':('cancel.reconcile',('id','confirmed')),'reconcile-rename':('rename.reconcile',('id','confirmed')),'rename':('rename.approve',('id','skip_archive')),'clear-extinct-denials':('sync.clear_obsolete',()),'archive-delete':('archive.delete',('id',)),'destroy-disc':('archive.destroyed',('id','confirmed','creator_fingerprint')),'cancel-build':('cancel.confirm',('id','action')),'disable-sync':('sync.disable',('id',)),'enable-sync':('sync.enable',('id',)),'cancel-sync':('sync.cancel',('id',)),'cancel-setup':('setup.cancel',('id',)),'history':('authorise.history',('id',)),'review':('authorise.review',('id',)),'approve':('authorise.approve',('id',)),'deny':('authorise.deny',('id',)),'forget':('authorise.forget',('id',)),'participate':('setup.participate',('id','pins')),'sign':('wallet.sign',('id','action','fee_ack'))}
                     action=self.path.rsplit('/',1)[1]
                     if action not in actions:raise ValueError('Invalid local authorisation action.')
                     method,fields=actions[action]
@@ -314,7 +315,7 @@ class Server(IPv6HTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('::1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev63'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev64'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -334,7 +335,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev63':
+    if installed!='2.0.0~dev64':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -344,7 +345,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev63') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev64') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)
