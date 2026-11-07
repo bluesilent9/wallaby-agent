@@ -38,15 +38,23 @@ def classify(state,name,raw):
 def blocked(state,p):
     if not isinstance(state,dict):state={}
     if p.get('kind')!='wallet_transfer':return False
+    from signer_restoration import requested
+    if requested(p):return False # Public invitation only; private release requires an SSH role permit.
     raw=p['public_wallet'];info=classify(state,raw['wallet_name'],raw)
     if p.get('source_has_private_keys') is True:
         for record in state.get('approved_wallets',{}).values():
             if record.get('wallet_layout')=='combined-policy-key-v1' and raw_keys([record['receive_descriptor'].split('#')[0],record['change_descriptor'].split('#')[0]])<=descriptors(raw):return True
     return bool(info and info['kind'] in ('signer','combined'))
 
-def guard(core,p,store=None,actual_name=None):
+def guard(core,p,store=None,actual_name=None,*,public_preview=False,restoration_permit=None):
     from wallet_ops import rpc
     state=store.read() if store is not None else getattr(core,'managed_store',None).read() if getattr(core,'managed_store',None) is not None else {}
+    from signer_restoration import requested,validate_offer
+    if requested(p):
+        if public_preview:return
+        if restoration_permit is not None:
+            validate_offer(p,restoration_permit,False);return
+        raise LocalActionFailure('managed_signer_transfer','A direct SSH restoration permit is required before accessing this wallet for transfer.')
     if blocked(state,p) or actual_name is not None and KEY.fullmatch(actual_name):raise LocalActionFailure('managed_signer_transfer',REASON)
     # Match public keys against persisted Core policies too. A Dashboard rename
     # cannot bypass the check, including after a protected RAM session restarts.

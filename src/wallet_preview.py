@@ -25,9 +25,13 @@ def validate_preview(payload,fresh=True):
     from peer_wallet import validate_details
     if not isinstance(payload,dict) or set(payload)!={'preview','public_key','signature'}:raise ValueError('Invalid signed wallet preview.')
     p=payload['preview'];required={'version','transfer_id','challenge','sender_ipv6','receiver_ipv6','public_wallet','chain','funded_outputs','node_tip','generated_at'}
+    if isinstance(p,dict) and 'restoration' in p:required=required|{'restoration'}
     if not isinstance(p,dict) or (set(p)!=required if p.get('version')==1 else set(p)!=required|{'vaults','address_labels'}) or p['version'] not in (1,2):raise ValueError('Invalid public preview schema.')
     for k in ('transfer_id','challenge'):
         if not re.fullmatch('[0-9a-f]{64}',str(p[k])):raise ValueError('Invalid preview binding.')
+    if 'restoration' in p:
+        from signer_restoration import requested
+        requested({'restoration':p['restoration'],'public_wallet':p['public_wallet'],'transfer_version':p['version']})
     ipv6(p['sender_ipv6']);ipv6(p['receiver_ipv6']);descriptors(p['public_wallet'])
     validate_details({k:p[k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels') if k in p})
     if not isinstance(p['node_tip'],dict) or set(p['node_tip'])!={'height','hash'} or type(p['node_tip']['height']) is not int or not 0<=p['node_tip']['height']<500000000 or not re.fullmatch('[0-9a-f]{64}',str(p['node_tip']['hash'])):raise ValueError('Invalid preview block reference.')
@@ -70,6 +74,7 @@ def verify_bound(store,payload,p):
     against this immutable signed review immediately before any wallet data moves.
     """
     proof=verify(store,payload,fresh=False);v=payload['preview']
+    if v.get('restoration')!=p.get('restoration'):raise ValueError('Signed restoration purpose differs from the paired request.')
     if v['version']!=(2 if p.get('transfer_version')==2 else 1):raise ValueError('Preview protocol differs from request.')
     sender=p['node_ipv6'] if p['direction']=='send' else p['peer']['ipv6']
     receiver=p['peer']['ipv6'] if p['direction']=='send' else p['node_ipv6']
@@ -85,6 +90,7 @@ def prepare(core,store,key,p):
     facts=wallet_details(core,p,store);tip=rpc(core,'getblockchaininfo')
     if tip.get('initialblockdownload') or tip.get('headers',tip['blocks'])!=tip['blocks']:raise ValueError('Wait for the sending node to finish synchronising before preparing a wallet preview.')
     preview={'version':2 if p.get('transfer_version')==2 else 1,'transfer_id':p['transfer_id'],'challenge':p['preview_challenge'],'sender_ipv6':own,'receiver_ipv6':ipv6(p['peer']['ipv6']),**facts,'node_tip':{'height':tip['blocks'],'hash':tip['bestblockhash']},'generated_at':int(time.time())}
+    if 'restoration' in p:preview['restoration']=p['restoration']
     payload=sign(store,preview);verify(store,payload)
     with store.edit() as s:
         # Only an unchanged currently active request can acquire a verified local snapshot.

@@ -85,9 +85,9 @@ def readiness(p):
             'firewall_remove_command':f'sudo ufw delete allow proto tcp from {peer} to any port 22',
             'network_note':'The receiving SSH server must permit this local account and password authentication. Never enable root login. If UFW is active, its IPv6 support must be enabled (IPV6=yes in /etc/default/ufw). On the receiving modem, allow incoming IPv6 TCP 22 to this computer from the sending IPv6 address. IPv6 normally needs a firewall exception, not IPv4 port forwarding. The Agent cannot reliably inspect your modem or distinguish a modem block from a host firewall or routing failure. System SSH remains controlled by you; closing this transfer closes its direct connection and the Agent receiving socket, not an existing SSH server.'}
 
-def source_wallet(core,p,require_encrypted=False):
+def source_wallet(core,p,require_encrypted=False,*,public_preview=False,restoration_permit=None):
     from managed_accounts import guard
-    guard(core,p)
+    guard(core,p,public_preview=public_preview,restoration_permit=restoration_permit)
     wanted=descriptors(p['public_wallet']);matches=[]
     from extinct_sync import grouped,ARCHIVE
     if grouped(p['public_wallet']) and not p['source_has_private_keys'] and ARCHIVE in rpc(core,'listwallets'):
@@ -100,17 +100,19 @@ def source_wallet(core,p,require_encrypted=False):
             actual=descriptors(raw)
             if actual==wanted or (not p['source_has_private_keys'] and address_only(p['public_wallet']) and wanted<=actual):matches.append(name)
         except ValueError:continue
+    if len(matches)>1 and __import__('signer_restoration').requested(p):matches=[n for n in matches if n==p['public_wallet']['wallet_name']]
     if len(matches)!=1:raise ValueError('The local public descriptors must identify exactly one loaded source wallet. Load the wallet and resolve duplicate replicas first.')
-    guard(core,p,actual_name=matches[0])
+    guard(core,p,actual_name=matches[0],public_preview=public_preview,restoration_permit=restoration_permit)
     info=rpc(core,'getwalletinfo',[],matches[0])
     if info.get('private_keys_enabled')!=p['source_has_private_keys'] or info.get('scanning'):raise ValueError('Source wallet key capability changed or its scan is incomplete.')
+    if require_encrypted and info.get('wallaby_storage')=='disc':raise ValueError('A physical-only disc signer cannot be copied into a persistent node wallet. Use its verified physical backup/recovery workflow; no private wallet file was sent.')
     if require_encrypted and info.get('private_keys_enabled') and ('unlocked_until' not in info or info['unlocked_until']!=0):raise ValueError('Lock this encrypted wallet in Bitcoin Core before sending. Unencrypted private-key wallets cannot be transferred; encrypt and back up the wallet in Core first.')
     return matches[0]
 
 def wallet_details(core,p,store=None,local_source=None):
     """Funded address facts originate at Core, transferred peer-to-peer, never asserted by Dashboard."""
     if local_source is None and __import__('extinct_sync').grouped(p['public_wallet']):return __import__('extinct_sync').local_details(core,p,store)
-    name=local_source if local_source is not None else source_wallet(core,p)
+    name=local_source if local_source is not None else source_wallet(core,p,public_preview=True)
     if local_source is not None:
         raw=rpc(core,'listdescriptors',[False],name);info=rpc(core,'getwalletinfo',[],name)
         if info.get('private_keys_enabled') or p['source_has_private_keys'] or info.get('scanning') or not descriptors(p['public_wallet'])<=descriptors(raw):raise ValueError('Local historical source differs from the reviewed public addresses.')
@@ -194,7 +196,7 @@ class Transfer:
             proof={'fingerprint':fingerprint(preview['public_key']),'preview_hash':digest(preview['preview'])}
             self.details={k:preview['preview'][k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels') if k in preview['preview']}
         from sync_queue import rows
-        return {'rows':rows(self.store),'batch':self.store.read().get('sync_batch'),'route':route_info(row['proposal']['peer']['ipv6']) if row else None,'initial_preview':preview,'preview_proof':proof,'preview_error':self.store.read().get('preview_errors',{}).get(key,''),'id':key,'proposal':row['proposal'] if row else None,'state':row['state'] if row else None,'ready':bool(self.listener),'sending':getattr(self,'sending',False),'firewall':self.firewall,'details':self.details,'error':self.error,'success_until':self.success_until,'setup':readiness(row['proposal']) if row else None,'chain_sync':self.store.read().get('chain_sync',{})}
+        return {'rows':rows(self.store),'batch':self.store.read().get('sync_batch'),'route':route_info(row['proposal']['peer']['ipv6']) if row else None,'initial_preview':preview,'preview_proof':proof,'preview_error':self.store.read().get('preview_errors',{}).get(key,''),'id':key,'proposal':row['proposal'] if row else None,'state':row['state'] if row else None,'ready':bool(self.listener),'sending':getattr(self,'sending',False),'firewall':self.firewall,'details':self.details,'error':self.error,'success_until':self.success_until,'setup':readiness(row['proposal']) if row else None,'chain_sync':self.store.read().get('chain_sync',{}),'original_assignments':[{'wallet_name':b['wallet_name'],'binding_id':b['binding_id'],'had_private':b['had_private']} for _,b in __import__('signer_restoration').candidates(self.store.read(),row['proposal']['public_wallet'])] if row and __import__('signer_restoration').requested(row['proposal']) else []}
     def review(self,key):
         with self.store.edit() as s:
             if key not in s['pending'] or s['pending'][key].get('withdrawn') or s['pending'][key]['proposal']['kind']!='wallet_transfer':raise ValueError('Wallet request was withdrawn.')
@@ -204,7 +206,7 @@ class Transfer:
         if row['state']!='pending':return self.state()
         p=row['proposal']
         from managed_accounts import guard
-        guard(self.core,p,self.store)
+        guard(self.core,p,self.store,public_preview=True)
         if p['direction']=='send':
             if p.get('preview_challenge'):
                 from wallet_preview import prepare
@@ -217,7 +219,7 @@ class Transfer:
             current,row=active(self.store)
             if key!=current or not row or row['proposal']['direction']!='receive':raise ValueError('Review the active receiving request.')
             from managed_accounts import guard
-            guard(self.core,row['proposal'],self.store)
+            guard(self.core,row['proposal'],self.store,public_preview=True)
             from wallet_preview import verify_bound
             payload=self.store.read().get('transfer_previews',{}).get(key)
             if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('The initial node-verified wallet preview is missing. Dashboard Build 8 needs the documented preview protocol update; receiving is disabled until then.')
@@ -277,7 +279,7 @@ class Transfer:
                 key,row=matches[0];p=row['proposal']
                 with self.store.edit() as state:state['active_transfer']=key
             from managed_accounts import guard
-            guard(self.core,p,self.store)
+            guard(self.core,p,self.store,public_preview=True)
             if header.get('operation')!='manifest' or header.get('transfer_id')!=p['transfer_id'] or ipv6(header.get('peer_ipv6'))!=ipv6(p['peer']['ipv6']):raise ValueError('Transfer or authenticated SSH source address differs from the approved request.')
             details=header.get('details');wanted=descriptors(p['public_wallet'])
             if not isinstance(details,dict) or descriptors(details.get('public_wallet'))!=wanted or details.get('chain')!=rpc(self.core,'getblockchaininfo')['chain']:raise ValueError('Direct peer public wallet does not match the approved descriptors/network.')
@@ -291,7 +293,11 @@ class Transfer:
             watch=not p['source_has_private_keys'] or option.get('watch_only',False) or header.get('watch_only',False)
             if type(header.get('watch_only',False)) is not bool:raise ValueError('Invalid watch-only choice.')
             if p.get('transfer_version')!=2 and watch:raise ValueError('Watch-only transfer requires the Build 8 direct protocol on both Agents.')
-            ready={'status':'ready','features':['chain_sync_v1','core_history_v1']}
+            from signer_restoration import requested,offer,verify_received,finish as finish_restoration,candidates
+            if candidates(self.store.read(),p['public_wallet']) and not requested(p):raise ValueError('This wallet needs a Build 65 restoration invitation and signed restoration preview.')
+            restoration_offer=offer(self.store,p,watch)
+            ready={'status':'ready','features':['chain_sync_v1','core_history_v1','restore_roles_v1']}
+            if restoration_offer:ready['restoration']=restoration_offer
             if p.get('transfer_version')==2:ready['watch_only']=watch
             frame_write(stream,ready)
             header=frame_read(stream)
@@ -302,7 +308,9 @@ class Transfer:
                 header=frame_read(stream)
             from local_extinction import restoration,restored_from_ssh
             if restoration(self.store,p['public_wallet']) and not native_peer:raise ValueError('Restoring an extinct wallet requires direct SSH synchronisation with a Build 64 sending Agent.')
-            if watch:
+            if requested(p) and not native_peer:raise ValueError('Original signer restoration requires Core-validated direct SSH catch-up.')
+            watch_snapshot=bool(restoration_offer and watch and header.get('operation')=='watch_snapshot')
+            if watch and not watch_snapshot:
                 if header.get('operation')!='public_wallet' or set(header) not in ({'operation'},{'operation','core_history'}):raise ValueError('Watch-only transfer cannot contain a wallet file.')
                 from wallet_recovery import verify_history
                 from extinct_sync import import_watch
@@ -329,24 +337,38 @@ class Transfer:
                 verify_history(self.core,name,details,self.store)
                 actual=descriptors(rpc(self.core,'listdescriptors',[False],name))
                 with self.store.edit() as state:state.get('history_jobs',{}).pop(key,None)
-                restored_from_ssh(self.core,self.store,p['public_wallet'],name,validated_ssh=native_peer)
+                if restoration_offer:finish_restoration(self.core,self.store,p,name,restoration_offer['bindings'][0]['binding_id'],restoration_offer)
+                else:restored_from_ssh(self.core,self.store,p['public_wallet'],name,validated_ssh=native_peer)
                 self.complete(key);frame_write(stream,{'status':'loaded','transfer_id':p['transfer_id'],'wallet_identity':digest(sorted(actual))});frame_read(stream)
                 if native_peer:
                     from chain_sync import finish
                     finish(self.core,self.store)
                 return
-            if set(header)!={'size','sha256'} or type(header['size']) is not int or not 0<header['size']<=MAX_FILE or not re.fullmatch('[0-9a-f]{64}',header['sha256']):raise ValueError('Invalid encrypted wallet file header.')
+            expected_header={'operation','size','sha256','restoration'} if watch_snapshot else {'size','sha256','restoration'} if restoration_offer else {'size','sha256'}
+            if set(header)!=expected_header or type(header['size']) is not int or not 0<header['size']<=MAX_FILE or not re.fullmatch('[0-9a-f]{64}',header['sha256']):raise ValueError('Invalid encrypted wallet file header.')
             # Never overwrite a wallet, even if the server chose an existing name.
             for name in rpc(self.core,'listwallets'):
-                try:
-                    if descriptors(rpc(self.core,'listdescriptors',[False],name)) & wanted:raise FileExistsError('This wallet is already present locally.')
-                except ValueError:continue
+                local=rpc(self.core,'listdescriptors',[False],name)
+                if not local.get('descriptors'):continue
+                if descriptors(local) & wanted:
+                    if restoration_offer and not watch_snapshot:
+                        from signer_restoration import capture
+                        existing=capture(self.core,[name])[0]['private_key_ids']
+                        if existing and all(existing!=b['private_key_ids'] for b in restoration_offer['bindings']):continue
+                    raise FileExistsError('This wallet is already present locally.')
             root=work_dir(self.core);fd,filename=tempfile.mkstemp(prefix='receive-',dir=root);path=Path(filename);hasher=hashlib.sha256();remaining=header['size']
             with os.fdopen(fd,'wb') as out:
                 while remaining:
                     chunk=read_exact(stream,min(65536,remaining));out.write(chunk);hasher.update(chunk);remaining-=len(chunk)
                 out.flush();os.fsync(out.fileno())
             if hasher.hexdigest()!=header['sha256']:raise ValueError('Wallet file integrity check failed.')
+            if watch_snapshot:
+                from signer_restoration import backup_keys
+                from watch_snapshot import verify as verify_watch_snapshot
+                verify_watch_snapshot(path)
+                if backup_keys(path)['private_key_ids'] or header['restoration']!={'permit_hash':digest(restoration_offer),'binding_id':restoration_offer['bindings'][0]['binding_id']}:raise ValueError('Watch-only restoration contains private keys or differs from the local SSH permit.')
+                restored_binding=restoration_offer['bindings'][0]['binding_id']
+            else:restored_binding=verify_received(p,restoration_offer,path,header['restoration']) if restoration_offer else None
             with self.store.edit() as s:s['pending'][key]['state']='attempted'
             name='Wallaby Sync '+p['transfer_id'][:24]
             from wallet_recovery import history_missing,earliest,require
@@ -360,7 +382,7 @@ class Transfer:
             if any(w['name']==name for w in rpc(self.core,'listwalletdir')['wallets']):raise ValueError('A previous restoration exists. Inspect it in Core; it will not be overwritten.')
             rpc(self.core,'restorewallet',{'wallet_name':name,'backup_file':__import__('core_ram_path').for_core(self.core,path),'load_on_startup':True},timeout=600)
             info=rpc(self.core,'getwalletinfo',[],name);actual=descriptors(rpc(self.core,'listdescriptors',[False],name))
-            if actual!=wanted or info.get('private_keys_enabled')!=p['source_has_private_keys'] or (info.get('private_keys_enabled') and ('unlocked_until' not in info or info['unlocked_until']!=0)) or info.get('scanning'):
+            if actual!=wanted or info.get('private_keys_enabled')!=(False if watch_snapshot else p['source_has_private_keys']) or (info.get('private_keys_enabled') and ('unlocked_until' not in info or info['unlocked_until']!=0)) or info.get('scanning'):
                 rpc(self.core,'unloadwallet',{'wallet_name':name,'load_on_startup':False});raise ValueError('Restored wallet failed descriptor, encryption or scan verification; unloaded. Inspect it in Core before retrying.')
             if p.get('transfer_version')==2:
                 from wallet_labels import apply_labels
@@ -372,7 +394,8 @@ class Transfer:
                 if not coin or str(__import__('wallet_ops').sats(coin['value']))!=output['amount_sats'] or coin['scriptPubKey'].get('address')!=output['address']:
                     raise ValueError('A funded output is missing or changed on the receiving node. Check blockchain synchronisation and wallet history before retrying; success was not recorded.')
                 rpc(self.core,'gettransaction',[output['txid'],True],name)
-            restored_from_ssh(self.core,self.store,p['public_wallet'],name,validated_ssh=native_peer)
+            if restoration_offer:finish_restoration(self.core,self.store,p,name,restored_binding,restoration_offer)
+            else:restored_from_ssh(self.core,self.store,p['public_wallet'],name,validated_ssh=native_peer)
             self.complete(key);frame_write(stream,{'status':'loaded','transfer_id':p['transfer_id'],'wallet_identity':digest(sorted(actual))})
             # Sender explicitly confirms learning the receiver loaded successfully.
             frame_read(stream)
@@ -409,7 +432,7 @@ class Transfer:
             self.details=details
             choice=self.store.read().get('sync_batch',{}).get('options',{}).get(key,{})
             watch=not p['source_has_private_keys'] or choice.get('watch_only',False)
-            name=None if watch else source_wallet(self.core,p)
+            name=None if watch else source_wallet(self.core,p,public_preview=True)
             with tempfile.TemporaryDirectory(prefix='send-',dir=work_dir(self.core)) as d:
                 root=Path(d);backup=root/'wallet.dat';known=root/'known_hosts';ask=self.store.root/('askpass-'+secrets.token_hex(6)+'.sock');process=None;auth=None;errors=bytearray()
                 try:
@@ -452,6 +475,11 @@ class Transfer:
                         if reply.get('status')!='review_required':raise ValueError('Receiver did not accept this paired request. Authorise on the receiving Agent first.')
                         reply=frame_read(process.stdout)
                         if reply.get('status')!='ready':raise ValueError('Receiver did not approve the direct wallet history.')
+                        from signer_restoration import requested,validate_offer,permit_backup
+                        restoration_offer=None
+                        if requested(p):
+                            if 'restore_roles_v1' not in reply.get('features',[]):raise ValueError('The receiver needs Build 65 original-role restoration support. No wallet file was created or sent.')
+                            restoration_offer=validate_offer(p,reply.get('restoration'),reply.get('watch_only',False))
                         native_peer='chain_sync_v1' in reply.get('features',[])
                         native_history='core_history_v1' in reply.get('features',[])
                         if native_peer:
@@ -459,6 +487,18 @@ class Transfer:
                             send_chain(self.core,process.stdin,lambda _:frame_read(process.stdout),frame_write)
                         effective_watch=reply.get('watch_only',False)
                         if type(effective_watch) is not bool or watch and not effective_watch:raise ValueError('Receiver did not honour watch-only mode. No private wallet file was created or sent.')
+                        if effective_watch and restoration_offer:
+                            from watch_snapshot import create
+                            name=source_wallet(self.core,p,public_preview=True);create(self.core,name,backup);size=backup.stat().st_size
+                            if not 0<size<=MAX_FILE:raise ValueError('Public recovery snapshot exceeds the transfer limit.')
+                            checksum=hashlib.sha256(backup.read_bytes()).hexdigest()
+                            header={'operation':'watch_snapshot','size':size,'sha256':checksum,'restoration':{'permit_hash':digest(restoration_offer),'binding_id':restoration_offer['bindings'][0]['binding_id']}}
+                            with self.store.edit() as saved:saved['pending'][key]['state']='attempted'
+                            frame_write(process.stdin,header)
+                            with backup.open('rb') as f:shutil.copyfileobj(f,process.stdin,65536)
+                            process.stdin.flush();answer=frame_read(process.stdout)
+                            if answer.get('status')!='loaded' or answer.get('transfer_id')!=p['transfer_id'] or answer.get('wallet_identity')!=digest(sorted(descriptors(p['public_wallet']))):raise ValueError('Receiver did not verify its complete watch-only restoration snapshot.')
+                            frame_write(process.stdin,{'status':'confirmed'});self.complete(key);return {'ok':True}
                         if effective_watch:
                             with self.store.edit() as state:state['pending'][key]['state']='attempted'
                             if native_history and __import__('extinct_sync').grouped(p['public_wallet']):
@@ -483,14 +523,16 @@ class Transfer:
                             if reply.get('status')!='loaded' or reply.get('transfer_id')!=p['transfer_id'] or reply.get('wallet_identity')!=digest(sorted(descriptors(p['public_wallet']))):raise ValueError('Receiver did not confirm a matching watch wallet.')
                             frame_write(process.stdin,{'status':'confirmed'});self.complete(key);return {'ok':True}
                         # Revalidate the source immediately before making a consistent Core backup.
-                        source_wallet(self.core,p,require_encrypted=True);rpc(self.core,'backupwallet',[__import__('core_ram_path').for_core(self.core,backup)],name)
+                        source_wallet(self.core,p,require_encrypted=True,restoration_permit=restoration_offer);rpc(self.core,'backupwallet',[__import__('core_ram_path').for_core(self.core,backup)],name)
                         size=backup.stat().st_size
                         if not 0<size<=MAX_FILE:raise ValueError('Wallet backup exceeds the 256 MiB transfer limit.')
                         h=hashlib.sha256()
                         with backup.open('rb') as f:
                             for chunk in iter(lambda:f.read(65536),b''):h.update(chunk)
+                        header={'size':size,'sha256':h.hexdigest()}
+                        if restoration_offer:header['restoration']=permit_backup(p,restoration_offer,backup)
                         with self.store.edit() as s:s['pending'][key]['state']='attempted'
-                        frame_write(process.stdin,{'size':size,'sha256':h.hexdigest()})
+                        frame_write(process.stdin,header)
                         with backup.open('rb') as f:shutil.copyfileobj(f,process.stdin,65536)
                         process.stdin.flush();reply=frame_read(process.stdout)
                         if reply.get('status')=='recovery_required' and reply.get('transfer_id')==p['transfer_id']:

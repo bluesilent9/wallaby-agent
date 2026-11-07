@@ -51,7 +51,7 @@ def proposal(p):
         return p
     if kind=='node_identity' and set(p)=={'kind'}:return p
     if kind=='wallet_transfer':
-        if not {'kind','direction','transfer_id','peer','public_wallet','source_has_private_keys','earliest_timestamp','requires_blockchain_redownload'}<=set(p)<={'kind','direction','transfer_id','peer','public_wallet','source_has_private_keys','earliest_timestamp','requires_blockchain_redownload','preview_challenge','node_ipv6','transfer_version'}:raise ValueError('Invalid paired transfer request.')
+        if not {'kind','direction','transfer_id','peer','public_wallet','source_has_private_keys','earliest_timestamp','requires_blockchain_redownload'}<=set(p)<={'kind','direction','transfer_id','peer','public_wallet','source_has_private_keys','earliest_timestamp','requires_blockchain_redownload','preview_challenge','node_ipv6','transfer_version','restoration'}:raise ValueError('Invalid paired transfer request.')
         if p['direction'] not in ('send','receive') or not re.fullmatch('[0-9a-f]{64}',p['transfer_id']):raise ValueError('Invalid transfer identity.')
         if ('preview_challenge' in p)!=('node_ipv6' in p):raise ValueError('Both preview negotiation fields are required.')
         if 'preview_challenge' in p:
@@ -61,6 +61,8 @@ def proposal(p):
         peer=p['peer']
         if not isinstance(peer,dict) or set(peer)!={'node_id','hostname','ipv6'}:raise ValueError('Invalid peer identity.')
         text(peer['node_id']);text(peer['hostname']);ipv6(peer['ipv6']);descriptors(p['public_wallet'])
+        from signer_restoration import requested
+        requested(p)
         from wallet_labels import fixed_address
         if any(fixed_address(row['desc']) for row in p['public_wallet']['descriptors']) and p['source_has_private_keys']:raise ValueError('Fixed-address records require a private-key-disabled watch wallet.')
         if type(p['source_has_private_keys']) is not bool or type(p['requires_blockchain_redownload']) is not bool or type(p['earliest_timestamp']) is not int or not 0<=p['earliest_timestamp']<=4102444800:raise ValueError('Invalid transfer history.')

@@ -2,9 +2,11 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** Private keys and passphrases are never sent to the Dashboard. Policy installation and refresh temporarily handle private descriptors inside the protected local worker; signing unlocks the selected Core wallet. Those protections do not remove the risk of a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 64
+# Wallaby Agent V2 — Development Build 65
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
+
+Build 65 restores each original managed signer independently through a fresh locally approved direct SSH transfer. It verifies actual private-key ownership, retains every historical vault policy, supports safe watch-only history snapshots and keeps ordinary signer cloning blocked. Extinction and restoration never require every signer or a quorum. Requires matching Dashboard Build 90 restoration invitations. [Role checks, compatibility and tests](AGENT_BUILD65_ORIGINAL_SIGNER_RESTORATION.md).
 
 Build 64 preserves complete Core-native Extinct transaction history, retains exact LOST labels, catches receiving Core nodes up over authorised direct SSH with Internet peers paused, and gates historical imports on completed local extinction. Verified SSH restoration clears the local extinct state; persistent extinction/restoration Deny entries are separate from temporary Cancel and ordinary wallet sync. Immediate Dashboard extinction and its Restore button require Dashboard Build 90. [Protocol, safeguards and limits](AGENT_BUILD64_HISTORY_AND_SSH.md).
 

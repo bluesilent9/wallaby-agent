@@ -25,11 +25,19 @@ def validate(data):
     retired=data.get('retirements',{})
     if not isinstance(retired,dict) or len(retired)>128:raise ValueError('Too many local extinction decisions.')
     for key,row in retired.items():
-        if not HEX.fullmatch(str(key)) or not isinstance(row,dict) or set(row)!={'policy_id','address_ids','wallet_names','request_hash','operation_id','state'} or row['policy_id']!=key or row['state'] not in ('prepared','complete','restored'):raise ValueError('Invalid local extinction decision.')
+        if not HEX.fullmatch(str(key)) or not isinstance(row,dict) or not {'policy_id','address_ids','wallet_names','request_hash','operation_id','state'}<=set(row)<={'policy_id','address_ids','wallet_names','request_hash','operation_id','state','wallet_bindings'} or row['policy_id']!=key or row['state'] not in ('prepared','complete','restored'):raise ValueError('Invalid local extinction decision.')
         if any(not HEX.fullmatch(str(row[f])) for f in ('request_hash','operation_id')):raise ValueError('Invalid local extinction identity.')
         if not isinstance(row['address_ids'],list) or not 1<=len(row['address_ids'])<=10000 or len(set(row['address_ids']))!=len(row['address_ids']) or any(not isinstance(a,str) or not HEX.fullmatch(a) for a in row['address_ids']):raise ValueError('Invalid retired address identities.')
         if not isinstance(row['wallet_names'],list) or len(row['wallet_names'])>128:raise ValueError('Invalid retired wallet names.')
         for name in row['wallet_names']:label(name)
+        bindings=row.get('wallet_bindings',[])
+        if not isinstance(bindings,list) or len(bindings)>128:raise ValueError('Invalid original wallet bindings.')
+        for binding in bindings:
+            if not isinstance(binding,dict) or set(binding)!={'policy_id','binding_id','wallet_name','private_key_ids','had_private','restored'} or any(not isinstance(binding[k],str) or not HEX.fullmatch(binding[k]) for k in ('policy_id','binding_id')) or type(binding['had_private']) is not bool or type(binding['restored']) is not bool:raise ValueError('Invalid original signer binding.')
+            label(binding['wallet_name']);ids=binding['private_key_ids']
+            if not isinstance(ids,list) or len(ids)>4096 or any(not isinstance(i,str) or not HEX.fullmatch(i) for i in ids) or len(ids)!=len(set(ids)) or binding['had_private']!=bool(ids):raise ValueError('Invalid original private-role identities.')
+            from approval_store import digest
+            if binding['binding_id']!=digest({k:v for k,v in binding.items() if k not in ('binding_id','restored')}):raise ValueError('Original signer binding hash changed.')
     denied=data.get('request_denials',{})
     if not isinstance(denied,dict) or len(denied)>128:raise ValueError('Too many lifecycle denials.')
     for key,row in denied.items():

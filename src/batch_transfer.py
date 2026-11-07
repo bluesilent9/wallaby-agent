@@ -24,11 +24,14 @@ class BatchTransfer(Transfer):
             if not row or row.get('withdrawn') or row['state']!='pending' or row['proposal']['direction']!=direction:raise ValueError('Selected requests changed. Review them again.')
             p=row['proposal']
             from managed_accounts import guard
-            guard(self.core,p,self.store)
+            guard(self.core,p,self.store,public_preview=True)
             if p.get('transfer_version')!=2:raise ValueError('Multiple and watch-only transfers require the documented Build 8 queue/transfer protocol from Dashboard.')
             payload=saved.get('transfer_previews',{}).get(key)
             if not payload:raise ValueError('Each selected wallet needs its signed initial public preview before authorisation.')
             verify_bound(self.store,payload,p)
+            if direction=='receive' and __import__('signer_restoration').requested(p):
+                option=saved.get('sync_choices',{}).get(key,{})
+                __import__('signer_restoration').offer(self.store,p,not p['source_has_private_keys'] or option.get('watch_only',False))
     def authorise_batch(self,fingerprints):
         keys=selected(self.store,'receive');self.validate_batch(keys,'receive')
         saved=self.store.read()

@@ -5,9 +5,12 @@ from build8_policy import descriptors
 from wallet_labels import address_only
 
 
-def prepare(store,p,names):
+def prepare(store,p,names,core=None):
     ident=digest(sorted(descriptors(p['public_wallet'])))
     row={'policy_id':ident,'address_ids':sorted(digest({'address':r['address']}) for r in p['manifest']['addresses']),'wallet_names':sorted(names),'request_hash':digest(p),'operation_id':p['operation_id'],'state':'prepared'}
+    if core is not None:
+        from signer_restoration import capture
+        row['wallet_bindings']=capture(core,names)
     with store.edit() as saved:saved.setdefault('local_retirements',{})[ident]=row
     return ident
 
@@ -39,7 +42,11 @@ def restoration(store,raw):
     """A local fact, never a Dashboard flag or permission to regenerate keys."""
     if address_only(raw):return None
     ident=digest(sorted(descriptors(raw)))
-    row=store.read().get('local_retirements',{}).get(ident)
+    state=store.read()
+    from signer_restoration import candidates
+    bound=candidates(state,raw)
+    if bound:return bound[0][0]
+    row=state.get('local_retirements',{}).get(ident)
     return ident if row and row['state'] in ('prepared','complete') else None
 
 

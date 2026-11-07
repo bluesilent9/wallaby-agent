@@ -249,7 +249,12 @@ def approve(owner,key,fingerprint_value=None,history_elsewhere_confirmed=False):
                 if fresh[f]!=facts[f]:raise ValueError('Local wallet changed before deletion. No deletion authorised.')
             if owner.store.read().get('retirement_cancel_pending',{}).get(key):return owner._cancel_result(key)
             from local_extinction import prepare as prepare_local,complete as complete_local
-            local_id=prepare_local(owner.store,p,fresh['local_wallets'])
+            local_id=prepare_local(owner.store,p,fresh['local_wallets'],core=owner.core)
+            if owner.store.read().get('retirement_cancel_pending',{}).get(key):return owner._cancel_result(key)
+            current=review(owner.core,owner.store,p)
+            for field in ('addresses','transaction_records','deletion','local_wallets','retained_signers','local_extinct_wallets','history_elsewhere_confirmation_required'):
+                if current[field]!=fresh[field]:raise ValueError('Local wallet changed while its original signer assignment was recorded. No deletion authorised.')
+            if owner.store.read().get('retirement_cancel_pending',{}).get(key):return owner._cancel_result(key)
             for item in fresh['deletion']:rpc(owner.core,'unloadwallet',{'wallet_name':item['wallet'],'load_on_startup':False})
             if set(fresh['local_wallets'])&set(rpc(owner.core,'listwallets')):raise ValueError('Not every approved wallet unloaded; deletion blocked.')
             from wallet_deletion import delete

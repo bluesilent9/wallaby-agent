@@ -6,8 +6,9 @@ from build8_policy import descriptors
 def intent(state,p):
     if p.get('kind')=='wallet_retire':purpose='extinction'
     elif p.get('kind')=='wallet_transfer' and p.get('direction')=='receive':
+        from signer_restoration import requested,candidates
         row=state.get('local_retirements',{}).get(digest(sorted(descriptors(p['public_wallet']))))
-        if not row or row['state'] not in ('prepared','complete'):return None
+        if not requested(p) and not candidates(state,p['public_wallet']) and (not row or row['state'] not in ('prepared','complete')):return None
         purpose='restoration'
     else:return None
     return purpose,digest({'purpose':purpose,'policy':sorted(descriptors(p['public_wallet']))})
