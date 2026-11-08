@@ -36,7 +36,8 @@ class Exchange:
         from cancellation import held_item,blocked
         ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1 if pair[1]['kind'] in ('partial_sign_result','broadcast_result') else 2)
         items=[{'id':key,**row} for key,row in ordered if not held_item(state,row)][:8]
-        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','automatic_broadcast_v1','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_policy_refresh_batch_v1','wallet_policy_refresh_cancel_v1','wallet_rename_v1','wallet_relay_v1','wallet_policy_refresh_relay_v1']}
+        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','automatic_broadcast_v1','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_policy_refresh_batch_v1','wallet_policy_refresh_cancel_v1','wallet_rename_v1']}
+        if getattr(self.store,'peers',None):body['capabilities']+=['wallet_relay_v1','wallet_policy_refresh_relay_v1']
         from mobile_verification import legacy_facts_available
         if legacy_facts_available():body['capabilities'].append('wallet_mobile_verification_v1')
         if time.monotonic()-getattr(self,'address_checked',-60)>=30:

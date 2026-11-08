@@ -3,8 +3,9 @@
 The protected worker's filesystem remains read-only. This same-UID helper can
 write only its fixed private state directory and accepts a bounded exact schema.
 """
-import copy,os,stat
+import copy,os,stat,sys
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 from denial_storage import FileStore as BaseFile,Client as BaseClient,Server
 from peer_protocol import binary,hexid,participant
 

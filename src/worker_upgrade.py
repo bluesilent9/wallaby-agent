@@ -2,7 +2,7 @@
 import json,os,secrets,socket,struct,time
 from protected_memory import root,enforce
 
-VERSION='2.0.0~dev67'
+VERSION='2.0.0~dev68'
 PROTOCOL=1
 REQUEST='upgrade-request.json'
 RESULT='upgrade-result.json'
@@ -34,6 +34,8 @@ def private_idle(state):
 
 def inspect_request():
     """Run in a viewer child of the old service, before creating any Qt window."""
+    from legacy_startup_recovery import inspect_request as recover_legacy
+    if recover_legacy():return True
     path=root()/REQUEST
     if not path.exists():return False
     enforce()

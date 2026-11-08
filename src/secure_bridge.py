@@ -125,7 +125,7 @@ def compatible(state):
             prepare_stop(peer)
             _stop_service()
             fresh=_ensure_running()
-            if not current(fresh):raise WorkspaceFailure('upgrade_version','The restarted worker is still an older build. Reinstall Build 21 before reconnecting.')
+            if not current(fresh):raise WorkspaceFailure('upgrade_version','The restarted worker is still an older build. Reinstall the current Agent package before reconnecting.')
             return fresh
         finally:flag.unlink(missing_ok=True)
 

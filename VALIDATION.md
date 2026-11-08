@@ -1,3 +1,7 @@
+# Build 68 validation
+
+See AGENT_BUILD68_STARTUP_RECOVERY.md and the accompanying Build 68 test log for startup, guarded recovery, direct SSH/Core and browser checks. Fixtures use isolated data directories; no live user wallet or service is touched.
+
 # Build 67 validation
 
 Real restricted Paramiko SSH + fresh inner Noise, simultaneous renewal/cutover, one reachable orientation, hard expiry, persistent direct deletion without QR/key loss, Agent-server/Mobile-client roles, local QR-image decoding and actual Wallet Server Build 3 dispatcher integration are tested in `tests/test_build67.py`. Real Core 31 isolated regtest transfers cover private single-signature wallets, original multisig vault signer restoration and watch-only vault history. Bulk frame IDs are absent from relay traffic; relay bulk receipt is refused. Existing pairing/replay/role/downgrade, extinction/LOST/original-role and disc/transaction UI regressions are retained. See AGENT_BUILD67_DIRECT_PEERS.md for precise limits and Mobile protocol.

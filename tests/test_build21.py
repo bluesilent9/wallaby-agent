@@ -36,7 +36,7 @@ class NativeWire(unittest.TestCase):
   # Exercise the exact QMainWindow closeEvent body without requiring Qt/display.
   source=ast.parse((Path(__file__).resolve().parents[1]/'src/protected_viewer.py').read_text());cls=next(n for n in ast.walk(source) if isinstance(n,ast.ClassDef) and n.name=='Window');method=next(n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name=='closeEvent');module=ast.fix_missing_locations(ast.Module(body=[method],type_ignores=[]))
   with patch.object(protected_viewer,'QMessageBox',Mock(),create=True):
-   exec(compile(module,'native-close-event','exec'),protected_viewer.__dict__);event=Mock();protected_viewer.closeEvent(None,event);event.accept.assert_called_once();event.ignore.assert_not_called();self.assertTrue(self.worker.closing)
+   exec(compile(module,'native-close-event','exec'),protected_viewer.__dict__);event=Mock();protected_viewer.closeEvent(Mock(),event);event.accept.assert_called_once();event.ignore.assert_not_called();self.assertTrue(self.worker.closing)
  def test_native_x_keeps_window_open_for_active_work_or_queued_delivery(self):
   for busy,outbox in [(True,{}),(False,{'signed':{'kind':'partial_sign_result','payload':{'status':'signed'}}})]:
    self.worker.busy.return_value=busy;self.worker.store.read.return_value={'outbox':outbox};self.worker.closing=False

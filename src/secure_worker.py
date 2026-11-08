@@ -36,7 +36,7 @@ def delivery_pending(state):
 class Workspace:
     def __init__(self):
         from node_recovery import Recovery
-        self.recovery=Recovery();self.node_epoch=0
+        self.recovery=Recovery();self.node_epoch=0;self.peer_start_lock=threading.Lock()
         self.store=Store(root()/ 'state');self.store.identity_root=Config().root
         # Never replay the legacy non-volatile approvals.json into a new workspace.
         # Only the schema-limited denial store survives workspace shutdown.
@@ -54,13 +54,6 @@ class Workspace:
             if self.ops and (self.busy() or self.archives and (self.archives.loaded or self.archives.staged)):raise ValueError('Finish protected wallet work before changing the Core connection.')
             if self.node_stop:self.node_stop.set()
             if self.transfer:self.transfer.close()
-            if not getattr(self,'peers',None):
-                from peer_channels import Peers
-                self.peers=Peers(self.store)
-                from relay_stream import Bridge
-                self.peers.wallet_bridge=Bridge(self.peers,self.store)
-                from direct_peers import Direct
-                Direct(self.peers).start()
             self.ops=WalletOps(Core(c),self.store);self.ops.core.managed_store=self.store
             from automatic_broadcast import Broadcasts
             self.broadcasts=Broadcasts(self.ops.core,self.store,lambda:not getattr(self,'closing',False) and not self.recovery_state().get('active'))
@@ -90,10 +83,45 @@ class Workspace:
             agent_exchange.LOCAL_RETIREMENT=self.retirement
             agent_exchange.LOCAL_ARCHIVES=self.archive_ops
             agent_exchange.LOCAL_BROADCASTS=self.broadcasts
+        self.start_peer_support()
         self.setup.environment=self.environment
         if getattr(self,'archives',None):self.archives.environment=self.environment
         if getattr(self,'refresh_ops',None):self.refresh_ops.environment=self.environment
         if self.cancellations:self.cancellations.environment=self.environment
+    def start_peer_support(self):
+        # Optional peer services must never hold node startup/status hostage.
+        with self.peer_start_lock:
+            if getattr(self,'peers',None) or getattr(self,'peer_starting',False) or time.monotonic()<getattr(self,'peer_retry_at',0) or self.closing:return
+            self.peer_starting=True;self.peer_retry_at=time.monotonic()+30
+        def initialise():
+            candidate=None
+            try:
+                from peer_channels import Peers
+                from relay_stream import Bridge
+                from direct_peers import Direct
+                candidate=Peers(self.store)
+                candidate.wallet_bridge=Bridge(candidate,self.store);direct=Direct(candidate)
+                with self.lock:
+                    if self.closing:
+                        candidate.close();self.store.peers=None;return
+                    self.peers=candidate;self.peer_error='';direct.start()
+            except Exception:
+                if candidate:
+                    try:candidate.close()
+                    except (ValueError,OSError):pass
+                if getattr(self.store,'peers',None) is candidate:self.store.peers=None
+                self.peer_error='Peer connections are unavailable. Check the local peer-trust service. Node access and local wallet work remain available; no peer trust was reset.'
+            finally:self.peer_starting=False
+        threading.Thread(target=initialise,daemon=True,name='optional-peer-support').start()
+    def peer_action(self,name,data):
+        self.start_peer_support()
+        if not getattr(self,'peers',None):
+            if name=='status' and not data:
+                identity=self.setup.own_identity()
+                return {'available':False,'identity':{'identity_key':identity['public_key']},'pairs':[],'pending':[],'registered':False,'error':getattr(self,'peer_error','Checking the local peer-trust service…')}
+            raise ValueError(getattr(self,'peer_error','Peer connections are starting. Wait for their local status before pairing or transferring.'))
+        from peer_actions import action
+        return action(self,name,data)
     def binary(self):
         for path in ('/usr/bin/bitcoind','/usr/local/bin/bitcoind','/opt/bitcoin/bin/bitcoind','/snap/bitcoin-core/current/bin/bitcoind','/snap/bitcoin-core/current/usr/bin/bitcoind'):
             if Path(path).is_file():
@@ -172,7 +200,7 @@ class Workspace:
         return result
     def service_status(self):
         if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
-        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if row['proposal']['kind']!='broadcast_transaction' and (not row.get('withdrawn') or row['proposal']['kind']=='wallet_rename' and row['state']=='attempted'));result={'recovery':self.recovery_state(),'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'worker_version':VERSION,'worker_protocol':PROTOCOL,'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or ((self.archives.loaded or self.archives.staged) and not getattr(self,'closing',False)) or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
+        saved=self.store.read();pending=sorted(k for k,row in saved['pending'].items() if row['proposal']['kind']!='broadcast_transaction' and (not row.get('withdrawn') or row['proposal']['kind']=='wallet_rename' and row['state']=='attempted'));result={'recovery':self.recovery_state(),'connected':self.node_status['color']=='green','pending':[],'denied':[],'transfer':{},'burn':{},'sync':'Protected Bitcoin workspace is active. Open its protected pages for wallet data.','outbox_count':0,'worker_version':VERSION,'worker_protocol':PROTOCOL,'peer_support':{'available':bool(getattr(self,'peers',None)),'starting':bool(getattr(self,'peer_starting',False))},'protected':{'running':True,'viewer':False},'has_approvals':bool(pending or any(v['phase']!='complete' for v in self.setup.sessions.values())),'busy':bool(self.busy() or ((self.archives.loaded or self.archives.staged) and not getattr(self,'closing',False)) or delivery_pending(saved)),'has_burn':bool(self.setup.burner.state().get('id')),'notice':digest(pending),'needs_sync':bool(self.transfer.state().get('rows') or self.transfer.state().get('recovery',{}).get('status') not in (None,'Synchronised')),'window_required':self.window_required,'viewer_open':any(process.poll() is None for process in self.viewers),'identity':self.setup.own_identity()}
         self._service_snapshot=dict(result);return result
     def recovery_state(self):
         return self.recovery.snapshot() if hasattr(self,'recovery') else {}
@@ -355,8 +383,7 @@ class Workspace:
         if method=='peers.action':
             if len(args)!=2 or not isinstance(args[0],str) or not isinstance(args[1],dict):raise ValueError('Invalid local peer control.')
             enforce();self.configure(environment)
-            from peer_actions import action
-            return action(self,*args)
+            return self.peer_action(*args)
         with self.lock:
             enforce();self.configure(environment)
             if getattr(self,'closing',False) and method not in ('ui.arm','ui.close'):raise ValueError('The protected workspace is closing. Reconnect the node before starting another operation.')

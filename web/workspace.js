@@ -38,7 +38,7 @@ function windowMode(w){
  $('#node-recovery-message').textContent=reconnecting?w.recovery.message+'. Reconnecting… '+w.recovery.remaining+' seconds remaining.':'';
  for(const name of ['services','authorise','synchronisation','burn','message','peers'])document.querySelector('[data-page="'+name+'"]').disabled=name==='services'?viewer:!viewer;
  $('#protected-processing').hidden=!viewer;
- $('#resume-older-workspace').hidden=viewer||!w?.protected?.running||w.worker_version==='2.0.0~dev38';
+ $('#resume-older-workspace').hidden=viewer||!w?.protected?.running||!w.upgrade_required;
  $('#page-services').hidden=viewer||page!=='services';
  if(viewer&&page==='services')showPage(initialPage==='services'?'authorise':initialPage);
 }

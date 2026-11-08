@@ -78,6 +78,8 @@ def workspace(server):
         try:
             snapshot=call('status' if inside() else 'service_status')
             if not inside():
+                from worker_upgrade import current
+                snapshot['upgrade_required']=not current(snapshot)
                 status=read_status('node');snapshot['legacy_close_recovery']=legacy_close_window(snapshot);snapshot['cleanup_recovery']=snapshot.get('viewer_open') is False and status.get('cleanup_failed') is True
                 snapshot['cleanup_pending']=snapshot.get('viewer_open') is False and status.get('lifecycle') is True and status.get('color')=='amber'
             return snapshot
@@ -117,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
             from activity_log import DiagnosticLog
             try:return self.reply(200,DiagnosticLog().text().encode('utf-8'),'text/plain; charset=utf-8')
             except (OSError,ValueError):return self.reply(500,{'error':'Diagnostic log storage is unavailable. Check its ownership and permissions.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev67'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev68'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
@@ -147,7 +149,8 @@ class Handler(BaseHTTPRequestHandler):
                 from node_lifecycle import closing
                 if closing() or (runtime_dir()/'worker-upgrading').exists():raise ValueError('Protected workspace is being replaced or closed. Wait for cleanup to finish.')
                 from secure_bridge import call
-                return self.reply(200,call('ui.open',body['page']))
+                from viewer_recovery import resume
+                return self.reply(200,resume(body['page']))
             from protected_memory import required,inside
             if required() and not inside() and self.path.startswith(('/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/vault/')):raise ValueError('Open the protected Bitcoin workspace from Services. Wallet information never passes through the ordinary browser service.')
             if self.path=='/api/protected/recover' and not body:
@@ -321,7 +324,7 @@ class Server(IPv6HTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('::1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev67'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev68'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -341,7 +344,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev67':
+    if installed!='2.0.0~dev68':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -351,7 +354,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev67') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev68') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

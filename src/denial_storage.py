@@ -3,8 +3,9 @@
 The protected worker never gains a writable disk mount. A separate unprivileged
 service accepts this exact schema and writes only its fixed state directory.
 """
-import copy,fcntl,json,os,re,secrets,socket,socketserver,stat,struct,threading
+import copy,fcntl,json,os,re,secrets,socket,socketserver,stat,struct,threading,sys
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 
 LIMIT=2*1024*1024
 HEX=re.compile('[0-9a-f]{64}')
