@@ -56,11 +56,11 @@ def guard(core,p,store=None,actual_name=None,*,public_preview=False,restoration_
             validate_offer(p,restoration_permit,False);return
         raise LocalActionFailure('managed_signer_transfer','A direct SSH restoration permit is required before accessing this wallet for transfer.')
     if blocked(state,p) or actual_name is not None and KEY.fullmatch(actual_name):raise LocalActionFailure('managed_signer_transfer',REASON)
-    # Match public keys against persisted Core policies too. A Dashboard rename
+    # Match public keys against persisted Core policies too. A Wallet Server rename
     # cannot bypass the check, including after a protected RAM session restarts.
     wanted=descriptors(p['public_wallet'])
     # Combined private wallets must not become ordinary replica transfers. The
-    # Dashboard must coordinate their public policy separately, never clone roles.
+    # Wallet Server must coordinate their public policy separately, never clone roles.
     from wallet_setup_signing import restricted
     for name in (rpc(core,'listwallets') if isinstance(getattr(core,'config',None),dict) else []):
         local=rpc(core,'listdescriptors',[False],name)

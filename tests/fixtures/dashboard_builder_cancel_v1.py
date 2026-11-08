@@ -1,4 +1,4 @@
-"""Exact Dashboard Build20 receipt method snapshot; globals supplied by the test."""
+"""Exact Wallet Server Build20 receipt method snapshot; globals supplied by the test."""
 def receipt(self, node, payload):
     if not isinstance(payload, dict) or set(payload) != {'version', 'cancellation_id', 'request_hash', 'status'} or type(payload['version']) is not int or (payload['version'] != 1) or (payload['status'] != 'received'):
         raise ValueError('Invalid cancellation delivery receipt.')

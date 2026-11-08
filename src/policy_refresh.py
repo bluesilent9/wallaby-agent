@@ -27,7 +27,10 @@ def transition(value):
 
 def validate(p):
     from vault_policy import NETWORK,text
-    if not isinstance(p,dict) or not FIELDS<=set(p)<=FIELDS|{'receiving_address'} or p['kind']!='wallet_policy_refresh' or type(p['version']) is not int or p['version']!=1 or not re.fullmatch('[0-9a-f]{64}',str(p['request_id'])) or p['chain'] not in NETWORK or type(p['expires_at']) is not int or not time.time()<p['expires_at']<=time.time()+86400:raise ValueError('Invalid or expired public policy refresh.')
+    if not isinstance(p,dict) or not (FIELDS|({'peer_transport'} if p.get('version')==2 else set()))<=set(p)<=FIELDS|{'receiving_address'}|({'peer_transport'} if p.get('version')==2 else set()) or p['kind']!='wallet_policy_refresh' or type(p['version']) is not int or p['version'] not in (1,2) or not re.fullmatch('[0-9a-f]{64}',str(p['request_id'])) or p['chain'] not in NETWORK or type(p['expires_at']) is not int or not time.time()<p['expires_at']<=time.time()+86400:raise ValueError('Invalid or expired public policy refresh.')
+    if p['version']==2:
+        from peer_protocol import requirements
+        requirements(p['peer_transport'])
     text(p['wallet'],256);transition(p)
     if 'receiving_address' in p:
         target=p['receiving_address']
@@ -145,7 +148,7 @@ def verify_output_policies(ops,p,review):
         approved=bool(proof and row['descriptor'] in (proof['receive_descriptor'],proof['change_descriptor']))
         if not approved:
             # Public Core markers and locally reviewed archive histories survive a
-            # new volatile signing session; Dashboard labels cannot establish them.
+            # new volatile signing session; Wallet Server labels cannot establish them.
             import node_client
             router=node_client.LOCAL_ROUTER
             if router:

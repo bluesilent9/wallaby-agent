@@ -36,7 +36,7 @@ def local_details(core,p,store):
             ident=(row['txid'],row['vout']);old=outputs.get(ident)
             if old and old!=row:raise ValueError('Local Extinct output facts changed during review. Review again.')
             outputs[ident]=row
-    if covered!=wanted:raise ValueError('The local watch-only archives do not contain every requested Extinct address. No Dashboard assertion can fill missing data.')
+    if covered!=wanted:raise ValueError('The local watch-only archives do not contain every requested Extinct address. No Wallet Server assertion can fill missing data.')
     return {'public_wallet':{'wallet_name':ARCHIVE,'descriptors':[records[k] for k in sorted(records)]},'chain':chain,'funded_outputs':sorted(outputs.values(),key=lambda r:(r['txid'],r['vout'])),'address_labels':sorted(labels.values(),key=lambda r:r['address']),'vaults':[]}
 
 def children(details):

@@ -69,7 +69,7 @@ def inventory(core,store,p,collect_only=False,confirmed_manifest=None):
             else:local_wallets.append(signer)
         local_wallets=sorted(set(local_wallets)|set(monitors))
         requested={item['wallet']:item for item in p['delete_wallets']}
-        if not collect_only and set(requested)!=set(local_wallets):raise ValueError('The retirement target list differs from independently identified local copies, monitors or dedicated signing accounts. Refresh the Dashboard request; no wallet was deleted.')
+        if not collect_only and set(requested)!=set(local_wallets):raise ValueError('The retirement target list differs from independently identified local copies, monitors or dedicated signing accounts. Refresh the Wallet Server request; no wallet was deleted.')
         for candidate in local_wallets:
             local_info=rpc(core,'getwalletinfo',[],candidate)
             if not collect_only and (local_info.get('private_keys_enabled') is not requested[candidate]['private_keys_enabled'] or descriptors(rpc(core,'listdescriptors',[False],candidate))!=descriptors(requested[candidate]['public_wallet'])):raise ValueError('A retirement target policy or private-key status differs from local Core.')

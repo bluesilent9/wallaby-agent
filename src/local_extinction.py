@@ -39,7 +39,7 @@ def eligible(core,store,raw):
 
 
 def restoration(store,raw):
-    """A local fact, never a Dashboard flag or permission to regenerate keys."""
+    """A local fact, never a Wallet Server flag or permission to regenerate keys."""
     if address_only(raw):return None
     ident=digest(sorted(descriptors(raw)))
     state=store.read()
@@ -53,7 +53,7 @@ def restoration(store,raw):
 def restored_from_ssh(core,store,raw,wallet,*,validated_ssh=False):
     ident=restoration(store,raw)
     if not ident:return
-    if not validated_ssh:raise ValueError('Restore this extinct wallet through a Build 64 direct SSH synchronisation; a Dashboard request alone cannot restore it.')
+    if not validated_ssh:raise ValueError('Restore this extinct wallet through a Build 64 direct SSH synchronisation; a Wallet Server request alone cannot restore it.')
     actual=rpc(core,'listdescriptors',[False],wallet);info=rpc(core,'getwalletinfo',[],wallet);tip=rpc(core,'getblockchaininfo')
     if descriptors(actual)!=descriptors(raw) or info.get('scanning') or info.get('lastprocessedblock',{}).get('height',-1)<tip['blocks']:raise ValueError('The SSH-restored wallet has not passed its local policy and current-chain checks.')
     with store.edit() as saved:saved['local_retirements'][ident]['state']='restored'

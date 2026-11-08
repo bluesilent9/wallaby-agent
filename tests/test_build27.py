@@ -75,4 +75,4 @@ class QueueDiagnostics(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    store=Store(d)
    with patch('activity_log.event') as log:apply_snapshot(store,1,[])
-   self.assertIn('receiving=0',log.call_args.args[1]);self.assertIn('visible=0',log.call_args.args[1]);result=enable(store,'1'*64);self.assertIn('Waiting for the Dashboard',result['message']);self.assertFalse(store.read()['pending'])
+   self.assertIn('receiving=0',log.call_args.args[1]);self.assertIn('visible=0',log.call_args.args[1]);result=enable(store,'1'*64);self.assertIn('Waiting for the Wallet Server',result['message']);self.assertFalse(store.read()['pending'])

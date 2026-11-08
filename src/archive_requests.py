@@ -1,4 +1,4 @@
-"""Dashboard owns task lifetime; local approval, denials and physical evidence stay here."""
+"""Wallet Server owns task lifetime; local approval, denials and physical evidence stay here."""
 import copy,re
 from approval_store import digest
 from build8_policy import descriptors
@@ -73,4 +73,4 @@ def delete(store,key):
     with store.edit() as s:
         s['pending'].pop(key)
         s['completed'][key]={'kind':p['kind'],'at':__import__('time').time(),'result':receipt}
-    return {'message':'Archive request deleted. The signed deletion result is queued for the Dashboard. This does not report a successful burn or physical disc destruction.'}
+    return {'message':'Archive request deleted. The signed deletion result is queued for the Wallet Server. This does not report a successful burn or physical disc destruction.'}

@@ -35,7 +35,7 @@ class FakeCore(http.server.BaseHTTPRequestHandler):
   else:result='{"chain":"main","blocks":970000}'
   raw=('{"jsonrpc":"2.0","id":'+json.dumps(body['id'])+',"result":'+result+'}').encode();self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
 
-class DashboardIntegration(unittest.TestCase):
+class Wallet ServerIntegration(unittest.TestCase):
  def test_real_hub_registration_rpc_decimal_and_disconnect(self):
   with tempfile.TemporaryDirectory() as root:
    registry=NodeRegistry(Path(root)/'dashboard.cfg');hub=create_agent_server(registry,port=0,ipv6=True,ipv4=False);hub.start()

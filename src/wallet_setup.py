@@ -85,20 +85,24 @@ class WalletSetup:
         p=self.store.read()['pending'][key]['proposal'];proposal(p)
         if p['kind']=='wallet_setup':
             own=self.own_identity();roles=[{**r,'fingerprint':fingerprint(r['agent_key']),'local':r['agent_key']==own['public_key']} for r in p['cosigners']]
-            facts={'name':p['name'],'chain':p['chain'],'threshold':p['threshold'],'total':len(roles),'height':p['height'],'roles':roles,'proposal_hash':digest(p),'identity':own,'requires_disc':any(r['local'] and r['storage']=='disc' for r in roles),'no_bypass':True}
+            from peer_mesh import observe
+            mesh=observe(self.store,p,'proposal')
+            facts={'peer_mesh':mesh,'name':p['name'],'chain':p['chain'],'threshold':p['threshold'],'total':len(roles),'height':p['height'],'roles':roles,'proposal_hash':digest(p),'identity':own,'requires_disc':any(r['local'] and r['storage']=='disc' for r in roles),'no_bypass':True}
             return {'kind':'wallet_setup','id':key,'setup':facts,'unlock_estimates':self.unlock_estimates(facts)}
+        from peer_mesh import observe
+        mesh=observe(self.store,p,'policy')
         session=self.sessions.get(digest(p['proposal']))
         if not session:
             from activity_log import event
             event('setup.missing','Complete policy has no original RAM session · setup='+digest(p['proposal'])[:12]+' · live_setups='+str(len(self.sessions))+' · burn_jobs='+str(len(self.disc_sessions)))
-            raise LocalActionFailure('setup_session_missing','This policy request has no original setup in this protected workspace. Do not approve participation again to recreate its keys. Cancel this setup in Dashboard and reconcile any installed wallets locally before starting a fresh setup. Other approved archive jobs are unaffected.')
+            raise LocalActionFailure('setup_session_missing','This policy request has no original setup in this protected workspace. Do not approve participation again to recreate its keys. Cancel this setup in Wallet Server and reconcile any installed wallets locally before starting a fresh setup. Other approved archive jobs are unaffected.')
         messages=[];roles={r['id']:r for r in p['proposal']['cosigners']}
         for envelope in p['contributions']:
             ident=envelope.get('message',{}).get('cosigner_id')
             if ident not in roles:raise ValueError('Unknown cosigner contribution.')
             messages.append(verify(self.store,envelope,roles[ident]['agent_key']))
         descs=policy(p['proposal'],messages)
-        if descs!=[p['receive_descriptor'],p['change_descriptor']]:raise ValueError('Dashboard policy differs from the independently constructed threshold, keys, branches or mandatory height. There is no editable or alternative spending path.')
+        if descs!=[p['receive_descriptor'],p['change_descriptor']]:raise ValueError('Wallet Server policy differs from the independently constructed threshold, keys, branches or mandatory height. There is no editable or alternative spending path.')
         for own in session['contributions']:
             if own['message'] not in messages:raise ValueError('A locally generated contribution was replaced.')
         samples=[]
@@ -109,13 +113,16 @@ class WalletSetup:
                 local=Descriptor.from_string(desc).derive(index).script_pubkey().address(NETWORKS[p['proposal']['chain']]);node=rpc(self.core,'deriveaddresses',[desc,[index,index]])
                 if node!=[local]:raise ValueError('Independent address derivation differs from Core.')
                 samples.append({'branch':'Receive' if branch==0 else 'Change','index':index,'address':local})
-        facts={'proposal_hash':digest(p['proposal']),'policy_hash':digest({'proposal':p['proposal'],'receive_descriptor':descs[0],'change_descriptor':descs[1],'contributions':p['contributions']}),'receive_descriptor':descs[0],'change_descriptor':descs[1],'samples':samples,'threshold':p['proposal']['threshold'],'total':len(roles),'height':p['proposal']['height'],'roles':[{**r,'fingerprint':fingerprint(r['agent_key']),'local':r['agent_key']==self.own_identity()['public_key']} for r in roles.values()],'name':p['proposal']['name'],'chain':p['proposal']['chain'],'requires_disc':any(r['agent_key']==self.own_identity()['public_key'] and r['storage']=='disc' for r in roles.values())}
+        facts={'peer_mesh':mesh,'proposal_hash':digest(p['proposal']),'policy_hash':digest({'proposal':p['proposal'],'receive_descriptor':descs[0],'change_descriptor':descs[1],'contributions':p['contributions']}),'receive_descriptor':descs[0],'change_descriptor':descs[1],'samples':samples,'threshold':p['proposal']['threshold'],'total':len(roles),'height':p['proposal']['height'],'roles':[{**r,'fingerprint':fingerprint(r['agent_key']),'local':r['agent_key']==self.own_identity()['public_key']} for r in roles.values()],'name':p['proposal']['name'],'chain':p['proposal']['chain'],'requires_disc':any(r['agent_key']==self.own_identity()['public_key'] and r['storage']=='disc' for r in roles.values())}
         self.reviews[key]=(facts,time.time());return {'kind':'wallet_setup_policy','id':key,'setup':facts,'unlock_estimates':self.unlock_estimates(facts)}
     def check_cancel(self,binding):
-        if binding in self.store.read().get('cancelled_setups',{}):raise ValueError('Dashboard requested cancellation. Review Delete and Cancel or Backup and Cancel on Authorise before continuing.')
+        if binding in self.store.read().get('cancelled_setups',{}):raise ValueError('Wallet Server requested cancellation. Review Delete and Cancel or Backup and Cancel on Authorise before continuing.')
     def approve_proposal(self,key,pins):
         self.enforce();row=self.store.read()['pending'][key];p=proposal(row['proposal']);own=self.own_identity()
         if rpc(self.core,'getblockchaininfo')['chain']!=p['chain']:raise ValueError('The proposed network differs from this local node.')
+        from peer_mesh import observe,pins as trusted_pins
+        observe(self.store,p,'proposal',strict=True)
+        if p.get('version')==2:pins=trusted_pins(self.store,p)
         identities={r['agent_key'] for r in p['cosigners']}
         expected={fingerprint(key) for key in identities}
         # Current UI enters each distinct producer once. Accept exact legacy role
@@ -149,7 +156,9 @@ class WalletSetup:
                 name='key_'+hashlib.sha256(role['id'].encode()).hexdigest()[:20];c=session['core'].core
                 self.check_cancel(binding)
                 stage='encrypted_wallet_creation'
-                try:rpc(c,'createwallet',{'wallet_name':name,'passphrase':password,'descriptors':True,'load_on_startup':False})
+                try:
+                    observe(self.store,p,'proposal',strict=True)
+                    rpc(c,'createwallet',{'wallet_name':name,'passphrase':password,'descriptors':True,'load_on_startup':False})
                 finally:password=None
                 if rpc(c,'getwalletinfo',[],name).get('unlocked_until')!=0:raise ValueError('New signing wallet must be encrypted and locked.')
                 stage='public_contribution'
@@ -174,8 +183,10 @@ class WalletSetup:
     def approve_policy(self,key):
         self.enforce();old=self.reviews.get(key)
         if not old or time.time()-old[1]>600:raise ValueError('Review the complete public policy again.')
+        from peer_mesh import observe
+        observe(self.store,self.store.read()['pending'][key]['proposal'],'policy',strict=True)
         fresh=self.review(key)['setup']
-        if fresh!=old[0]:raise ValueError('Complete policy changed. Review again.')
+        if {k:v for k,v in fresh.items() if k!='peer_mesh'}!={k:v for k,v in old[0].items() if k!='peer_mesh'}:raise ValueError('Complete policy changed. Review again.')
         p=self.store.read()['pending'][key]['proposal'];session=self.sessions[fresh['proposal_hash']];self.check_cancel(fresh['proposal_hash'])
         if session['phase']!='contributed':raise ValueError('Setup already attempted. Inspect local outcome; nothing was replayed.')
         from combined_wallet import wallet_name,role_wallet,public_policy,LAYOUT

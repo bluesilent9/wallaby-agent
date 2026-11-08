@@ -60,7 +60,7 @@ class RealPhasedRetirement(unittest.TestCase):
    dashboard=os.environ.get('WALLABY_TEST_DASHBOARD_SRC')
    if dashboard:
     run=subprocess.run([sys.executable,'-B',str(Path(__file__).with_name('dashboard34_retirement_probe.py')),dashboard],input=json.dumps({'proposal':p,'result':outcome,'core':core.config}),text=True,capture_output=True,timeout=90)
-    self.assertEqual(run.returncode,0,run.stderr);evidence=json.loads(run.stdout);self.assertTrue(all(evidence.values()));print('Dashboard/Agent live-Core preservation interoperability:',json.dumps(evidence),flush=True)
+    self.assertEqual(run.returncode,0,run.stderr);evidence=json.loads(run.stdout);self.assertTrue(all(evidence.values()));print('Wallet Server/Agent live-Core preservation interoperability:',json.dumps(evidence),flush=True)
    deletion=proposal(raw,p['manifest'],'delete','Watch',coldtargets,saved,operation='d'*64);k=digest(deletion);other.receive(deletion);facts=r.review(k)['retirement']
    def local_remove(request):return remove(request,[Path(request['path']).parent])
    with patch('wallet_deletion.delete',side_effect=local_remove):r.approve(k,facts['preservation_fingerprint'],history_elsewhere_confirmed=True)

@@ -143,7 +143,7 @@ class RealBatch(unittest.TestCase):
    self.assertNotIn(policy_id(p),a.store.read().get('retired_policies',{}));self.assertEqual(rpc(a.core,'listwallets'),before_names)
    for record in pool.loaded.values():self.assertEqual(validate_extensions(record['recovery']),new);self.assertEqual(len(record['recovery']['policy_extensions']),1)
    # Independently detect the output vault and forecast its height from local
-   # Core, even when Dashboard supplies no output_policies binding.
+   # Core, even when Wallet Server supplies no output_policies binding.
    address=rpc(core,'deriveaddresses',[new[0],[0,0]])[0]
    coin=rpc(core,'listunspent',[1],'miner')[0];packet=rpc(core,'walletcreatefundedpsbt',{'inputs':[{'txid':coin['txid'],'vout':coin['vout']}],'outputs':[{address:'0.01'}],'options':{'add_inputs':False,'fee_rate':1}},'miner')['psbt']
    sign={'kind':'sign_psbt_partial','request_id':'e'*64,'chain':'regtest','wallet':'miner','psbt':packet};a.store.receive(sign);shown=cancel.ops.prepare_request(digest(sign));forecast=next(v for v in shown['unlock_estimates'] if v['height']==200);self.assertIn('utc',forecast);self.assertIn('local',forecast);self.assertIn('local_zone',forecast);self.assertTrue(any(o.get('vault_policy',{}).get('height')==200 for o in shown['review']['outputs']))

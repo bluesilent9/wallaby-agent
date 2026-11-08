@@ -1,4 +1,4 @@
-"""Child process for Dashboard/Agent interoperability, using only invented keys."""
+"""Child process for Wallet Server/Agent interoperability, using only invented keys."""
 import base64,json,sys,tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -22,7 +22,7 @@ try:
   if method=='gettxout' and params[0]==previous['txid']:return {'result':previous['vout'][params[1]]}
   if method=='walletprocesspsbt' and isinstance(params,dict) and params.get('sign'):sign_calls[0]+=1
   r=original(ident,method,params,wallet,timeout=timeout)
-  # The fixture transaction is network-independent, but Dashboard's protocol
+  # The fixture transaction is network-independent, but Wallet Server's protocol
   # deliberately only accepts mainnet proposals. No real chain is contacted.
   if method=='getblockchaininfo' and 'result' in r:r['result']['chain']='main'
   return r

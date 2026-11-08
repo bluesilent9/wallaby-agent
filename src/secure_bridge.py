@@ -131,7 +131,7 @@ def compatible(state):
 
 def stop():
     from configuration import Config
-    if Config().values['enabled']['node']:raise ValueError('Switch off Bitcoin Core Node Dashboard Interface before closing its protected workspace.')
+    if Config().values['enabled']['node']:raise ValueError('Switch off Bitcoin Core Node Wallet Server Interface before closing its protected workspace.')
     import fcntl
     from runtime import runtime_dir
     with (runtime_dir()/'worker-upgrade.lock').open('a') as lock:

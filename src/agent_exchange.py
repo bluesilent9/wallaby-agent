@@ -1,4 +1,4 @@
-"""Optional Agent v2 exchange; v1 Dashboard remains usable with read-only RPC.
+"""Optional Agent v2 exchange; v1 Wallet Server remains usable with read-only RPC.
 
 The transport stores proposals and public results. It never imports or signs.
 No retry ever repeats a wallet operation; only content-addressed data is retried.
@@ -36,7 +36,9 @@ class Exchange:
         from cancellation import held_item,blocked
         ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1 if pair[1]['kind'] in ('partial_sign_result','broadcast_result') else 2)
         items=[{'id':key,**row} for key,row in ordered if not held_item(state,row)][:8]
-        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','automatic_broadcast_v1','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_policy_refresh_batch_v1','wallet_policy_refresh_cancel_v1','wallet_rename_v1']}
+        body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','automatic_broadcast_v1','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_policy_refresh_batch_v1','wallet_policy_refresh_cancel_v1','wallet_rename_v1','wallet_relay_v1','wallet_policy_refresh_relay_v1']}
+        from mobile_verification import legacy_facts_available
+        if legacy_facts_available():body['capabilities'].append('wallet_mobile_verification_v1')
         if time.monotonic()-getattr(self,'address_checked',-60)>=30:
             self.address=local_ipv6();self.address_checked=time.monotonic()
         address=getattr(self,'address',None)
@@ -46,19 +48,21 @@ class Exchange:
             if item['kind'] in ('partial_sign_result','broadcast_result') and item['id'] not in getattr(self,'signing_sent',set()):
                 self.signing_sent=(getattr(self,'signing_sent',set()) if len(getattr(self,'signing_sent',set()))<128 else set())|{item['id']}
                 event('transaction.delivery','Sending '+('signed result' if item['kind']=='partial_sign_result' else 'broadcast result')+' · request='+item['payload']['request_hash'][:12])
+        peers=getattr(self.store,'peers',None)
+        if peers is not None:peers.connect(lambda data:http_json(self.port,'/agent/v1/relay',data,self.token,timeout=10,response_limit=2*1024*1024))
         self.phase='http'
         try:r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)
         except HTTPFailure as error:
             if error.status in (404,405,501):
                 self.unsupported=True
-                with self.store.edit() as s:s['sync']='Dashboard does not yet support vault/signing exchange. Public data and unsigned PSBT exports remain queued locally.'
+                with self.store.edit() as s:s['sync']='Wallet Server does not yet support vault/signing exchange. Public data and unsigned PSBT exports remain queued locally.'
                 return
             raise
         if self.cancelled():return
         self.phase='response'
-        if not isinstance(r,dict) or set(r)!={'version','accepted','proposals'} or type(r['version']) is not int or r['version']!=1 or not isinstance(r['accepted'],list) or not isinstance(r['proposals'],list) or len(r['proposals'])>16:raise ValueError('Invalid Dashboard exchange response.')
+        if not isinstance(r,dict) or set(r)!={'version','accepted','proposals'} or type(r['version']) is not int or r['version']!=1 or not isinstance(r['accepted'],list) or not isinstance(r['proposals'],list) or len(r['proposals'])>16:raise ValueError('Invalid Wallet Server exchange response.')
         sent={i['id'] for i in items}
-        if any(not isinstance(k,str) or k not in sent for k in r['accepted']):raise ValueError('Dashboard acknowledged an item that was not sent.')
+        if any(not isinstance(k,str) or k not in sent for k in r['accepted']):raise ValueError('Wallet Server acknowledged an item that was not sent.')
         # A valid acknowledgement is independent of unrelated proposals in this
         # response. Record delivery before processing a new proposal can fail.
         with self.store.edit() as saved:
@@ -68,19 +72,22 @@ class Exchange:
                 if item and item['kind'] in ('partial_sign_result','broadcast_result'):
                     request=item['payload']['request_hash'];record=saved['completed'].get(request)
                     if record and record.get('outbox_id')==key:record.update(delivery='acknowledged',acknowledged_at=time.time())
-                    event('transaction.delivery','Dashboard acknowledged '+('signed result' if item['kind']=='partial_sign_result' else 'broadcast result')+' · request='+request[:12])
-        # List membership belongs to Dashboard. Signed previews never grant local authority.
+                    event('transaction.delivery','Wallet Server acknowledged '+('signed result' if item['kind']=='partial_sign_result' else 'broadcast result')+' · request='+request[:12])
+        # List membership belongs to Wallet Server. Signed previews never grant local authority.
         from vault_policy import validate_proposal
         proposals=[]
         self.phase='proposal_validation'
         for p in r['proposals']:
             # Record only a fixed known kind, never remote strings or payloads.
-            known={'wallet_rename','wallet_rename_queue','builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc','archive_cancel'}
+            known={'wallet_mobile_verification','wallet_rename','wallet_rename_queue','builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc','archive_cancel'}
             self.proposal_kind=p.get('kind') if isinstance(p,dict) and p.get('kind') in known else 'unknown'
             if self.proposal_kind=='wallet_retire':
                 from retirement_phases import require_current
                 require_current(p)
-            proposals.append(validate_proposal(p))
+            checked=validate_proposal(p)
+            from peer_compatibility import require_current
+            require_current(self.store,checked)
+            proposals.append(checked)
         self.phase='proposal_application'
         for p in proposals:
             self.proposal_kind=p['kind']
@@ -101,7 +108,10 @@ class Exchange:
         for p in proposals:
             self.proposal_kind=p['kind']
             if p['kind'] in ('builder_cancel','wallet_retire_cancel') or blocked(self.store.read(),p):continue
-            if p['kind']=='wallet_transfer_preview':
+            if p['kind']=='wallet_mobile_verification':
+                from mobile_verification import facts
+                self.store.queue('wallet_mobile_verification_record',facts(self.store,p['challenge']))
+            elif p['kind']=='wallet_transfer_preview':
                 from wallet_preview import receive
                 receive(self.store,{k:p[k] for k in ('preview','public_key','signature')})
             elif p['kind']=='wallet_sync_preferences':
@@ -132,7 +142,7 @@ class Exchange:
         self.phase='acknowledgement';self.proposal_kind='none'
         with self.store.edit() as s:
             self.preview_ready=not s.get('sync_batch') and not s.get('active_transfer') and any(row['proposal']['kind']=='wallet_transfer' and row['proposal']['direction']=='send' and row['proposal'].get('preview_challenge') and key not in s.get('transfer_previews',{}) for key,row in s['pending'].items())
-            s['sync']='Dashboard exchange connected. Pending changes require local authorisation.';s['last_exchange']=time.time();s.pop('exchange_error',None)
+            s['sync']='Wallet Server exchange connected. Pending changes require local authorisation.';s['last_exchange']=time.time();s.pop('exchange_error',None)
     def prepare_preview(self):
         if self.cancelled():return
         saved=self.store.read()
@@ -167,16 +177,16 @@ class Exchange:
         failure=describe('dashboard',error)
         if isinstance(error,HTTPFailure):
             reason=getattr(error,'safe_reason',None)
-            advice={'agent_version':'Dashboard rejected the Agent version. Check both installed Development builds and restart the Agent only after safely finishing active work.','capabilities':'Dashboard rejected the Agent capability list. Update Dashboard to the matching build; do not disable local security validation.','identity_conflict':'Dashboard reports a node identity conflict. Resolve it on the Dashboard Nodes page.','session_expired':'Dashboard exchange session expired. The public node connection may need to register again.'}.get(reason)
+            advice={'agent_version':'Wallet Server rejected the Agent version. Check both installed Development builds and restart the Agent only after safely finishing active work.','capabilities':'Wallet Server rejected the Agent capability list. Update Wallet Server to the matching build; do not disable local security validation.','identity_conflict':'Wallet Server reports a node identity conflict. Resolve it on the Wallet Server Nodes page.','session_expired':'Wallet Server exchange session expired. The public node connection may need to register again.'}.get(reason)
             return ConnectionFailure('dashboard','exchange_'+(reason or 'http_'+str(error.status)),advice or str(failure))
         if isinstance(error,ValueError):
             from sync_queue import RevisionError
             if isinstance(error,RevisionError):
                 from activity_log import event
                 event('sync.queue.reject','Revision refused · previous='+str(error.previous)+' · incoming='+str(error.incoming)+' · same_authenticated_session=true')
-            reason={'Invalid public descriptor fields.':'descriptor_fields','Invalid descriptor timestamp or activity.':'descriptor_metadata','Descriptor ranges exceed the safe automatic import limit.':'descriptor_range','Only checksummed public descriptors are accepted.':'descriptor_checksum','Private material is forbidden in Dashboard messages.':'private_material','Invalid synchronisation list.':'sync_list','A revision cannot change contents.':'sync_revision','Stale synchronisation list.':'sync_revision','Authorisation queue is full.':'queue_full','Only an Ed25519 Agent identity is supported.':'identity_format','No unique paired receiving request.':'unpaired_preview'}.get(str(error),'invalid_data')
+            reason={'Invalid public descriptor fields.':'descriptor_fields','Invalid descriptor timestamp or activity.':'descriptor_metadata','Descriptor ranges exceed the safe automatic import limit.':'descriptor_range','Only checksummed public descriptors are accepted.':'descriptor_checksum','Private material is forbidden in Wallet Server messages.':'private_material','Invalid synchronisation list.':'sync_list','A revision cannot change contents.':'sync_revision','Stale synchronisation list.':'sync_revision','Authorisation queue is full.':'queue_full','Only an Ed25519 Agent identity is supported.':'identity_format','No unique paired receiving request.':'unpaired_preview'}.get(str(error),'invalid_data')
             if self.phase in ('local_outbox','acknowledgement'):return ConnectionFailure('workspace','exchange_local_state','Protected workspace exchange storage was refused at '+self.phase+'. Queued data retained; inspect local workspace diagnostics.')
-            return ConnectionFailure('dashboard','exchange_'+reason,'Agent rejected Dashboard exchange data at '+self.phase+' ('+self.proposal_kind+'); category '+reason+'. Queued data retained. Compare the Dashboard protocol log; no rejected request authorised a wallet operation.')
+            return ConnectionFailure('dashboard','exchange_'+reason,'Agent rejected Wallet Server exchange data at '+self.phase+' ('+self.proposal_kind+'); category '+reason+'. Queued data retained. Compare the Wallet Server protocol log; no rejected request authorised a wallet operation.')
         return failure
     def run(self,stop):
         # A temporary local-store/diagnostic failure outside the normal HTTP

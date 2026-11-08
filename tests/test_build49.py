@@ -69,7 +69,7 @@ class QueueRefresh(unittest.TestCase):
    b=Burner(tmp,Mock());rows=[]
    for i in range(3):
     r=task(paired()['public_wallet'])
-    # Node-wallet recovery records are the actual bundle inputs, not Dashboard tasks.
+    # Node-wallet recovery records are the actual bundle inputs, not Wallet Server tasks.
     recovery={'version':1,'kind':'node_wallet','chain':'regtest','name':'wallet '+str(i),'policy_hash':digest(r['public_wallet']),'public_wallet':r['public_wallet'],'labels':{}}
     # Distinct wallet identities use distinct descriptors from paired().
     rows.append((str(i)*64,{'wallet':str(i)+'.dat'},recovery))

@@ -75,7 +75,7 @@ class RealCoreBuild9(unittest.TestCase):
     self.assertEqual(len([n for n in rpc(self.core,'listwallets') if n.startswith('Wallaby key ')]),2)
     rpc(self.core,'createwallet',{'wallet_name':'Miner'});dest=rpc(self.core,'getnewaddress',[],'Miner');rpc(self.core,'generatetoaddress',[102,dest]);monitor=record['monitor_wallet'];address=rpc(self.core,'getnewaddress',[],monitor);rpc(self.core,'sendtoaddress',[address,'2'],'Miner');rpc(self.core,'generatetoaddress',[1,dest]);coin=rpc(self.core,'listunspent',[1],monitor)[0]
     psbt=rpc(self.core,'createpsbt',[[{'txid':coin['txid'],'vout':coin['vout'],'sequence':4294967294}],{dest:'1.9999'},50]);psbt=rpc(self.core,'walletprocesspsbt',{'psbt':psbt,'sign':False,'bip32derivs':True,'finalize':False},monitor)['psbt'];ops=WalletOps(self.core,self.store)
-    # Global readiness is cryptographic evidence, never a Dashboard green flag.
+    # Global readiness is cryptographic evidence, never a Wallet Server green flag.
     from setup_completion import apply as complete_setup
     policy_ack=[item['payload'] for item in self.store.read()['outbox'].values() if item['kind']=='wallet_setup_ack' and item['payload']['message'].get('status')=='policy_approved']
     proof={'kind':'wallet_setup_complete','version':1,'proposal_hash':digest(p),'policy_hash':record['policy_hash'],'acknowledgements':policy_ack}
@@ -91,7 +91,7 @@ class RealCoreBuild9(unittest.TestCase):
     for i,wallet in enumerate(record['signing_wallets'].values()):
         req={'kind':'sign_psbt_partial','request_id':str(i+1)*64,'chain':'regtest','wallet':wallet,'psbt':psbt};self.store.receive(req);k=digest(req);ops.prepare_request(k);ops.sign(k,'fixture-only-Core-passphrase','partial',fee_ack=True);psbt=[x['payload']['psbt'] for x in self.store.read()['outbox'].values() if x['kind']=='partial_sign_result'][-1];self.assertEqual(len(rpc(self.core,'decodepsbt',[psbt])['inputs'][0].get('partial_signatures',{})),i+1)
     final=rpc(self.core,'finalizepsbt',[psbt]);self.assertTrue(final['complete']);self.assertTrue(rpc(self.core,'testmempoolaccept',[[final['hex']]])[0]['allowed']);self.assertFalse(rpc(self.core,'getrawmempool'))
-    # Dashboard request validation never allows changing a mandatory height path.
+    # Wallet Server request validation never allows changing a mandatory height path.
     wrong=rpc(self.core,'createpsbt',[[{'txid':coin['txid'],'vout':coin['vout'],'sequence':4294967295}],{dest:'1.9999'},0]);req={'kind':'sign_psbt_partial','request_id':'f'*64,'chain':'regtest','wallet':next(iter(record['signing_wallets'].values())),'psbt':wrong};self.store.receive(req)
     with self.assertRaises(ValueError):ops.prepare_request(digest(req))
  def test_empty_private_wallet_archives_used_change_and_keeps_keys(self):

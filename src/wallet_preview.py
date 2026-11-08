@@ -1,6 +1,6 @@
 """Signed initial public review, independently pinned by the receiving user.
 
-The Dashboard is a courier, not a key authority. SSH signatures use an Agent-only
+The Wallet Server is a courier, not a key authority. SSH signatures use an Agent-only
 identity (never a Bitcoin key), namespace and fresh per-transfer challenge.
 """
 import base64,hashlib,json,re,subprocess,tempfile,time
@@ -25,14 +25,20 @@ def validate_preview(payload,fresh=True):
     from peer_wallet import validate_details
     if not isinstance(payload,dict) or set(payload)!={'preview','public_key','signature'}:raise ValueError('Invalid signed wallet preview.')
     p=payload['preview'];required={'version','transfer_id','challenge','sender_ipv6','receiver_ipv6','public_wallet','chain','funded_outputs','node_tip','generated_at'}
+    if isinstance(p,dict) and p.get('version')==3:required=required|{'transport'}
     if isinstance(p,dict) and 'restoration' in p:required=required|{'restoration'}
-    if not isinstance(p,dict) or (set(p)!=required if p.get('version')==1 else set(p)!=required|{'vaults','address_labels'}) or p['version'] not in (1,2):raise ValueError('Invalid public preview schema.')
+    if not isinstance(p,dict) or (set(p)!=required if p.get('version')==1 else set(p)!=required|{'vaults','address_labels'}) or p['version'] not in (1,2,3):raise ValueError('Invalid public preview schema.')
     for k in ('transfer_id','challenge'):
         if not re.fullmatch('[0-9a-f]{64}',str(p[k])):raise ValueError('Invalid preview binding.')
     if 'restoration' in p:
         from signer_restoration import requested
         requested({'restoration':p['restoration'],'public_wallet':p['public_wallet'],'transfer_version':p['version']})
-    ipv6(p['sender_ipv6']);ipv6(p['receiver_ipv6']);descriptors(p['public_wallet'])
+    if p['version']==3:
+        from peer_protocol import transport
+        transport(p)
+        if p['sender_ipv6'] is not None or p['receiver_ipv6'] is not None:raise ValueError('Encrypted preview must use identity routing.')
+    else:ipv6(p['sender_ipv6']);ipv6(p['receiver_ipv6'])
+    descriptors(p['public_wallet'])
     validate_details({k:p[k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels') if k in p})
     if not isinstance(p['node_tip'],dict) or set(p['node_tip'])!={'height','hash'} or type(p['node_tip']['height']) is not int or not 0<=p['node_tip']['height']<500000000 or not re.fullmatch('[0-9a-f]{64}',str(p['node_tip']['hash'])):raise ValueError('Invalid preview block reference.')
     stamp=p['generated_at'];now=time.time()
@@ -75,7 +81,13 @@ def verify_bound(store,payload,p):
     """
     proof=verify(store,payload,fresh=False);v=payload['preview']
     if v.get('restoration')!=p.get('restoration'):raise ValueError('Signed restoration purpose differs from the paired request.')
-    if v['version']!=(2 if p.get('transfer_version')==2 else 1):raise ValueError('Preview protocol differs from request.')
+    if v['version']!=p.get('transfer_version',1):raise ValueError('Preview protocol differs from request.')
+    if p.get('transfer_version')==3:
+        if v.get('transport')!=p['transport']:raise ValueError('Signed encrypted transport differs from request.')
+        from peer_mesh import manager
+        manager(store).binding(p)
+        own='sender' if p['direction']=='send' else 'receiver'
+        if payload['public_key']!=p['transport']['sender_identity']:raise ValueError('Signed preview did not come from the independently paired sender.')
     sender=p['node_ipv6'] if p['direction']=='send' else p['peer']['ipv6']
     receiver=p['peer']['ipv6'] if p['direction']=='send' else p['node_ipv6']
     if v['transfer_id']!=p['transfer_id'] or v['challenge']!=p.get('preview_challenge') or v['sender_ipv6']!=sender or v['receiver_ipv6']!=receiver or descriptors(v['public_wallet'])!=descriptors(p['public_wallet']):raise ValueError('Signed preview does not match the active wallet, challenge and peer addresses.')
@@ -85,11 +97,15 @@ def prepare(core,store,key,p):
     from peer_wallet import wallet_details,local_ipv6
     from wallet_ops import rpc
     if not p.get('preview_challenge'):return None # Build 8 must be updated before this protocol is enabled.
-    own=local_ipv6(p['peer']['ipv6'])
+    own=None if p.get('transfer_version')==3 else local_ipv6(p['peer']['ipv6'])
+    if p.get('transfer_version')==3:
+        from peer_mesh import manager
+        manager(store).binding(p)
     if own!=p['node_ipv6']:raise ValueError('The local IPv6 route differs from the paired request. Refresh node identity before synchronisation.')
     facts=wallet_details(core,p,store);tip=rpc(core,'getblockchaininfo')
     if tip.get('initialblockdownload') or tip.get('headers',tip['blocks'])!=tip['blocks']:raise ValueError('Wait for the sending node to finish synchronising before preparing a wallet preview.')
-    preview={'version':2 if p.get('transfer_version')==2 else 1,'transfer_id':p['transfer_id'],'challenge':p['preview_challenge'],'sender_ipv6':own,'receiver_ipv6':ipv6(p['peer']['ipv6']),**facts,'node_tip':{'height':tip['blocks'],'hash':tip['bestblockhash']},'generated_at':int(time.time())}
+    preview={'version':p.get('transfer_version',1),'transfer_id':p['transfer_id'],'challenge':p['preview_challenge'],'sender_ipv6':own,'receiver_ipv6':None if p.get('transfer_version')==3 else ipv6(p['peer']['ipv6']),**facts,'node_tip':{'height':tip['blocks'],'hash':tip['bestblockhash']},'generated_at':int(time.time())}
+    if p.get('transfer_version')==3:preview['transport']=p['transport']
     if 'restoration' in p:preview['restoration']=p['restoration']
     payload=sign(store,preview);verify(store,payload)
     with store.edit() as s:
@@ -104,7 +120,7 @@ def receive(store,payload):
     suppressed=False
     if not candidates:
         from sync_preferences import policy_id
-        # A just-disabled row can still have an in-flight Dashboard preview.
+        # A just-disabled row can still have an in-flight Wallet Server preview.
         # Bind it to the last authoritative snapshot and verify normally, but
         # never recreate the row or store/authorise its preview.
         disabled=[p for p in state.get('sync_snapshot_requests',[]) if p['direction']=='receive' and p['transfer_id']==transfer_id and policy_id(p) in state.get('sync_exclusions',{})]

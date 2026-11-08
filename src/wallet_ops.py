@@ -1,4 +1,4 @@
-"""Local-only wallet operations. Dashboard RPC cannot enter this module.
+"""Local-only wallet operations. Wallet Server RPC cannot enter this module.
 
 Core holds all private keys. Reviews are generated from actual transactions,
 local previous transactions and wallet descriptors, never remote display labels.
@@ -143,7 +143,7 @@ class WalletOps:
             input_policies=[{'height':r['public']['height'],'threshold':1,'total':1} for r in local_vaults.values() if r['public']['address']==address]
             for policy in matches(self.core,self.store,address,shared_inventory):
                 if policy['height'] is not None:input_policies.append({k:policy[k] for k in ('height','threshold','total')})
-                if not policy['setup_ready']:raise ValueError('This wallet setup lacks independently verified policy or physical-backup completion. Dashboard cannot declare it ready without the signed proofs.')
+                if not policy['setup_ready']:raise ValueError('This wallet setup lacks independently verified policy or physical-backup completion. Wallet Server cannot declare it ready without the signed proofs.')
                 if policy['height'] is not None and (tx['locktime']>=500000000 or tx['locktime']<policy['height'] or vin['sequence']==0xffffffff):raise ValueError('The final transaction bypasses or changes an approved mandatory vault height.')
             witness=scope.get('witness_utxo')
             if witness and (sats(witness['amount'])!=value or witness['scriptPubKey']['hex']!=spk['hex']):raise ValueError('PSBT witness input differs from the locally verified previous output.')
@@ -154,7 +154,7 @@ class WalletOps:
             spk=row['scriptPubKey'];address=spk.get('address','');local,change=owners(address);amount=sats(row['value'])
             outputs.append({'n':row['n'],'sats':str(amount),'address':address or 'Script '+spk['hex'],'wallets':local,'change':change,'script':spk['hex'],'traits':local_traits(self.core,local,address,cache=trait_cache)})
         # Recognise destination vaults from actual local descriptor ownership,
-        # even if Dashboard omitted its advisory output-policy bindings.
+        # even if Wallet Server omitted its advisory output-policy bindings.
         from wallet_setup_signing import matches
         for output in outputs:
             if not output['wallets']:continue
@@ -174,7 +174,7 @@ class WalletOps:
         if row['state']!='pending':raise ValueError('This request was already attempted; reconcile its outcome before proceeding.')
         p=row['proposal']
         if p['kind']=='vault_sync':return {'kind':'vault_sync','id':key,'vault':p['vault'],'proof':verify_vault(self.core,p['vault'])}
-        if p['kind'] not in ('sign_psbt_partial','broadcast_transaction'):raise ValueError('This request requires the Synchronisation page or an updated Dashboard.')
+        if p['kind'] not in ('sign_psbt_partial','broadcast_transaction'):raise ValueError('This request requires the Synchronisation page or an updated Wallet Server.')
         wallet=p.get('wallet');review=self.review(p['psbt'],wallet,p['chain'],require_owned=p['kind']=='sign_psbt_partial')
         from policy_refresh_backups import guard
         guard(self.store,review)
@@ -201,7 +201,7 @@ class WalletOps:
         if action not in ('broadcast','partial'):raise ValueError('Invalid signing action.')
         with self.lock:
             p=require_current_review(self.prepared.get(key))
-            if p['kind']=='sign_psbt_partial' and action!='partial':raise ValueError('Dashboard signing requests return signatures only; broadcasting requires a separate local approval.')
+            if p['kind']=='sign_psbt_partial' and action!='partial':raise ValueError('Wallet Server signing requests return signatures only; broadcasting requires a separate local approval.')
             if p['kind']=='broadcast_transaction' and action!='broadcast':raise ValueError('Review and authorise broadcast locally.')
             if p['kind'] not in ('sign_psbt_partial','broadcast_transaction'):raise ValueError('This retired local builder operation is unavailable.')
             current=self.review(p['psbt'],p['wallet'],p['chain'],require_owned=p['kind']!='broadcast_transaction')
@@ -276,11 +276,11 @@ class WalletOps:
                 added=sum(1 for i in indices for field,value in returned[i].items() if value and before[i].get(field)!=value)
                 if not added:
                     with self.store.edit() as state:state['pending'][key]['state']='pending'
-                    raise LocalActionFailure('transaction_no_signature','Bitcoin Core returned no new signature for this signing account. Nothing was sent to Dashboard. Review the local signing keys and this transaction again.')
+                    raise LocalActionFailure('transaction_no_signature','Bitcoin Core returned no new signature for this signing account. Nothing was sent to Wallet Server. Review the local signing keys and this transaction again.')
                 payload={'request_hash':key,'status':'signed','psbt':signed_psbt};item={'kind':'partial_sign_result','payload':payload};outbox_id=digest(item)
                 from approval_store import MAX_ITEMS
                 with self.store.edit() as state:
-                    if len(state['outbox'])>=MAX_ITEMS:raise ValueError('Dashboard outbox is full; connect and synchronise first.')
+                    if len(state['outbox'])>=MAX_ITEMS:raise ValueError('Wallet Server outbox is full; connect and synchronise first.')
                     # Publish the immutable result and its local receipt together;
                     # exchange may acknowledge it immediately on another thread.
                     state['outbox'][outbox_id]=item
@@ -288,4 +288,4 @@ class WalletOps:
                     state['pending'].pop(key,None)
                 from activity_log import event
                 event('transaction.sign','Signature result queued · request='+key[:12]+' · added_fields='+str(added))
-                return {'queued':True,'request_hash':key,'delivery':'queued','message':'Transaction signed locally. Waiting for Dashboard acknowledgement; do not sign again. No transaction was broadcast.'}
+                return {'queued':True,'request_hash':key,'delivery':'queued','message':'Transaction signed locally. Waiting for Wallet Server acknowledgement; do not sign again. No transaction was broadcast.'}

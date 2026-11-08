@@ -39,7 +39,7 @@ def enable(store,ident):
     with store.edit() as saved:
         if saved.get('active_transfer') or saved.get('sync_batch'):raise ValueError('Finish the active synchronisation first.')
         saved.setdefault('request_denials',{}).pop(ident,None)
-    return {'message':'Lifecycle denial removed. Dashboard may offer the request again; no wallet operation was authorised.'}
+    return {'message':'Lifecycle denial removed. Wallet Server may offer the request again; no wallet operation was authorised.'}
 
 
 def cancel(store,key):
@@ -47,4 +47,4 @@ def cancel(store,key):
         row=saved['pending'].get(key)
         if not row or row['state']!='pending' or not intent(saved,row['proposal']) or saved.get('active_transfer') or saved.get('sync_batch'):raise ValueError('Only an unattempted inactive lifecycle request can be cancelled.')
         saved['pending'].pop(key);saved.get('sync_choices',{}).pop(key,None)
-    return {'message':'Request dismissed locally without a deny entry. It may return while Dashboard still requests it. Existing wallet data was retained.'}
+    return {'message':'Request dismissed locally without a deny entry. It may return while Wallet Server still requests it. Existing wallet data was retained.'}

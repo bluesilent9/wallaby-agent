@@ -20,12 +20,12 @@ def node_support(config=None):
     try:cookie_ok=bool(cookie) and Path(cookie).expanduser().is_file() and os.access(Path(cookie).expanduser(),os.R_OK)
     except OSError:cookie_ok=False
     if not cookie_ok:missing.append('readable Bitcoin Core RPC cookie')
-    if not missing:return {'available':True,'message':'Bitcoin prerequisites detected. Enabling the node interface checks Core RPC and Dashboard connectivity.','missing':[],'commands':[]}
+    if not missing:return {'available':True,'message':'Bitcoin prerequisites detected. Enabling the node interface checks Core RPC and Wallet Server connectivity.','missing':[],'commands':[]}
     message='Node interface unavailable: '+', '.join(missing)+'. '
     commands=['sudo apt install '+' '.join(dict.fromkeys(packages))] if packages else []
     if packages:message+='Install the optional desktop components using the command below. '
     if not cookie_ok:message+='Install/start Bitcoin Core with RPC enabled, or choose its readable .cookie file in Connection settings. Core can be installed separately, including Snap; an apt package named bitcoind is not required. '
-    message+='DDNS-GO and Dashboard SSH tunnels remain available without Bitcoin.'
+    message+='DDNS-GO and Wallet Server SSH tunnels remain available without Bitcoin.'
     return {'available':False,'message':message,'missing':missing,'commands':commands}
 
 def require_node(config=None):

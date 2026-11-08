@@ -35,7 +35,7 @@ class ProtectedNode:
         except OSError as error:
             raise describe('workspace',error) from None
         except ValueError:
-            raise ConnectionFailure('workspace','local_request','The local protected Bitcoin workspace could not complete the node connection request. Check its status on Services; this is not a Dashboard protocol error.') from None
+            raise ConnectionFailure('workspace','local_request','The local protected Bitcoin workspace could not complete the node connection request. Check its status on Services; this is not a Wallet Server protocol error.') from None
         finally:
             if generation is not None:
                 try:call('node.stop',generation)

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Protected local worker. The browser and Dashboard can only submit public messages."""
+"""Protected local worker. The browser and Wallet Server can only submit public messages."""
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
@@ -23,9 +23,9 @@ def delivery_pending(state):
     choices; their optional status messages must not prevent window closure.
     """
     for item in state['outbox'].values():
-        if item['kind'] in ('wallet_sync_preferences','wallet_setup_identity','node_identity','wallet_transfer_preview'):continue
+        if item['kind'] in ('wallet_sync_preferences','wallet_setup_identity','node_identity','wallet_transfer_preview','wallet_mobile_verification_record'):continue
         payload=item['payload']
-        # Retirement cancellation is an explicit outcome the Dashboard must flag;
+        # Retirement cancellation is an explicit outcome the Wallet Server must flag;
         # retain it until acknowledged, unlike optional sync denial notices.
         if item['kind']=='wallet_retirement_result':return True
         signed=payload.get('message',{})
@@ -54,6 +54,11 @@ class Workspace:
             if self.ops and (self.busy() or self.archives and (self.archives.loaded or self.archives.staged)):raise ValueError('Finish protected wallet work before changing the Core connection.')
             if self.node_stop:self.node_stop.set()
             if self.transfer:self.transfer.close()
+            if not getattr(self,'peers',None):
+                from peer_channels import Peers
+                self.peers=Peers(self.store)
+                from relay_stream import Bridge
+                self.peers.wallet_bridge=Bridge(self.peers,self.store)
             self.ops=WalletOps(Core(c),self.store);self.ops.core.managed_store=self.store
             from automatic_broadcast import Broadcasts
             self.broadcasts=Broadcasts(self.ops.core,self.store,lambda:not getattr(self,'closing',False) and not self.recovery_state().get('active'))
@@ -117,11 +122,11 @@ class Workspace:
             getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or
             s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'))
     def public_rpc(self,ident,name,params,wallet,timeout):
-        """One read-only gate for terminal bridge and Dashboard execution threads."""
+        """One read-only gate for terminal bridge and Wallet Server execution threads."""
         from agent_rpc import request
         validated,_=request(name,params,wallet)
         busy={'error':{'code':'synchronisation_busy','message':'A locally authorised wallet operation is active. Retry after it finishes.'}}
-        # Dashboard issues parallel read-only inventory calls while the viewer
+        # Wallet Server issues parallel read-only inventory calls while the viewer
         # polls status. A non-blocking exclusive lock falsely classified every
         # overlapping public read as wallet work and prevented complete inventory.
         if not self.lock.acquire(timeout=min(3,max(.05,float(timeout)))):
@@ -248,9 +253,10 @@ class Workspace:
         if reasons:
             from activity_log import event
             event('workspace.close','Close refused · blockers='+','.join(reasons)+' · RAM retained')
-            raise ValueError('Finish active wallet work and wait for queued Dashboard deliveries before closing the protected window and disconnecting its node. Blocking: '+', '.join({'active_wallet_work':'wallet operations or history recovery','undelivered_operation_result':'completed operation results awaiting Dashboard delivery'}[v] for v in reasons)+'.')
+            raise ValueError('Finish active wallet work and wait for queued Wallet Server deliveries before closing the protected window and disconnecting its node. Blocking: '+', '.join({'active_wallet_work':'wallet operations or history recovery','undelivered_operation_result':'completed operation results awaiting Wallet Server delivery'}[v] for v in reasons)+'.')
         if deadline is not None and time.monotonic()>=deadline:raise ValueError('Close request expired; no workspace state was changed.')
         self.closing=True
+        if getattr(self,'peers',None):self.peers.close()
         if getattr(self,'node_stop',None):self.node_stop.set()
         from activity_log import event
         event('workspace.close','Safe close accepted; awaiting node disconnect and RAM cleanup.')
@@ -266,7 +272,7 @@ class Workspace:
         self.viewers=[]
         return {'message':'Protected window closed. The node interface will disconnect and its protected workspace will close automatically.'}
     def open_view(self,page):
-        if page not in ('authorise','synchronisation','burn','message'):raise ValueError('Invalid protected page.')
+        if page not in ('authorise','synchronisation','burn','message','peers'):raise ValueError('Invalid protected page.')
         if any(p.poll() is None for p in self.viewers):
             self.window_required=True
             return {'message':'The protected window is already open.'}
@@ -344,6 +350,11 @@ class Workspace:
             try:
                 enforce();self.configure(environment);return self.service_status()
             finally:self.lock.release()
+        if method=='peers.action':
+            if len(args)!=2 or not isinstance(args[0],str) or not isinstance(args[1],dict):raise ValueError('Invalid local peer control.')
+            enforce();self.configure(environment)
+            from peer_actions import action
+            return action(self,*args)
         with self.lock:
             enforce();self.configure(environment)
             if getattr(self,'closing',False) and method not in ('ui.arm','ui.close'):raise ValueError('The protected workspace is closing. Reconnect the node before starting another operation.')
@@ -389,7 +400,7 @@ class Workspace:
                 Exchange(args[0],args[1],self.store).once();return {'ok':True}
             if method=='authorise.review':
                 kind=self.store.read()['pending'][args[0]]['proposal']['kind']
-                if kind=='broadcast_transaction':raise ValueError('Completed transactions are broadcast automatically only when Dashboard requests it. No second local approval is needed.')
+                if kind=='broadcast_transaction':raise ValueError('Completed transactions are broadcast automatically only when Wallet Server requests it. No second local approval is needed.')
                 if kind=='wallet_rename':return self.renames.review(args[0])
                 if kind in ('archive_wallet','destroy_disc','archive_cancel'):return self.archive_ops.review(args[0])
                 if kind=='wallet_policy_refresh':
@@ -506,7 +517,7 @@ class Workspace:
             if method=='wallet.sign':
                 key,action,fee_ack=args
                 if type(fee_ack) is not bool:raise ValueError('Invalid local fee acknowledgement.')
-                if action!='partial':raise ValueError('Broadcast is requested from Dashboard after signing. No second local approval is needed.')
+                if action!='partial':raise ValueError('Broadcast is requested from Wallet Server after signing. No second local approval is needed.')
                 from wallet_ops import require_current_review
                 prepared=require_current_review(self.ops.prepared.get(key))
                 if prepared['review']['fee_review']['requires_ack'] and not fee_ack:raise ValueError('Acknowledge the high fee locally before entering a wallet passphrase.')

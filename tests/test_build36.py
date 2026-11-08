@@ -66,7 +66,7 @@ class ThreeAgentVault(unittest.TestCase):
     self.assertEqual(agents[0].sessions[key]['phase'],'awaiting_disc')
     self.assertEqual([a.sessions[key]['phase'] for a in agents[1:]],['complete','complete'])
     self.assertEqual([len(rpc(n.core,'listwallets')) for n in nodes],[1,2,1])
-    # Add an unrelated Dashboard archive while this producer waits for discs.
+    # Add an unrelated Wallet Server archive while this producer waits for discs.
     from archive_operations import Operations
     from types import SimpleNamespace
     rpc(nodes[0].core,'createwallet',{'wallet_name':'Independent backup','passphrase':'fixture-backup-passphrase'})

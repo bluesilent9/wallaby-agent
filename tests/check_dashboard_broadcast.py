@@ -1,4 +1,4 @@
-"""Real test-chain broadcast through the Dashboard/Agent exchange protocol."""
+"""Real test-chain broadcast through the Wallet Server/Agent exchange protocol."""
 import base64,json,os,socket,sys,tempfile,threading
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,HTTPServer
@@ -40,6 +40,6 @@ try:
    assert run.returncode==0,run.stdout+run.stderr
    report=json.loads(run.stdout);assert report['pending']==0 and report['acknowledged'] and report['prompts']==0
    result=signing_state(fixture.hub,fixture.user,job);assert result['broadcast_txid']==expected;assert result['broadcast_request']['state']=='complete';assert result['can_complete']
-   print(json.dumps({'Agent':56,'Dashboard':64,'signed_without_broadcast':True,'later_dashboard_request_published':True,'core_mempool_confirmed':True,'dashboard_confirmed_exact_raw_transaction':True,'broadcast_receipt_acknowledged':True,'agent_pending_requests':0,'native_prompts':0,'live_wallets_accessed':False},indent=2))
+   print(json.dumps({'Agent':56,'Wallet Server':64,'signed_without_broadcast':True,'later_dashboard_request_published':True,'core_mempool_confirmed':True,'dashboard_confirmed_exact_raw_transaction':True,'broadcast_receipt_acknowledged':True,'agent_pending_requests':0,'native_prompts':0,'live_wallets_accessed':False},indent=2))
  finally:server.shutdown();server.server_close();thread.join()
 finally:node.close();fixture.doCleanups()

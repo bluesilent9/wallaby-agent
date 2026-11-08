@@ -1,6 +1,6 @@
-"""Three independent Agents, Dashboard HTTP/RPC broker and three real Core nodes.
+"""Three independent Agents, Wallet Server HTTP/RPC broker and three real Core nodes.
 
-Test-only adapters: Dashboard network constants/health accept regtest, fixture MAC/IPv6
+Test-only adapters: Wallet Server network constants/health accept regtest, fixture MAC/IPv6
 identities, receiver SSH readiness, and SSH pipes replaced by a local relay.
 Production pairing, permissions, signatures, snapshots, batches, import/backup,
 framing, Core verification and completion receipts remain real. No live coins,
@@ -203,7 +203,7 @@ def coordinator(agent_source,dashboard_source,out):
   policy=agents['treasury-russia'].command({'op':'disable_one'});wait_counts({'wallet-laptop':21,'treasury-australia':11,'treasury-russia':10},previews=False);agents['treasury-russia'].command({'op':'enable','id':policy});wait_counts(expected);stage('local_denial_enable_isolated_to_one_recipient')
   agents['treasury-australia'].close();agents['treasury-australia']=Process(['agent',agent_source,str(configs[1])],output/'australia-reconnect-stderr.log');processes.append(agents['treasury-australia']);wait_counts(expected);stage('recipient_reconnect_verified')
   # Match the reported installed lifecycle: keep all Agent workspaces alive,
-  # clear the Dashboard profile through its production storage operation, and
+  # clear the Wallet Server profile through its production storage operation, and
   # let real HTTP re-registration rebuild all lists without Ownership records.
   server.command({'op':'clear_profile'});reset=wait_counts(expected)
   assert not any(v['error'] for v in reset.values()),reset

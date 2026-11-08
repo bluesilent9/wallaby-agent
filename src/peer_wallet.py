@@ -1,7 +1,7 @@
 """Direct, explicitly approved wallet file transfer through system OpenSSH.
 
-Dashboard carries only public pairing metadata. Passwords exist only in memory
-and an owner-only askpass socket. No credentials, files or paths reach Dashboard.
+Wallet Server carries only public pairing metadata. Passwords exist only in memory
+and an owner-only askpass socket. No credentials, files or paths reach Wallet Server.
 """
 import base64,contextlib,hashlib,ipaddress,json,os,pwd,re,secrets,shutil,socket,struct,subprocess,sys,tempfile,threading,time
 from pathlib import Path
@@ -75,6 +75,7 @@ def host_fingerprints():
     return result
 
 def readiness(p):
+    if p.get('transfer_version')==3:return {'relay':True,'installed':True,'listening':True,'message':'Authenticated encrypted relay; no inbound SSH listener or peer login required.'}
     present=Path('/usr/sbin/sshd').exists();listening=False
     try:listening=bool(subprocess.run(['/usr/bin/ss','-H','-6','-ltn','sport = :22'],capture_output=True,text=True,timeout=3).stdout.strip())
     except OSError:pass
@@ -110,14 +111,14 @@ def source_wallet(core,p,require_encrypted=False,*,public_preview=False,restorat
     return matches[0]
 
 def wallet_details(core,p,store=None,local_source=None):
-    """Funded address facts originate at Core, transferred peer-to-peer, never asserted by Dashboard."""
+    """Funded address facts originate at Core, transferred peer-to-peer, never asserted by Wallet Server."""
     if local_source is None and __import__('extinct_sync').grouped(p['public_wallet']):return __import__('extinct_sync').local_details(core,p,store)
     name=local_source if local_source is not None else source_wallet(core,p,public_preview=True)
     if local_source is not None:
         raw=rpc(core,'listdescriptors',[False],name);info=rpc(core,'getwalletinfo',[],name)
         if info.get('private_keys_enabled') or p['source_has_private_keys'] or info.get('scanning') or not descriptors(p['public_wallet'])<=descriptors(raw):raise ValueError('Local historical source differs from the reviewed public addresses.')
     names=[name];vaults=[]
-    if p.get('transfer_version')==2:
+    if p.get('transfer_version') in (2,3):
         from wallet_ops import verify_vault
         from vault_policy import public_vault
         for item in (store or Store()).read()['vaults'].values():
@@ -155,7 +156,7 @@ def wallet_details(core,p,store=None,local_source=None):
             height=heights[h]
         rows.append({'address':u.get('address','Unknown script'),'txid':u['txid'],'vout':u['vout'],'amount_sats':str(__import__('wallet_ops').sats(u['amount'])),'time_received':tx.get('timereceived',tx.get('time')),'blockheight':height,'confirmations':u.get('confirmations',0)})
     raw=rpc(core,'listdescriptors',[False],name)
-    if p.get('transfer_version')==2:
+    if p.get('transfer_version') in (2,3):
         from wallet_labels import address_only,fixed_address,read_labels
         if address_only(p['public_wallet']):
             wanted=descriptors(p['public_wallet']);raw['descriptors']=[r for r in raw['descriptors'] if descriptors({'wallet_name':name,'descriptors':[r]})<=wanted]
@@ -166,7 +167,7 @@ def wallet_details(core,p,store=None,local_source=None):
             if len(groups)==1:raw['wallet_name']=next(iter(groups))
     if __import__('extinct_sync').grouped(p['public_wallet']):raw['wallet_name']='Wallaby Extinct'
     result={'public_wallet':raw,'funded_outputs':rows,'chain':rpc(core,'getblockchaininfo')['chain']}
-    if p.get('transfer_version')==2:result.update(vaults=vaults,address_labels=labels)
+    if p.get('transfer_version') in (2,3):result.update(vaults=vaults,address_labels=labels)
     return result
 
 def work_dir(core):
@@ -196,7 +197,15 @@ class Transfer:
             proof={'fingerprint':fingerprint(preview['public_key']),'preview_hash':digest(preview['preview'])}
             self.details={k:preview['preview'][k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels') if k in preview['preview']}
         from sync_queue import rows
-        return {'rows':rows(self.store),'batch':self.store.read().get('sync_batch'),'route':route_info(row['proposal']['peer']['ipv6']) if row else None,'initial_preview':preview,'preview_proof':proof,'preview_error':self.store.read().get('preview_errors',{}).get(key,''),'id':key,'proposal':row['proposal'] if row else None,'state':row['state'] if row else None,'ready':bool(self.listener),'sending':getattr(self,'sending',False),'firewall':self.firewall,'details':self.details,'error':self.error,'success_until':self.success_until,'setup':readiness(row['proposal']) if row else None,'chain_sync':self.store.read().get('chain_sync',{}),'original_assignments':[{'wallet_name':b['wallet_name'],'binding_id':b['binding_id'],'had_private':b['had_private']} for _,b in __import__('signer_restoration').candidates(self.store.read(),row['proposal']['public_wallet'])] if row and __import__('signer_restoration').requested(row['proposal']) else []}
+        relay_route=None;relay_progress=None
+        if row and row['proposal'].get('transfer_version')==3:
+            from peer_mesh import manager
+            peers=getattr(self.store,'peers',None)
+            try:manager(self.store).binding(row['proposal']);relay_route={'ready':True,'message':'QR-paired encrypted peer channel ready through Wallet Server. Bulk transfer speed is limited by the Server relay.'}
+            except ValueError as error:relay_route={'ready':False,'message':str(error)}
+            streams=list(getattr(getattr(peers,'wallet_bridge',None),'streams',{}).values())
+            relay_progress={'sent_bytes':sum(s.tx for s in streams),'received_bytes':sum(s.rx for s in streams),'paused':bool(peers and time.monotonic()<peers.backpressured_until)}
+        return {'relay_progress':relay_progress,'rows':rows(self.store),'batch':self.store.read().get('sync_batch'),'route':(relay_route if row['proposal'].get('transfer_version')==3 else route_info(row['proposal']['peer']['ipv6'])) if row else None,'initial_preview':preview,'preview_proof':proof,'preview_error':self.store.read().get('preview_errors',{}).get(key,''),'id':key,'proposal':row['proposal'] if row else None,'state':row['state'] if row else None,'ready':bool(self.listener),'sending':getattr(self,'sending',False),'firewall':self.firewall,'details':self.details,'error':self.error,'success_until':self.success_until,'setup':readiness(row['proposal']) if row else None,'chain_sync':self.store.read().get('chain_sync',{}),'original_assignments':[{'wallet_name':b['wallet_name'],'binding_id':b['binding_id'],'had_private':b['had_private']} for _,b in __import__('signer_restoration').candidates(self.store.read(),row['proposal']['public_wallet'])] if row and __import__('signer_restoration').requested(row['proposal']) else []}
     def review(self,key):
         with self.store.edit() as s:
             if key not in s['pending'] or s['pending'][key].get('withdrawn') or s['pending'][key]['proposal']['kind']!='wallet_transfer':raise ValueError('Wallet request was withdrawn.')
@@ -222,9 +231,12 @@ class Transfer:
             guard(self.core,row['proposal'],self.store,public_preview=True)
             from wallet_preview import verify_bound
             payload=self.store.read().get('transfer_previews',{}).get(key)
-            if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('The initial node-verified wallet preview is missing. Dashboard Build 8 needs the documented preview protocol update; receiving is disabled until then.')
+            if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('The initial node-verified wallet preview is missing. Wallet Server Build 8 needs the documented preview protocol update; receiving is disabled until then.')
             proof=verify_bound(self.store,payload,row['proposal'])
-            if sender_fingerprint!=proof['fingerprint']:raise ValueError('The Agent identity fingerprint must match the sending Agent’s own screen. Dashboard is not a trusted source for it.')
+            if row['proposal'].get('transfer_version')==3:
+                from peer_mesh import manager
+                c=manager(self.store).binding(row['proposal']);sender_fingerprint=__import__('wallet_preview').fingerprint(c.peer['identity_key'])
+            if sender_fingerprint!=proof['fingerprint']:raise ValueError('The Agent identity fingerprint must match the sending Agent’s own screen. Wallet Server is not a trusted source for it.')
             if row['state']!='pending':raise ValueError('This receiving request was already attempted. Reconcile it before retrying.')
             if not readiness(row['proposal'])['listening']:raise ValueError('Start the receiving machine’s IPv6 SSH listener using the displayed instructions, then Authorise again.')
             if self.thread and self.thread.is_alive():raise ValueError('Receiving is already active. Finish or cancel it first.')
@@ -259,7 +271,7 @@ class Transfer:
         if getattr(self,'sending',False) or (row['state']=='attempted' and self.thread and self.thread.is_alive()):raise ValueError('Wallet transfer/restoration is running. Wait for its result before cancelling.')
         self.close()
         with self.store.edit() as s:s.pop('active_transfer',None)
-        self.details=None # The request remains in the Dashboard-owned list.
+        self.details=None # The request remains in the Wallet Server-owned list.
     def receive(self,key,p):
         conn=None;path=None;listener=self.listener
         try:
@@ -280,7 +292,12 @@ class Transfer:
                 with self.store.edit() as state:state['active_transfer']=key
             from managed_accounts import guard
             guard(self.core,p,self.store,public_preview=True)
-            if header.get('operation')!='manifest' or header.get('transfer_id')!=p['transfer_id'] or ipv6(header.get('peer_ipv6'))!=ipv6(p['peer']['ipv6']):raise ValueError('Transfer or authenticated SSH source address differs from the approved request.')
+            if p.get('transfer_version')==3:
+                from peer_mesh import manager
+                c=manager(self.store).binding(p)
+                if header.get('peer_endpoint')!=c.peer['endpoint_id']:raise ValueError('Encrypted sender differs from approved peer.')
+            elif ipv6(header.get('peer_ipv6'))!=ipv6(p['peer']['ipv6']):raise ValueError('Authenticated SSH source differs from request.')
+            if header.get('operation')!='manifest' or header.get('transfer_id')!=p['transfer_id']:raise ValueError('Transfer differs from the approved request.')
             details=header.get('details');wanted=descriptors(p['public_wallet'])
             if not isinstance(details,dict) or descriptors(details.get('public_wallet'))!=wanted or details.get('chain')!=rpc(self.core,'getblockchaininfo')['chain']:raise ValueError('Direct peer public wallet does not match the approved descriptors/network.')
             # A second local click approves the actual live peer history, not server-provided claims.
@@ -292,13 +309,13 @@ class Transfer:
             option=self.store.read().get('sync_batch',{}).get('options',{}).get(key,{})
             watch=not p['source_has_private_keys'] or option.get('watch_only',False) or header.get('watch_only',False)
             if type(header.get('watch_only',False)) is not bool:raise ValueError('Invalid watch-only choice.')
-            if p.get('transfer_version')!=2 and watch:raise ValueError('Watch-only transfer requires the Build 8 direct protocol on both Agents.')
+            if p.get('transfer_version') not in (2,3) and watch:raise ValueError('Watch-only transfer requires the Build 8 direct protocol on both Agents.')
             from signer_restoration import requested,offer,verify_received,finish as finish_restoration,candidates
             if candidates(self.store.read(),p['public_wallet']) and not requested(p):raise ValueError('This wallet needs a Build 65 restoration invitation and signed restoration preview.')
             restoration_offer=offer(self.store,p,watch)
             ready={'status':'ready','features':['chain_sync_v1','core_history_v1','restore_roles_v1']}
             if restoration_offer:ready['restoration']=restoration_offer
-            if p.get('transfer_version')==2:ready['watch_only']=watch
+            if p.get('transfer_version') in (2,3):ready['watch_only']=watch
             frame_write(stream,ready)
             header=frame_read(stream)
             native_peer=False
@@ -372,7 +389,7 @@ class Transfer:
             with self.store.edit() as s:s['pending'][key]['state']='attempted'
             name='Wallaby Sync '+p['transfer_id'][:24]
             from wallet_recovery import history_missing,earliest,require
-            if p.get('transfer_version')==2 and not native_peer and history_missing(self.core,earliest(details)):
+            if p.get('transfer_version') in (2,3) and not native_peer and history_missing(self.core,earliest(details)):
                 # Preserve the one received encrypted file for an explicitly approved restore.
                 staged=root/('pending-'+p['transfer_id']+'.dat')
                 if staged.exists():raise ValueError('An encrypted file for this transfer is already staged. Inspect recovery status.')
@@ -384,12 +401,12 @@ class Transfer:
             info=rpc(self.core,'getwalletinfo',[],name);actual=descriptors(rpc(self.core,'listdescriptors',[False],name))
             if actual!=wanted or info.get('private_keys_enabled')!=(False if watch_snapshot else p['source_has_private_keys']) or (info.get('private_keys_enabled') and ('unlocked_until' not in info or info['unlocked_until']!=0)) or info.get('scanning'):
                 rpc(self.core,'unloadwallet',{'wallet_name':name,'load_on_startup':False});raise ValueError('Restored wallet failed descriptor, encryption or scan verification; unloaded. Inspect it in Core before retrying.')
-            if p.get('transfer_version')==2:
+            if p.get('transfer_version') in (2,3):
                 from wallet_labels import apply_labels
                 apply_labels(self.core,name,details.get('address_labels',[]),write=False)
                 from wallet_recovery import verify_history
                 verify_history(self.core,name,details,self.store)
-            for output in ([] if p.get('transfer_version')==2 else details['funded_outputs']):
+            for output in ([] if p.get('transfer_version') in (2,3) else details['funded_outputs']):
                 coin=rpc(self.core,'gettxout',[output['txid'],output['vout'],True])
                 if not coin or str(__import__('wallet_ops').sats(coin['value']))!=output['amount_sats'] or coin['scriptPubKey'].get('address')!=output['address']:
                     raise ValueError('A funded output is missing or changed on the receiving node. Check blockchain synchronisation and wallet history before retrying; success was not recorded.')
@@ -403,6 +420,9 @@ class Transfer:
                 from chain_sync import finish
                 finish(self.core,self.store)
         except Exception as e:
+            if p.get('transfer_version')==3:
+                saved=self.store.read()['pending'].get(key)
+                if saved and saved['state']=='attempted':self.pending_recovery(key)
             self.error=str(e) if isinstance(e,(ValueError,FileExistsError)) else 'Direct transfer failed or its outcome is uncertain. Inspect Core before retrying.'
             if conn:
                 try:frame_write(conn.makefile('rwb',buffering=0),{'status':'error','message':self.error})
@@ -413,15 +433,19 @@ class Transfer:
             self.connection=None
             if not self.error:self.deadline=time.monotonic()+LIFETIME
             if self.listener is listener and not self.store.read().get('sync_batch'):self.close()
-    def send(self,key,username,password,fingerprint):
+    def send(self,key,username=None,password=None,fingerprint=None):
+        row=self.store.read()['pending'].get(key)
+        if row and row['proposal'].get('transfer_version')==3:
+            from relay_transfer import send
+            return send(self,key)
         with self.lock:
             current,row=active(self.store)
             if key!=current or not row or row['state']!='pending' or row['proposal']['direction']!='send':raise ValueError('Review the active sending request.')
             if not isinstance(username,str) or not re.fullmatch('[a-z_][a-z0-9_-]{0,63}',username):raise ValueError('Enter the receiving machine’s local username.')
             if not isinstance(password,str) or len(password)>1024 or '\n' in password or '\r' in password:raise ValueError('Invalid receiving login password.')
-            if not isinstance(fingerprint,str) or not re.fullmatch('SHA256:[A-Za-z0-9+/]{43}',fingerprint):raise ValueError('Compare and enter the fingerprint shown on the receiving Agent. Do not obtain it from Dashboard.')
+            if not isinstance(fingerprint,str) or not re.fullmatch('SHA256:[A-Za-z0-9+/]{43}',fingerprint):raise ValueError('Compare and enter the fingerprint shown on the receiving Agent. Do not obtain it from Wallet Server.')
             payload=self.store.read().get('transfer_previews',{}).get(key)
-            if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('Dashboard needs the initial signed-preview protocol update before this wallet can be sent. No credentials or wallet file were sent.')
+            if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('Wallet Server needs the initial signed-preview protocol update before this wallet can be sent. No credentials or wallet file were sent.')
             from wallet_preview import verify_bound
             verify_bound(self.store,payload,row['proposal'])
             p=row['proposal'];peer=ipv6(p['peer']['ipv6']);own=local_ipv6(peer)
@@ -468,7 +492,7 @@ class Transfer:
                     timer=threading.Timer(86400,process.kill);timer.daemon=True;timer.start()
                     try:
                         manifest={'operation':'manifest','transfer_id':p['transfer_id'],'peer_ipv6':own,'details':details}
-                        if p.get('transfer_version')==2:manifest['watch_only']=watch
+                        if p.get('transfer_version') in (2,3):manifest['watch_only']=watch
                         elif watch:raise ValueError('Watch-only transfer requires the Build 8 direct protocol.')
                         frame_write(process.stdin,manifest)
                         reply=frame_read(process.stdout)
@@ -667,11 +691,11 @@ def route_info(peer):
         if p.returncode or not isinstance(rows,list) or len(rows)!=1:raise ValueError('No unique route.')
         r=rows[0];dev=r.get('dev','');physical=bool(re.fullmatch('[A-Za-z0-9_.:-]{1,32}',dev) and (Path('/sys/class/net')/dev/'device').exists())
         direct=not r.get('gateway') and physical and r.get('type','unicast')=='unicast' and not r.get('encap')
-        if direct:message=f'The computer currently selects a direct local IPv6 route on {dev}. The wallet file goes directly over the LAN, not through Dashboard. SSH still encrypts it. Public preview and coordination messages still use Dashboard.'
-        elif r.get('gateway'):message=f'The computer routes this peer through {r["gateway"]} on {dev}. It may be a local router or an Internet path; this route alone cannot prove where subsequent hops go. The wallet file is still sent directly to the peer over encrypted SSH, not through Dashboard.'
+        if direct:message=f'The computer currently selects a direct local IPv6 route on {dev}. The wallet file goes directly over the LAN, not through Wallet Server. SSH still encrypts it. Public preview and coordination messages still use Wallet Server.'
+        elif r.get('gateway'):message=f'The computer routes this peer through {r["gateway"]} on {dev}. It may be a local router or an Internet path; this route alone cannot prove where subsequent hops go. The wallet file is still sent directly to the peer over encrypted SSH, not through Wallet Server.'
         else:message=f'The computer selects interface {dev or "unknown"}. A local physical LAN path could not be confirmed; virtual interfaces, VPNs and policy routing can change the path. Wallet files still use direct encrypted SSH.'
         return {'direct_lan':direct,'interface':dev,'gateway':r.get('gateway'),'message':message}
-    except (OSError,ValueError,KeyError):return {'direct_lan':False,'interface':None,'gateway':None,'message':'The IPv6 route could not be determined. Check network connectivity; wallet files use direct encrypted SSH, not a Dashboard relay.'}
+    except (OSError,ValueError,KeyError):return {'direct_lan':False,'interface':None,'gateway':None,'message':'The IPv6 route could not be determined. Check network connectivity; wallet files use direct encrypted SSH, not a Wallet Server relay.'}
 
 def unreachable_message(peer):
     if route_info(peer)['direct_lan']:

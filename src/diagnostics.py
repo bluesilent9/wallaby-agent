@@ -26,17 +26,17 @@ def describe(stage, error):
         return error
     from agent_rpc import PublicDataFailure
     if isinstance(error,PublicDataFailure):
-        advice={'response_limit':'Bitcoin Core/public RPC response exceeds the 16 MiB transport limit. For getrawmempool this can be a large verbose mempool. A bounded/paged Dashboard request is needed; no incomplete mempool was substituted.','private_material':'Public RPC output was blocked because it contained private-key material. No private result was sent.','response_json':'Local Core/public HTTP response was not valid JSON. Check the configured RPC service.','mempool_busy':'Another local mempool capture is in progress. Retry this read-only capture after it finishes.','mempool_limit':'The complete local mempool exceeds the bounded snapshot capacity. No partial projection data was returned.','mempool_expired':'The mempool snapshot expired or was replaced. Discard incomplete pages and begin a new capture.','mempool_offset':'The requested mempool page is outside this snapshot.','mempool_core':'Bitcoin Core refused its public mempool snapshot. Check node readiness.'}
+        advice={'response_limit':'Bitcoin Core/public RPC response exceeds the 16 MiB transport limit. For getrawmempool this can be a large verbose mempool. A bounded/paged Wallet Server request is needed; no incomplete mempool was substituted.','private_material':'Public RPC output was blocked because it contained private-key material. No private result was sent.','response_json':'Local Core/public HTTP response was not valid JSON. Check the configured RPC service.','mempool_busy':'Another local mempool capture is in progress. Retry this read-only capture after it finishes.','mempool_limit':'The complete local mempool exceeds the bounded snapshot capacity. No partial projection data was returned.','mempool_expired':'The mempool snapshot expired or was replaced. Discard incomplete pages and begin a new capture.','mempool_offset':'The requested mempool page is outside this snapshot.','mempool_core':'Bitcoin Core refused its public mempool snapshot. Check node readiness.'}
         message=advice.get(error.code,'Public RPC data was refused.')
         if error.code=='response_limit' and error.details:
-            message='RPC response exceeds its '+str(error.details.get('limit_bytes'))+' byte limit at '+str(error.details.get('boundary'))+'. For fee projection, Dashboard must use the paged wallaby_mempool_snapshot interface. No partial data was returned.'
+            message='RPC response exceeds its '+str(error.details.get('limit_bytes'))+' byte limit at '+str(error.details.get('boundary'))+'. For fee projection, Wallet Server must use the paged wallaby_mempool_snapshot interface. No partial data was returned.'
         failure=ConnectionFailure(stage,error.code,message);failure.measurements=error.details;return failure
-    label = {'rpc': 'Local Bitcoin Core RPC', 'dashboard': 'Wallaby Dashboard',
+    label = {'rpc': 'Local Bitcoin Core RPC', 'dashboard': 'Wallaby Wallet Server',
              'workspace': 'Protected Bitcoin workspace', 'ssh': 'SSH', 'configuration': 'Agent configuration'}.get(stage, 'Node interface')
     status = getattr(error, 'status', None)
     if status in (401, 403):
         advice = ('Check the cookie location and restart Core if its RPC setting changed.'
-                  if stage == 'rpc' else 'Check Dashboard Agent access and session compatibility.')
+                  if stage == 'rpc' else 'Check Wallet Server Agent access and session compatibility.')
         return ConnectionFailure(stage, 'http_auth', f'{label} rejected authentication (HTTP {status}). {advice}')
     if isinstance(status, int):
         return ConnectionFailure(stage, 'http_status', f'{label} returned HTTP {status}. Check the service on the configured port.')
@@ -102,7 +102,7 @@ def action_code(error):
     if isinstance(error,WorkspaceFailure):return error.code
     text=str(error)
     if core_refusal(text):return 'core_rpc_refused'
-    for prefix,code in (('Dashboard requested cancellation.', 'builder_cancellation_pending'),('Choose Delete and Cancel', 'builder_cancellation_choice_required'),('This build is cancelled.', 'builder_cancellation_pending'),('Close request expired;', 'close_admission_expired'),('Finish the active protected operation', 'local_action_busy'),('Finish active wallet work,', 'unfinished_wallet_work'),('The protected workspace is closing.', 'workspace_closing')):
+    for prefix,code in (('Wallet Server requested cancellation.', 'builder_cancellation_pending'),('Choose Delete and Cancel', 'builder_cancellation_choice_required'),('This build is cancelled.', 'builder_cancellation_pending'),('Close request expired;', 'close_admission_expired'),('Finish the active protected operation', 'local_action_busy'),('Finish active wallet work,', 'unfinished_wallet_work'),('The protected workspace is closing.', 'workspace_closing')):
         if text.startswith(prefix):return code
     return 'local_action_refused'
 
@@ -123,8 +123,8 @@ LOCAL_SETUP_MESSAGES=frozenset({
     'Core could not install the approved public policy.',
     'Core did not confirm a ranged public policy.',
     'Core did not return one public BIP84 key per branch.',
-    'Dashboard policy differs from the independently constructed threshold, keys, branches or mandatory height. There is no editable or alternative spending path.',
-    'Dashboard requested cancellation. Review Delete and Cancel or Backup and Cancel on Authorise before continuing.',
+    'Wallet Server policy differs from the independently constructed threshold, keys, branches or mandatory height. There is no editable or alternative spending path.',
+    'Wallet Server requested cancellation. Review Delete and Cancel or Backup and Cancel on Authorise before continuing.',
     'Duplicate cancellation export binding.',
     'Enter a non-empty passphrase, up to 1024 characters.',
     'Finish the current wallet setup and its physical backups before starting another wallet.',

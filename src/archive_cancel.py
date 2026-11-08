@@ -70,7 +70,7 @@ class Cancellations:
         self.plans.pop(key,None)
         from activity_log import event
         event('archive.cancellation','Completed locally · disc_created='+str(facts.get('disc_created'))+' · destroyed_discs='+str(facts.get('destroyed_disc_count',0)))
-        return {'message':'Archive cancellation completed. Its signed cleanup result is queued for Dashboard.'}
+        return {'message':'Archive cancellation completed. Its signed cleanup result is queued for Wallet Server.'}
     def observe(self,mark_only=False):
         for key,row in list(self.store.read()['pending'].items()):
             if row['proposal']['kind']!='archive_cancel':continue

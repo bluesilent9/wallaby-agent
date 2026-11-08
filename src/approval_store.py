@@ -34,7 +34,7 @@ class Store:
     def edit(self):
         with (self.root/'approvals.lock').open('a') as lock:
             os.chmod(lock.name,0o600);fcntl.flock(lock,fcntl.LOCK_EX)
-            state={'pending':{},'denied':{},'completed':{},'vaults':{},'outbox':{},'sync':'Waiting for Dashboard extension support.'}
+            state={'pending':{},'denied':{},'completed':{},'vaults':{},'outbox':{},'sync':'Waiting for Wallet Server extension support.'}
             if self.path.exists():state.update(json.loads(self.path.read_text()))
             record=None
             if self.persistence is not None:
@@ -89,7 +89,7 @@ class Store:
             if s['pending'][key]['proposal']['kind']=='builder_cancel':raise ValueError('Choose Delete and Cancel or Backup and Cancel locally.')
             if s['pending'][key]['proposal']['kind']=='wallet_retire' and s['pending'][key]['state']!='pending':raise ValueError('This extinction operation was attempted or has an uncertain outcome. Inspect Core and reconcile it; it cannot be relabelled as an unstarted denial.')
             if s.get('active_transfer')==key:raise ValueError('Cancel the active transfer on Synchronisation first.')
-            if s['pending'][key]['proposal']['kind']=='wallet_transfer':raise ValueError('Only Dashboard can remove synchronisation requests. Uncheck a wallet to leave it pending.')
+            if s['pending'][key]['proposal']['kind']=='wallet_transfer':raise ValueError('Only Wallet Server can remove synchronisation requests. Uncheck a wallet to leave it pending.')
             row=s['pending'].pop(key)
             from denial_storage import display
             kind=row['proposal']['kind'];s['denied'][key]={'proposal':{'kind':kind},'wallet_name':display(row['proposal'])}
@@ -103,6 +103,6 @@ class Store:
     def queue(self,kind,payload):
         item={'kind':kind,'payload':payload};key=digest(item)
         with self.edit() as s:
-            if len(s['outbox'])>=MAX_ITEMS:raise ValueError('Dashboard outbox is full; connect and synchronise first.')
+            if len(s['outbox'])>=MAX_ITEMS:raise ValueError('Wallet Server outbox is full; connect and synchronise first.')
             s['outbox'][key]=item
         return key

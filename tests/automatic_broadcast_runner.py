@@ -1,4 +1,4 @@
-"""Agent half of the isolated Dashboard broadcast integration check."""
+"""Agent half of the isolated Wallet Server broadcast integration check."""
 import json,sys,tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -11,7 +11,7 @@ from agent_exchange import Exchange
 config=json.loads(Path(sys.argv[1]).read_text());core=Core(config);original=core.call
 def call(ident,method,params,wallet=None,timeout=30):
  result=original(ident,method,params,wallet,timeout=timeout)
- # Dashboard's wire network is main; all coins and RPC here are isolated regtest.
+ # Wallet Server's wire network is main; all coins and RPC here are isolated regtest.
  if method=='getblockchaininfo' and 'result' in result:result['result']['chain']='main'
  return result
 core.call=call

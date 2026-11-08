@@ -1,4 +1,4 @@
-"""Local user deletion only. Never dispatched from a Dashboard RPC or proposal."""
+"""Local user deletion only. Never dispatched from a Wallet Server RPC or proposal."""
 import secrets,time
 from pathlib import Path
 from approval_store import digest

@@ -1,4 +1,4 @@
-"""Locally authorised history recovery. No backups or Dashboard-controlled commands.
+"""Locally authorised history recovery. No backups or Wallet Server-controlled commands.
 
 Jobs are durable before a mutation. An interrupted operation is inspected, never
 silently replayed. Reindex flags are one-shot arguments, never bitcoin.conf edits.
@@ -209,7 +209,7 @@ class Recovery:
         self.cache_at=0
     def restart_window(self):
         # Only this live, locally authorised restart owns the longer Core grace.
-        # A saved flag after a crash, Dashboard input or a failed launch cannot
+        # A saved flag after a crash, Wallet Server input or a failed launch cannot
         # suppress the ordinary 15-second connection failure handling.
         return bool(self.restart_deadline and time.monotonic()<self.restart_deadline and self.thread and self.thread.is_alive())
     def launch_command(self,launch,args,unit,wait=False):

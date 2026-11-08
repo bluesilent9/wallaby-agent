@@ -16,7 +16,7 @@ def change(store,key,disable):
                 if row['state']!='pending':raise ValueError('Inspect the previously attempted wallet transfer before disabling it.')
                 s['pending'].pop(item)
         s['sync_preferences_changed']=True
-    return {'message':'Incoming synchronisation disabled for that exact public wallet policy on this Agent. The local denial list is saved across reboots. Dashboard may still show a missing-wallet notification until it reads the Agent’s permission status.'}
+    return {'message':'Incoming synchronisation disabled for that exact public wallet policy on this Agent. The local denial list is saved across reboots. Wallet Server may still show a missing-wallet notification until it reads the Agent’s permission status.'}
 
 def enable(store,ident):
     restored=0
@@ -31,19 +31,19 @@ def enable(store,ident):
         disabled=len(s['sync_exclusions'])
     from activity_log import event
     event('sync.permissions','Incoming policy enabled · disabled_remaining='+str(disabled)+' · restored_requests='+str(restored))
-    return {'message':'Synchronisation enabled for that wallet again.'+(' Its current request is available on Synchronisation.' if restored else ' Waiting for the Dashboard to offer an active request; no wallet data was imported.')}
+    return {'message':'Synchronisation enabled for that wallet again.'+(' Its current request is available on Synchronisation.' if restored else ' Waiting for the Wallet Server to offer an active request; no wallet data was imported.')}
 
 def cancel(store,key):
     with store.edit() as s:
         row=s['pending'].get(key)
         if not row or row['proposal']['kind']!='wallet_transfer' or row['state']!='pending' or s.get('active_transfer') or s.get('sync_batch'):raise ValueError('Only an unattempted, inactive synchronization request can be cancelled.')
         s['pending'].pop(key);s.get('sync_choices',{}).pop(key,None)
-    return {'message':'Request dismissed locally. It will return while the Dashboard still offers it. Disable synchronisation to suppress this incoming policy instead.'}
+    return {'message':'Request dismissed locally. It will return while the Wallet Server still offers it. Disable synchronisation to suppress this incoming policy instead.'}
 
 NAMESPACE='wallaby-sync-preferences-v1'
 
 def exchange(store,p):
-    """Only a future Dashboard explicitly requesting this kind gets a new outbox.
+    """Only a future Wallet Server explicitly requesting this kind gets a new outbox.
 
     Build 11 rejects unknown outbox kinds; never break its ordinary connection.
     Previous snapshots are checked for compatibility but never restore preferences.

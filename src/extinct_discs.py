@@ -32,7 +32,7 @@ def proof(ops,p):
     catalog=ops.archives.catalogs.get(p['archive_id'])
     if not catalog:raise ValueError('Read and authenticate the old disc in Disc Operations before reviewing its complete membership.')
     actual={k:member(r) for k,r in catalog.items()};offered=inventory.get('members')
-    if not isinstance(offered,list) or len(offered)!=len(actual) or {r.get('member_id') for r in offered}!=set(actual) or any(r!=actual[r['member_id']] for r in offered):raise ValueError('Dashboard disc membership differs from the independently read disc.')
+    if not isinstance(offered,list) or len(offered)!=len(actual) or {r.get('member_id') for r in offered}!=set(actual) or any(r!=actual[r['member_id']] for r in offered):raise ValueError('Wallet Server disc membership differs from the independently read disc.')
     keys=descriptors(p['retired_wallet']);current=[];retired=[]
     for ident,r in actual.items():
         candidates=[r['public_wallet'],*r['related_policies']];matches=[descriptors(raw)==keys for raw in candidates]

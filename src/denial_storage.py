@@ -78,6 +78,9 @@ def strict_json(raw):
 
 class FileStore:
     """Fixed filenames; directory-FD operations reject symlink and path redirection."""
+    FILENAME="denials.json"
+    validate=staticmethod(validate)
+    initial=staticmethod(initial)
     def __init__(self,directory):self.directory=Path(directory)
     def directory_fd(self):
         fd=os.open(self.directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
@@ -85,14 +88,14 @@ class FileStore:
         if info.st_uid!=os.getuid() or stat.S_IMODE(info.st_mode)!=0o700:os.close(fd);raise ValueError('Denial storage must be a private user-owned directory.')
         return fd
     def read_at(self,parent):
-        try:fd=os.open('denials.json',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
-        except FileNotFoundError:return initial()
+        try:fd=os.open(self.FILENAME,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+        except FileNotFoundError:return self.initial()
         try:
             info=os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_nlink!=1 or info.st_size>LIMIT or stat.S_IMODE(info.st_mode)!=0o600:raise ValueError('Unsafe persistent denial file. Repair it locally before Bitcoin work can resume.')
             with os.fdopen(os.dup(fd),'rb') as f:raw=f.read(LIMIT+1)
             if len(raw)>LIMIT:raise ValueError('Denial file is too large.')
-            return validate(strict_json(raw))
+            return self.validate(strict_json(raw))
         finally:os.close(fd)
     def operation(self,request):
         if not isinstance(request,dict):raise ValueError('Invalid denial operation.')
@@ -104,13 +107,13 @@ class FileStore:
             fcntl.flock(lock,fcntl.LOCK_EX);old=self.read_at(parent)
             if request=={'method':'read'}:return old
             if set(request)!={'method','expected_revision','record'} or request['method']!='commit' or type(request['expected_revision']) is not int:raise ValueError('Only fixed denial read/commit operations are allowed.')
-            data=validate(request['record'])
+            data=self.validate(request['record'])
             if request['expected_revision']!=old['revision'] or data['revision']!=old['revision']+1:raise ValueError('Denial list changed. Refresh and try again.')
             name='.denials-'+secrets.token_hex(16)
             try:
                 fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=parent)
                 with os.fdopen(fd,'wb') as f:f.write(json.dumps(data,sort_keys=True,separators=(',',':'),allow_nan=False).encode());f.flush();os.fsync(f.fileno())
-                os.replace(name,'denials.json',src_dir_fd=parent,dst_dir_fd=parent);os.fsync(parent)
+                os.replace(name,self.FILENAME,src_dir_fd=parent,dst_dir_fd=parent);os.fsync(parent)
             finally:
                 try:os.unlink(name,dir_fd=parent)
                 except FileNotFoundError:pass
@@ -132,6 +135,7 @@ def receive(sock,n):
 def socket_path(legacy=False):return Path('/run/wallaby-agent-denials' if legacy else '/run/wallaby-agent-denials-v2')/str(os.getuid())/'denials.sock'
 
 class Client:
+    validate=staticmethod(validate)
     def __init__(self,path=None):self.path=Path(path or socket_path())
     def operation(self,request):
         raw=json.dumps(request,allow_nan=False).encode()
@@ -145,7 +149,7 @@ class Client:
                 reply=strict_json(receive(s,n))
                 if set(reply)=={'error'}:raise ValueError('Denial storage refused the operation: '+str(reply['error']))
                 if set(reply)!={'result'}:raise ValueError('Invalid denial storage response.')
-                return validate(reply['result'])
+                return self.validate(reply['result'])
         except (OSError,TimeoutError):raise ValueError('Persistent denial storage is unavailable. Restart the protected workspace after installing the complete Build 11 package; requests remain blocked until the list can be read.') from None
     def read(self):return self.operation({'method':'read'})
     def commit(self,old,new):return self.operation({'method':'commit','expected_revision':old,'record':new})

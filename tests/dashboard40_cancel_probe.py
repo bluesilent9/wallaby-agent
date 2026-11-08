@@ -1,4 +1,4 @@
-"""Independent Dashboard interpreter validates real Agent cancellation receipts."""
+"""Independent Wallet Server interpreter validates real Agent cancellation receipts."""
 import copy,hashlib,json,sys,tempfile
 from pathlib import Path
 from types import SimpleNamespace

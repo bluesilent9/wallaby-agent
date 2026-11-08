@@ -1,4 +1,4 @@
-"""Dashboard Build20 public fee projection snapshot; no Dashboard code changed."""
+"""Wallet Server Build20 public fee projection snapshot; no Wallet Server code changed."""
 import heapq
 from decimal import Decimal
 def number(value):

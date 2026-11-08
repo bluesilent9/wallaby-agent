@@ -36,7 +36,7 @@ def recover_renderer(view,page,window,status,code):
 
 def main():
     enforce();settings=json.loads(sys.stdin.buffer.readline(8192));origin=settings['origin'];token=settings['token']
-    if not valid_origin(origin) or settings['page'] not in ('authorise','synchronisation','burn','message'):raise SystemExit('Invalid local view.')
+    if not valid_origin(origin) or settings['page'] not in ('authorise','synchronisation','burn','message','peers'):raise SystemExit('Invalid local view.')
     from worker_upgrade import inspect_request
     if inspect_request():return
     # Keep Chromium's sandbox enabled. Disable only caching, persistence and dumps.

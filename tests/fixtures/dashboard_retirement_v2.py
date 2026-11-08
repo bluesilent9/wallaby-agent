@@ -1,4 +1,4 @@
-"""Dashboard Build 18 result validator snapshot for integration regression."""
+"""Wallet Server Build 18 result validator snapshot for integration regression."""
 def result(state,node,p):
     allowed={'request_hash','status','message','archive_verified','history_verified','zero_balance_verified','wallet_deleted','archive_wallet','address_count','deleted_wallets'}
     if not isinstance(p,dict) or not {'request_hash','status'}<=set(p) or set(p)-allowed or p['status'] not in ('complete','denied','cancelled','error'):raise ValueError('Invalid retirement result.')

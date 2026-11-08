@@ -28,7 +28,7 @@ for(const key of Object.keys(ids)){const input=$('#'+ids[key]);input.addEventLis
 async function change(path,body,button){
  if(busy)return;busy=true;button.disabled=true;
  const nodeChange=path==='toggle'&&body.service==='node',startingWorkspace=nodeChange&&body.enabled&&!state?.workspace?.protected?.running;
- if(nodeChange)nodeFeedback={color:'amber',message:body.enabled?(startingWorkspace?'Starting protected workspace. Approve the local administrator dialogue if requested.':'Connecting Bitcoin Core and Wallaby Dashboard…'):'Disconnecting node interface…'};
+ if(nodeChange)nodeFeedback={color:'amber',message:body.enabled?(startingWorkspace?'Starting protected workspace. Approve the local administrator dialogue if requested.':'Connecting Bitcoin Core and Wallaby Wallet Server…'):'Disconnecting node interface…'};
  else notify();
  try{
   if(state)render(state);await flush();

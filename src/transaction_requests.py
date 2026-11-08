@@ -19,7 +19,7 @@ def intents(ops,p,review):
         original=unsigned(ops.core,saved['psbt'])['tx']
         if final_points & {(i['txid'],i['vout']) for i in original['vin']}:
             if p['kind']=='broadcast_transaction':declared.append({'vault':saved['vault'],'proposal_psbt':saved['psbt']})
-            if not any(i['vault']==saved['vault'] and unsigned(ops.core,i['proposal_psbt'])['tx']==original for i in declared):raise ValueError('A locally exported vault intent was omitted or changed by Dashboard.')
+            if not any(i['vault']==saved['vault'] and unsigned(ops.core,i['proposal_psbt'])['tx']==original for i in declared):raise ValueError('A locally exported vault intent was omitted or changed by Wallet Server.')
     for intent in declared:
         v=public_vault(intent['vault']);verify_vault(ops.core,v)
         if v['chain']!=p['chain']:raise ValueError('Vault intent network mismatch.')

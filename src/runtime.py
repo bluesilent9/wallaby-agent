@@ -115,7 +115,7 @@ def worker(kind):
                 if not tunnel.alive():raise tunnel.failure()
                 if time.monotonic()-stable_since>=60:delay=15
                 if kind=='node':
-                    if session_stop.is_set():raise node_errors[0] if node_errors else ConnectionFailure('dashboard','session','Dashboard node session ended unexpectedly.')
+                    if session_stop.is_set():raise node_errors[0] if node_errors else ConnectionFailure('dashboard','session','Wallet Server node session ended unexpectedly.')
                     current=read_status(kind);publish(current['color'],current['message'],tunnel=True,stage='node')
                 else:publish('green',f'Connected · [::1]:{tunnel.port}',tunnel=True,stage='ssh')
         except Exception as error:
@@ -144,7 +144,7 @@ def worker(kind):
 
 def monitor():
     retire_jellyfin()
-    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev65','pid':os.getpid()}))
+    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev66','pid':os.getpid()}))
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     from node_lifecycle import Lifecycle
     lifecycle=Lifecycle()

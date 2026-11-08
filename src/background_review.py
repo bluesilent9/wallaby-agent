@@ -10,7 +10,12 @@ class Reviews:
         old=self.jobs.get(key)
         if old and old['proposal']==proposal:
             if old['state']=='running':return self.pending(key,old)
-            if old['state']=='done' and time.monotonic()-old['finished']<540:return copy.deepcopy(old['result'])
+            if old['state']=='done' and time.monotonic()-old['finished']<540:
+                result=copy.deepcopy(old['result'])
+                if row['proposal']['kind']=='wallet_policy_refresh':
+                    from peer_mesh import observe
+                    result['refresh']['peer_mesh']=observe(self.owner.store,row['proposal'],'refresh')
+                return result
             if old['state']=='error':
                 self.jobs.pop(key)
                 from diagnostics import LocalActionFailure
@@ -45,4 +50,4 @@ class Reviews:
         threading.Thread(target=run,daemon=True,name='policy-review').start()
         return self.pending(key,job)
     def pending(self,key,job):
-        return {'kind':'public_review_pending','id':key,'review_kind':job['kind'],'elapsed_seconds':round(time.monotonic()-job['started']),'message':'Checking local wallet policies and blockchain funding. This can take several minutes. Status and Dashboard inventory remain available; no policy is being installed.'}
+        return {'kind':'public_review_pending','id':key,'review_kind':job['kind'],'elapsed_seconds':round(time.monotonic()-job['started']),'message':'Checking local wallet policies and blockchain funding. This can take several minutes. Status and Wallet Server inventory remain available; no policy is being installed.'}

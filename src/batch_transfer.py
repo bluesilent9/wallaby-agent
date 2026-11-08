@@ -25,7 +25,7 @@ class BatchTransfer(Transfer):
             p=row['proposal']
             from managed_accounts import guard
             guard(self.core,p,self.store,public_preview=True)
-            if p.get('transfer_version')!=2:raise ValueError('Multiple and watch-only transfers require the documented Build 8 queue/transfer protocol from Dashboard.')
+            if p.get('transfer_version') not in (2,3):raise ValueError('Multiple and watch-only transfers require the documented Build 8 queue/transfer protocol from Wallet Server.')
             payload=saved.get('transfer_previews',{}).get(key)
             if not payload:raise ValueError('Each selected wallet needs its signed initial public preview before authorisation.')
             verify_bound(self.store,payload,p)
@@ -35,8 +35,18 @@ class BatchTransfer(Transfer):
     def authorise_batch(self,fingerprints):
         keys=selected(self.store,'receive');self.validate_batch(keys,'receive')
         saved=self.store.read()
+        if isinstance(fingerprints,dict):
+            fingerprints=dict(fingerprints)
+            for key in keys:
+                p=saved['pending'][key]['proposal']
+                if p.get('transfer_version')==3:
+                    from peer_mesh import manager
+                    fingerprints[key]=__import__('wallet_preview').fingerprint(manager(self.store).binding(p).peer['identity_key'])
         if not isinstance(fingerprints,dict) or set(fingerprints)!=set(keys):raise ValueError('Independently compare every sending Agent fingerprint.')
         for key in keys:
+            if saved['pending'][key]['proposal'].get('transfer_version')==3:
+                from peer_mesh import manager
+                channel=manager(self.store).binding(saved['pending'][key]['proposal']);fingerprints[key]=__import__('wallet_preview').fingerprint(channel.peer['identity_key'])
             proof=verify_bound(self.store,saved['transfer_previews'][key],saved['pending'][key]['proposal'])
             if fingerprints[key]!=proof['fingerprint']:raise ValueError('A sending Agent fingerprint does not match. Compare it directly on that computer.')
         if not readiness(saved['pending'][keys[0]]['proposal'])['listening']:raise ValueError('Start the receiving machine’s IPv6 SSH listener using the displayed instructions.')
@@ -60,7 +70,7 @@ class BatchTransfer(Transfer):
             self.close();release(self.store)
     def send_batch(self,credentials):
         keys=selected(self.store,'send');self.validate_batch(keys,'send');saved=self.store.read()
-        peers={saved['pending'][key]['proposal']['peer']['node_id'] for key in keys}
+        peers={saved['pending'][key]['proposal']['peer']['node_id'] for key in keys if saved['pending'][key]['proposal'].get('transfer_version')!=3}
         if not isinstance(credentials,dict) or set(credentials)!=peers:raise ValueError('Enter receiving credentials and independently verified SSH fingerprint for each receiving computer.')
         for data in credentials.values():
             if not isinstance(data,dict) or set(data)!={'username','password','fingerprint'}:raise ValueError('Invalid receiving credentials.')
@@ -70,12 +80,12 @@ class BatchTransfer(Transfer):
                 current=self.store.read()['pending'].get(key)
                 if not current or current.get('withdrawn'):skipped+=1;continue
                 with self.store.edit() as s:s['active_transfer']=key
-                data=credentials[current['proposal']['peer']['node_id']]
+                data=credentials.get(current['proposal']['peer']['node_id'],{})
                 super().send(key,**data)
             completed=self.store.read()['completed']
             if all(k in completed for k in keys):self.success_until=time.time()+5
             elif skipped:
-                self.error='Synchronisation batch interrupted: '+str(sum(k in completed for k in keys))+' of '+str(len(keys))+' selected transfers completed. Dashboard withdrew '+str(skipped)+' selected requests, which were skipped. Review the current list; no operation was automatically repeated.'
+                self.error='Synchronisation batch interrupted: '+str(sum(k in completed for k in keys))+' of '+str(len(keys))+' selected transfers completed. Wallet Server withdrew '+str(skipped)+' selected requests, which were skipped. Review the current list; no operation was automatically repeated.'
                 from activity_log import event
                 event('sync.batch',self.error)
                 raise ValueError(self.error)

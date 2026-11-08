@@ -28,8 +28,8 @@ class CancellationVisibility(unittest.TestCase):
   self.c.review(key);self.c.confirm(key,'delete')
   with patch('secure_worker.enforce',return_value={}):status=self.w.state()
   self.assertEqual(status['pending'],[]);self.assertEqual(status['setups'],[]);self.assertFalse(status['busy'])
-  with self.assertRaisesRegex(ValueError,'Dashboard deliveries'):self.w.begin_close()
-  with self.store.edit() as s:s['outbox'].clear() # Model Dashboard acknowledgement of delivery receipt.
+  with self.assertRaisesRegex(ValueError,'Wallet Server deliveries'):self.w.begin_close()
+  with self.store.edit() as s:s['outbox'].clear() # Model Wallet Server acknowledgement of delivery receipt.
   self.w.begin_close()
  def test_unrelated_pending_request_is_not_labelled_cancelled(self):
   unrelated={'kind':'wallet_setup','name':'Another vault'};ident=digest(unrelated)
@@ -46,5 +46,5 @@ class CancellationVisibility(unittest.TestCase):
   with patch('secure_worker.enforce',return_value={}):rows={p['id']:p for p in self.w.state()['pending']}
   self.assertEqual(rows[first]['replaces'],[self.original_id]);self.assertEqual(rows[second]['replaces'],[other_id])
  def test_diagnostic_categories_do_not_echo_sensitive_exception_text(self):
-  for message,code in [('Dashboard requested cancellation. secret material','builder_cancellation_pending'),('Choose Delete and Cancel or Backup and Cancel locally.','builder_cancellation_choice_required'),('This build is cancelled. secret material','builder_cancellation_pending')]:self.assertEqual(action_code(ValueError(message)),code)
+  for message,code in [('Wallet Server requested cancellation. secret material','builder_cancellation_pending'),('Choose Delete and Cancel or Backup and Cancel locally.','builder_cancellation_choice_required'),('This build is cancelled. secret material','builder_cancellation_pending')]:self.assertEqual(action_code(ValueError(message)),code)
   self.assertEqual(action_code(ValueError('arbitrary secret')),'local_action_refused')

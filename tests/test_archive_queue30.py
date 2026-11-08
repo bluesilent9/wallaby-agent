@@ -34,7 +34,7 @@ class ArchiveQueue(unittest.TestCase):
   source=os.environ.get('WALLABY_TEST_DASHBOARD_ARCHIVE_SRC')
   if not source:return
   run=subprocess.run([sys.executable,'-B',str(Path(__file__).with_name('dashboard_archive_result_probe.py')),source],input=json.dumps({'request':p,'receipt':receipt}),text=True,capture_output=True,timeout=30)
-  self.assertEqual(run.returncode,0,run.stderr);print('Dashboard/Agent archive outcome interoperability:',run.stdout.strip(),flush=True)
+  self.assertEqual(run.returncode,0,run.stderr);print('Wallet Server/Agent archive outcome interoperability:',run.stdout.strip(),flush=True)
  def test_later_requests_subset_verified_completion_and_unselected_survive(self):
   first=self.add('First');self.stage(first);second=self.add('Second');third=self.add('Third');self.stage(second);self.stage(third)
   self.assertEqual(len(self.burner.state()['queue']),3);self.burner.select([first,third]);self.burn(count=2)

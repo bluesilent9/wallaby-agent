@@ -32,11 +32,11 @@ with tempfile.TemporaryDirectory(prefix='identity-cluster-',dir='/tmp') as tempo
   while True:
    state=server.command({'op':'identity_status'})
    if state['identities']==3 and state['challenges']==3:break
-   if time.monotonic()>deadline:raise AssertionError('Three actual Dashboard identity replies did not arrive: '+str(state))
+   if time.monotonic()>deadline:raise AssertionError('Three actual Wallet Server identity replies did not arrive: '+str(state))
    time.sleep(.1)
   assert state['connections']==3 and before['sessions']==state['sessions'],'Session replacement during identity discovery'
   assert all(not a.command({'op':'status'})['thread_errors'] for a in agents)
-  result={'passed':True,'agent_build':44,'dashboard_source':str(dashboard_source),'separate_agent_processes':3,'core_nodes':3,'signed_identities_accepted':3,'authenticated_sessions_unchanged':True,'seconds_after_discovery':round(time.monotonic()-started,3),'adapters':'Isolated regtest network/health, synthetic MAC/IPv6 identities. Production Agent NodeClient/exchange and current Dashboard HTTP/RPC/builder signature validation. No live wallets or OS services.'}
+  result={'passed':True,'agent_build':44,'dashboard_source':str(dashboard_source),'separate_agent_processes':3,'core_nodes':3,'signed_identities_accepted':3,'authenticated_sessions_unchanged':True,'seconds_after_discovery':round(time.monotonic()-started,3),'adapters':'Isolated regtest network/health, synthetic MAC/IPv6 identities. Production Agent NodeClient/exchange and current Wallet Server HTTP/RPC/builder signature validation. No live wallets or OS services.'}
   (out/'result.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
  finally:
   for p in reversed(processes):p.close()

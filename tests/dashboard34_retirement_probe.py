@@ -1,4 +1,4 @@
-"""Separate Dashboard interpreter verifies the real Agent receipt and live Core archive."""
+"""Separate Wallet Server interpreter verifies the real Agent receipt and live Core archive."""
 import sys,json,copy,base64,urllib.request,contextlib
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,12 +20,12 @@ with __import__('tempfile').TemporaryDirectory() as root:
  bad=copy.deepcopy(row);bad['result']['archive_receipt']['message']['manifest_hash']='f'*64
  try:verify_archive(hub,bad)
  except ValueError:pass
- else:raise AssertionError('Dashboard accepted altered signed preservation evidence')
+ else:raise AssertionError('Wallet Server accepted altered signed preservation evidence')
  address=p['manifest']['addresses'][0]['address'];label=p['manifest']['addresses'][0]['label'];rpc(node,'setlabel',[address,'fixture deliberately incorrect'],wallet='Wallaby Extinct')
  try:
   try:verify_archive(hub,row)
   except ValueError:pass
-  else:raise AssertionError('Dashboard accepted incorrect actual archive readback')
+  else:raise AssertionError('Wallet Server accepted incorrect actual archive readback')
  finally:rpc(node,'setlabel',[address,label],wallet='Wallaby Extinct')
  assert verify_archive(hub,row)['manifest_hash']==p['manifest_hash']
  print(json.dumps({'dashboard_receipt_accepted':True,'live_core_archive_verified':True,'tampered_receipt_rejected':True,'incorrect_core_label_rejected':True}))

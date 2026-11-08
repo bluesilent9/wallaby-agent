@@ -1,4 +1,4 @@
-"""Actual Dashboard/Agent implementations in separate interpreters; public JSON only."""
+"""Actual Wallet Server/Agent implementations in separate interpreters; public JSON only."""
 import sys,tempfile,json,subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -43,4 +43,4 @@ with tempfile.TemporaryDirectory() as directory:
  body=[]
  with patch('agent_exchange.local_ipv6',return_value=None),patch('agent_exchange.http_json',side_effect=lambda port,path,data,*a,**k:body.append(data) or {'version':1,'accepted':[],'proposals':[]}):Exchange(1,'fixture',store).once()
  assert set(body[0]['capabilities'])<=set(reply['caps'])
- print('Production Dashboard/Agent: full archive queue, local delete/reoffer, signed verified completion, generated destruction task, own-key proof after RAM restart, local confirmation, withdrawal and advertised capabilities passed.')
+ print('Production Wallet Server/Agent: full archive queue, local delete/reoffer, signed verified completion, generated destruction task, own-key proof after RAM restart, local confirmation, withdrawal and advertised capabilities passed.')

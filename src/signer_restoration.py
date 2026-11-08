@@ -18,7 +18,7 @@ def policy_id(raw):return digest(sorted(descriptors(raw)))
 def requested(p):
     value=p.get('restoration')
     if value is None:return False
-    if not isinstance(value,dict) or set(value)!={'version','policy_id'} or type(value['version']) is not int or value['version']!=1 or value['policy_id']!=policy_id(p['public_wallet']) or p.get('transfer_version')!=2:raise ValueError('Invalid direct SSH restoration binding.')
+    if not isinstance(value,dict) or set(value)!={'version','policy_id'} or type(value['version']) is not int or value['version']!=1 or value['policy_id']!=policy_id(p['public_wallet']) or p.get('transfer_version') not in (2,3):raise ValueError('Invalid direct SSH restoration binding.')
     return True
 
 
@@ -72,7 +72,7 @@ def candidates(state,raw):
 def offer(store,p,watch):
     if not requested(p):return None
     rows=candidates(store.read(),p['public_wallet'])
-    if not rows:raise ValueError('No independently recorded original wallet assignment exists for this restoration. Dashboard cannot supply that authority; use locally verified original recovery evidence.')
+    if not rows:raise ValueError('No independently recorded original wallet assignment exists for this restoration. Wallet Server cannot supply that authority; use locally verified original recovery evidence.')
     allowed=[r for _,r in rows if watch or r['had_private']]
     if not allowed:raise ValueError('This Agent did not originally hold a private signer for this wallet. Choose watch-only restoration; private-role replication is forbidden.')
     return {'version':1,'transfer_id':p['transfer_id'],'policy_id':policy_id(p['public_wallet']),'challenge':secrets.token_hex(32),'watch_only':watch,'bindings':[{'binding_id':r['binding_id'],'private_key_ids':r['private_key_ids']} for r in allowed]}

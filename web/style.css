@@ -37,3 +37,5 @@ button.is-busy:disabled{cursor:wait}
 .archive-awaiting-authorisation{opacity:.55;cursor:not-allowed;display:flex;align-items:center;gap:12px}.archive-awaiting-authorisation span{font-size:12px;font-weight:400}
 
 .wallet-card .wallet-card-icons{display:flex;align-items:center;gap:10px;margin:0 0 12px}.wallet-card .wallet-card-icon{display:inline-flex;align-items:center;margin:0;flex:0 0 auto}.wallet-card-icon svg{width:24px;height:24px;display:block}.wallet-card-icon:focus-visible{outline:2px solid #526e5a;outline-offset:4px;border-radius:3px}.transaction-review-time{border:1px solid #a9beb0;background:#eef4ed;padding:18px 20px;border-radius:9px;position:sticky;top:8px;z-index:2;margin:0 0 20px}.transaction-countdown{display:block;font-size:28px;letter-spacing:.04em;font-variant-numeric:tabular-nums}.transaction-review-time.review-expired{border-color:#c48664;background:#fff0e5}.transaction-review-time p{margin:6px 0}.transaction-review-time h3{margin-bottom:5px}
+
+.peer-qr{display:block;width:min(80vw,560px);height:auto;background:white;image-rendering:pixelated}#peer-list code{overflow-wrap:anywhere}#peer-import{width:100%}

@@ -86,7 +86,7 @@ class NodeAndWindow(unittest.TestCase):
  def test_queued_dashboard_delivery_prevents_discarding_workspace(self):
   from secure_worker import Workspace
   worker=Workspace.__new__(Workspace);worker.busy=Mock(return_value=False);worker.archives=None;worker.store=Mock();worker.store.read.return_value={'outbox':{'delivery':{'kind':'partial_sign_result','payload':{'status':'signed','psbt':'public fixture'}}}};viewer=Mock();worker.viewers=[viewer]
-  with self.assertRaisesRegex(ValueError,'queued Dashboard deliveries'):worker.close_views()
+  with self.assertRaisesRegex(ValueError,'queued Wallet Server deliveries'):worker.close_views()
   viewer.terminate.assert_not_called()
  def test_disabled_sync_and_denied_notices_are_not_unfinished_work(self):
   from secure_worker import delivery_pending

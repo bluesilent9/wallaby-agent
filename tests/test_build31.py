@@ -23,7 +23,7 @@ class Cancellation(queue_fixture.ArchiveQueue):
  def wire(self,key,p):
   source=os.environ.get('WALLABY_TEST_DASHBOARD_CANCEL_SRC')
   if not source:return
-  result=self.store.read()['completed'][key]['result'];run=subprocess.run([sys.executable,'-B',str(Path(__file__).with_name('dashboard40_cancel_probe.py')),source],input=json.dumps({'task':p,'result':result}),text=True,capture_output=True,timeout=30);self.assertEqual(run.returncode,0,run.stderr);print('Dashboard cancellation interoperability:',run.stdout.strip(),flush=True)
+  result=self.store.read()['completed'][key]['result'];run=subprocess.run([sys.executable,'-B',str(Path(__file__).with_name('dashboard40_cancel_probe.py')),source],input=json.dumps({'task':p,'result':result}),text=True,capture_output=True,timeout=30);self.assertEqual(run.returncode,0,run.stderr);print('Wallet Server cancellation interoperability:',run.stdout.strip(),flush=True)
  def test_unattempted_and_unused_staged_requests_disappear_without_a_disc(self):
   first=self.add('First');k,p=self.request_cancel();self.ops.cancellations.observe();self.assertNotIn(k,self.store.read()['pending']);self.assertEqual(self.store.read()['completed'][k]['result']['disc_created'],False);self.wire(k,p)
   second=self.add('Second');self.stage(second);folder=self.ops.jobs[second]['folder'];k,p=self.request_cancel(1);self.ops.cancellations.observe();self.assertFalse(folder.exists());self.assertFalse(self.ops.busy());self.assertIsNone(self.burner.job);self.assertFalse(self.store.read()['completed'][k]['result']['disc_created']);self.wire(k,p)
@@ -55,7 +55,7 @@ class Cancellation(queue_fixture.ArchiveQueue):
   backups={k:{'recovery':copy.deepcopy(self.ops.jobs[k]['recovery']),'wallet':(self.ops.jobs[k]['folder']/'wallet.dat').read_bytes()} for k in (first,second)}
   self.burner.select([first,second]);self.burn();receipt=self.store.read()['completed'][first]['result']['signed_receipt'];k,p=self.request_cancel(receipt=receipt)
   # Simulate a fresh volatile worker: only its persistent signing identity and
-  # the Dashboard's exact signed original completion survive.
+  # the Wallet Server's exact signed original completion survive.
   previous=self.store;self.store=Store(self.root/'new-worker');self.store.identity_root=previous.root;self.ops.store=self.store;self.ops.cancellations.store=self.store;self.ops.jobs={};self.burner.job=None;self.burner.pending=[];self.revision+=1;snapshot(self.store,{'kind':'wallet_archive_queue','version':1,'queue_id':'f'*64,'revision':self.revision,'requests':[p]})
   facts=self.ops.cancellations.review(k)['cancellation'];self.assertTrue(facts['disc_created'])
   with self.assertRaisesRegex(ValueError,'Read the original'):self.ops.cancellations.stage(k,True)

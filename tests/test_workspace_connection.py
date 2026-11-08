@@ -1,4 +1,4 @@
-"""Local protected startup/IPC failures must never masquerade as Dashboard data errors."""
+"""Local protected startup/IPC failures must never masquerade as Wallet Server data errors."""
 import json,os,socket,struct,subprocess,sys,tempfile,threading,unittest
 from pathlib import Path
 from unittest.mock import Mock,patch

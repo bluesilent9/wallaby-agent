@@ -1,10 +1,10 @@
-"""Complete Agent signing -> HTTP exchange -> Dashboard workflow tests."""
+"""Complete Agent signing -> HTTP exchange -> Wallet Server workflow tests."""
 import base64,copy,json,os,subprocess,sys,tempfile,threading
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,HTTPServer
 import socket
 root=Path(__file__).resolve().parents[1]
-if not os.environ.get('WALLABY_TEST_DASHBOARD'):raise SystemExit('Set WALLABY_TEST_DASHBOARD to the matching Dashboard source checkout.')
+if not os.environ.get('WALLABY_TEST_DASHBOARD'):raise SystemExit('Set WALLABY_TEST_DASHBOARD to the matching Wallet Server source checkout.')
 dash=Path(os.environ['WALLABY_TEST_DASHBOARD'])
 sys.path[:0]=[str(dash),str(dash/'tests')]
 from test_build8 import Setup
@@ -41,7 +41,7 @@ for case in ('single','multiple_recipients','multisig'):
     def do_POST(self):
      try:
       body=json.loads(self.rfile.read(int(self.headers['Content-Length'])));requests.append(body);result=fixture.hub.exchange(token,body)
-      # Reproduce a lost acknowledgement after Dashboard already stored the
+      # Reproduce a lost acknowledgement after Wallet Server already stored the
       # signature. The Agent must deliver again without asking Core to re-sign.
       if case=='single' and not dropped[0]:dropped[0]=True;self.close_connection=True;return
       raw=json.dumps(result).encode();self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
@@ -57,4 +57,4 @@ for case in ('single','multiple_recipients','multisig'):
    finally:server.shutdown();server.server_close();thread.join()
   results.append({'case':case,'dashboard_all_signed':view['all_signed'],'agents':reports})
  finally:fixture.doCleanups()
-print(json.dumps({'Dashboard':int(dash.name.rsplit('build',1)[1]),'Agent':56,'live_wallets_accessed':False,'cases':results},indent=2))
+print(json.dumps({'Wallet Server':int(dash.name.rsplit('build',1)[1]),'Agent':56,'live_wallets_accessed':False,'cases':results},indent=2))

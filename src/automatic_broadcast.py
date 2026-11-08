@@ -34,7 +34,7 @@ class Broadcasts:
         payload={'request_hash':key,'status':status,'txid':p['txid'],**({'message':message} if status=='error' else {})}
         item={'kind':'broadcast_result','payload':payload};ident=digest(item)
         with self.store.edit() as saved:
-            if len(saved['outbox'])>=MAX_ITEMS:raise ValueError('Dashboard outbox is full; broadcast outcome retained for reconciliation.')
+            if len(saved['outbox'])>=MAX_ITEMS:raise ValueError('Wallet Server outbox is full; broadcast outcome retained for reconciliation.')
             saved['outbox'][ident]=item
             saved['completed'][key]={'kind':'broadcast_transaction','at':time.time(),'proposal':p,'artifact_psbt':p['psbt'],'artifact_txid':p['txid'],'status':status,'message':message,'automatic':True,'outbox_id':ident,'delivery':'queued'}
             saved['pending'].pop(key,None)
@@ -70,6 +70,6 @@ class Broadcasts:
             if sending:
                 if self.known(p['txid']):return self.finish(key,p,'broadcast','Core confirmed this exact transaction after an interrupted reply.')
                 message='Broadcast outcome is uncertain. No send was retried. Check this TXID on the node or Mempool before any new attempt.'
-            else:message=str(error) if isinstance(error,LocalActionFailure) else 'Core could not verify the completed transaction. No send was made. Check node readiness and retry from Dashboard when resolved.'
+            else:message=str(error) if isinstance(error,LocalActionFailure) else 'Core could not verify the completed transaction. No send was made. Check node readiness and retry from Wallet Server when resolved.'
             return self.finish(key,p,'error',message)
         return self.finish(key,p,'broadcast','Core accepted this exact transaction for broadcast.')

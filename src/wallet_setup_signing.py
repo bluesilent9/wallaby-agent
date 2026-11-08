@@ -1,7 +1,7 @@
 """Recognise the restricted shared policies directly from trusted local Core.
 
 The persisted Core public descriptor is authoritative after RAM-session restart.
-Dashboard names never establish a signing role; every account is matched locally.
+Wallet Server names never establish a signing role; every account is matched locally.
 """
 import re
 from wallet_ops import rpc

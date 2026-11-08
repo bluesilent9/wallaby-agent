@@ -1,4 +1,4 @@
-"""Only a later Dashboard broadcast request publishes a complete transaction."""
+"""Only a later Wallet Server broadcast request publishes a complete transaction."""
 import socket,tempfile,threading,time,unittest
 from pathlib import Path
 from unittest.mock import Mock,patch

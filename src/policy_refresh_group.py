@@ -6,7 +6,7 @@ from wallet_ops import rpc
 
 
 def targets(ops,p):
-    """Discover locally; names supplied by Dashboard do not establish a role."""
+    """Discover locally; names supplied by Wallet Server do not establish a role."""
     from policy_refresh import validate_extensions,transition
     wanted=descriptors({'wallet_name':'old','descriptors':[{'desc':d} for d in p['previous_descriptors']]})
     new=descriptors({'wallet_name':'new','descriptors':[{'desc':p[k]} for k in ('receive_descriptor','change_descriptor')]})
@@ -33,12 +33,14 @@ def targets(ops,p):
 
 
 def review(ops,key,p):
+    from peer_mesh import observe
+    mesh=observe(ops.store,p,'refresh')
     before=targets(ops,p)
     base={k:v for k,v in p.items() if k not in ('wallets',)};base['version']=1
     shown=ops.review_single(key,base)
     if targets(ops,p)!=before:raise ValueError('Loaded signing wallets changed during review. Review again.')
     shown['refresh']['targets']=[{k:r[k] for k in ('wallet','storage','private')} for r in before]
-    shown['refresh']['grouped']=True
+    shown['refresh']['grouped']=True;shown['refresh']['peer_mesh']=mesh
     ops.reviews[key]=(copy.deepcopy(p),shown['refresh'],time.monotonic(),before)
     return shown
 
@@ -49,7 +51,7 @@ def result(ops,key,p,status,**extra):
     payload={'version':1,'request_hash':key,'request_id':p['request_id'],'status':status,'wallet':p['wallet'],**extra}
     item={'kind':'wallet_policy_refresh_result','payload':sign(ops.store,payload)}
     with ops.store.edit() as saved:
-        if len(saved['outbox'])>=MAX_ITEMS:raise ValueError('Dashboard outbox is full; policy outcome retained locally.')
+        if len(saved['outbox'])>=MAX_ITEMS:raise ValueError('Wallet Server outbox is full; policy outcome retained locally.')
         saved['outbox'][digest(item)]=item
         if status in ('approved','history_required'):
             saved['pending'].pop(key,None);saved['completed'][key]={'kind':p['kind'],'at':time.time(),'proposal':p,'updated_wallets':extra['updated_wallets']}
@@ -71,6 +73,8 @@ def approve(ops,key):
     row=ops.store.read()['pending'][key];p=validate(row['proposal'])
     if row['state']!='pending':raise ValueError('This policy installation was attempted. Reconcile its local outcome; it will not be replayed automatically.')
     if p!=reviewed[0] or targets(ops,p)!=reviewed[3]:raise ValueError('The policy or loaded signer set changed. Review again before approval.')
+    from peer_mesh import observe
+    observe(ops.store,p,'refresh',strict=True)
     facts=reviewed[1];chain=rpc(ops.core,'getblockchaininfo');future=not facts['funded_outputs'] and facts['height']>chain['blocks'];plans=[];importing=False;completed=[];history=False;records={}
     from policy_refresh_backups import plan as backup_plan,stage as backup_stage,hold as backup_hold
     backup_discs=backup_plan(ops,reviewed[3])
@@ -93,10 +97,11 @@ def approve(ops,key):
                 finally:
                     password=None;rows=None;rpc(core,'walletlock',[],route)
             else:plan['requests']=[{'desc':p[k],'timestamp':timestamp,'active':True,'internal':bool(i),'range':[0,999]} for i,k in enumerate(('receive_descriptor','change_descriptor'))]
+        observe(ops.store,p,'refresh',strict=True)
         # Every password/key/metadata check succeeds before the first import.
         if time.monotonic()-reviewed[2]>600 or p['expires_at']<=time.time() or targets(ops,p)!=reviewed[3]:raise ValueError('The policy review expired or loaded signers changed. Review again.')
         with ops.store.edit() as saved:
-            if len(saved['outbox'])>=__import__('approval_store').MAX_ITEMS:raise ValueError('Dashboard outbox is full; connect before installing this policy.')
+            if len(saved['outbox'])>=__import__('approval_store').MAX_ITEMS:raise ValueError('Wallet Server outbox is full; connect before installing this policy.')
             current=saved['pending'][key]
             if current['state']!='pending' or current['proposal']!=p:raise ValueError('Policy work changed before installation.')
             current['state']='attempted';current['batch_wallets']=[r['wallet'] for r in reviewed[3]]
@@ -137,7 +142,7 @@ def approve(ops,key):
             latest=validate_extensions(record['recovery'])
             if latest==p['previous_descriptors']:record['recovery'].setdefault('policy_extensions',[]).append(transition(p))
             elif latest!=[p['receive_descriptor'],p['change_descriptor']]:raise ValueError('Archive history changed during installation.')
-        # Disc participants remain amber on Dashboard until their replacements
+        # Disc participants remain amber on Wallet Server until their replacements
         # pass full read-back and old-disc destruction is confirmed locally.
         outcome={'monitor_wallet':p['wallet'],'policy_hash':facts['policy_hash'],'receive_descriptor':p['receive_descriptor'],'change_descriptor':p['change_descriptor'],'previous_descriptors':p['previous_descriptors'],'updated_wallets':completed}
         if backup_discs:
@@ -146,7 +151,7 @@ def approve(ops,key):
         else:result(ops,key,p,'history_required' if history else 'approved',**outcome)
         with ops.store.edit() as saved:saved.get('retired_policies',{}).pop(digest([p['receive_descriptor'],p['change_descriptor']]),None)
         ops.reviews.pop(key,None)
-        return {'message':'Vault policy approved for all '+str(len(completed))+' related local wallets. Keys, old policies and archive members retained.'+(' Finish replacement discs in Disc Operations, then confirm old-disc destruction in Authorise. Dashboard will wait.' if backup_discs else '')+(' Blockchain history recovery is required.' if history else ''),'history_required':history,'updated_wallets':completed,'burn_authorised':bool(backup_discs)}
+        return {'message':'Vault policy approved for all '+str(len(completed))+' related local wallets. Keys, old policies and archive members retained.'+(' Finish replacement discs in Disc Operations, then confirm old-disc destruction in Authorise. Wallet Server will wait.' if backup_discs else '')+(' Blockchain history recovery is required.' if history else ''),'history_required':history,'updated_wallets':completed,'burn_authorised':bool(backup_discs)}
     except Exception as error:
         if importing:
             result(ops,key,p,'error',updated_wallets=completed,message='Policy installation is incomplete or uncertain. Retained keys and any installed policies were not replayed; reconcile this protected workspace.')
@@ -167,7 +172,7 @@ def received(store,p):
     with store.edit() as saved:
         row=saved['pending'].get(key)
         if not row or row.get('policy_receipt'):return
-        if len(saved['outbox'])>=MAX_ITEMS:raise ValueError('Dashboard outbox is full; request receipt remains pending.')
+        if len(saved['outbox'])>=MAX_ITEMS:raise ValueError('Wallet Server outbox is full; request receipt remains pending.')
         ident=digest(item);saved['outbox'][ident]=item;row['policy_receipt']=ident
 
 

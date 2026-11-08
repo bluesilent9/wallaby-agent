@@ -1,4 +1,4 @@
-"""Dashboard-owned rename queue; every mutation requires fresh local approval."""
+"""Wallet Server-owned rename queue; every mutation requires fresh local approval."""
 import copy,re,time,json
 from pathlib import Path
 from approval_store import digest
@@ -190,7 +190,7 @@ class Renames:
             self.update_references(p['wallet'],shown['actual_wallet']);proof=result(self.store,p,'complete',new_wallet=shown['actual_wallet'],identity_verified=True,policy_identity=facts['policy_identity'],archive_skipped=False,reconciled=True)
         else:proof=result(self.store,p,'error',identity_verified=True,attempted=False,outcome_uncertain=False,original_wallet_restored=True,reconciled=True,applied=False)
         self.finish(key,proof)
-        return {'message':'Local rename reconciled: '+shown['actual_wallet']+' is loaded and its original file identity, public policy, key capability and encryption are verified. No files were renamed during reconciliation. The signed outcome is queued for Dashboard.'}
+        return {'message':'Local rename reconciled: '+shown['actual_wallet']+' is loaded and its original file identity, public policy, key capability and encryption are verified. No files were renamed during reconciliation. The signed outcome is queued for Wallet Server.'}
     def update_references(self,old,new):
         # Only local mutable routing/history hints; signed proposals stay immutable.
         with self.store.edit() as s:

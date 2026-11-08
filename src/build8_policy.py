@@ -51,16 +51,23 @@ def proposal(p):
         return p
     if kind=='node_identity' and set(p)=={'kind'}:return p
     if kind=='wallet_transfer':
-        if not {'kind','direction','transfer_id','peer','public_wallet','source_has_private_keys','earliest_timestamp','requires_blockchain_redownload'}<=set(p)<={'kind','direction','transfer_id','peer','public_wallet','source_has_private_keys','earliest_timestamp','requires_blockchain_redownload','preview_challenge','node_ipv6','transfer_version','restoration'}:raise ValueError('Invalid paired transfer request.')
+        if not {'kind','direction','transfer_id','peer','public_wallet','source_has_private_keys','earliest_timestamp','requires_blockchain_redownload'}<=set(p)<={'kind','direction','transfer_id','peer','public_wallet','source_has_private_keys','earliest_timestamp','requires_blockchain_redownload','preview_challenge','node_ipv6','transfer_version','restoration','transport'}:raise ValueError('Invalid paired transfer request.')
         if p['direction'] not in ('send','receive') or not re.fullmatch('[0-9a-f]{64}',p['transfer_id']):raise ValueError('Invalid transfer identity.')
         if ('preview_challenge' in p)!=('node_ipv6' in p):raise ValueError('Both preview negotiation fields are required.')
         if 'preview_challenge' in p:
             if not re.fullmatch('[0-9a-f]{64}',str(p['preview_challenge'])):raise ValueError('Invalid preview challenge.')
-            ipv6(p['node_ipv6'])
-        if 'transfer_version' in p and (type(p['transfer_version']) is not int or p['transfer_version']!=2):raise ValueError('Unsupported direct transfer version.')
+            if p.get('transfer_version')!=3:ipv6(p['node_ipv6'])
+        if 'transfer_version' in p and (type(p['transfer_version']) is not int or p['transfer_version'] not in (2,3)):raise ValueError('Unsupported direct transfer version.')
         peer=p['peer']
         if not isinstance(peer,dict) or set(peer)!={'node_id','hostname','ipv6'}:raise ValueError('Invalid peer identity.')
-        text(peer['node_id']);text(peer['hostname']);ipv6(peer['ipv6']);descriptors(p['public_wallet'])
+        text(peer['node_id']);text(peer['hostname'])
+        if p.get('transfer_version')==3:
+            from peer_protocol import transport
+            transport(p)
+            if p.get('node_ipv6') is not None or peer['ipv6'] is not None or 'preview_challenge' not in p:raise ValueError('Relay transfers use identities, never peer IP addresses.')
+        elif 'transport' in p:raise ValueError('Relay binding cannot be added to an old transfer.')
+        else:ipv6(peer['ipv6'])
+        descriptors(p['public_wallet'])
         from signer_restoration import requested
         requested(p)
         from wallet_labels import fixed_address
@@ -86,6 +93,6 @@ def proposal(p):
             for i in intents:
                 if not isinstance(i,dict) or set(i)!={'vault','proposal_psbt'}:raise ValueError('Invalid vault intent.')
                 public_vault(i['vault']);psbt_text(i['proposal_psbt'])
-    else:raise ValueError('Unsupported Dashboard operation.')
-    if PRIVATE.search(json.dumps(p)):raise ValueError('Private material is forbidden in Dashboard messages.')
+    else:raise ValueError('Unsupported Wallet Server operation.')
+    if PRIVATE.search(json.dumps(p)):raise ValueError('Private material is forbidden in Wallet Server messages.')
     return p

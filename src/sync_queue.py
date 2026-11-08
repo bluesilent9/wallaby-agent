@@ -1,4 +1,4 @@
-"""Dashboard-owned request list; selection and transfer authority are local only."""
+"""Wallet Server-owned request list; selection and transfer authority are local only."""
 import socket,time,json
 from approval_store import digest,MAX_ITEMS
 
@@ -19,7 +19,7 @@ def apply_snapshot(store,revision,requests,session=None):
         if p['kind']!='wallet_transfer' or p['transfer_id'] in ids:raise ValueError('Duplicate or invalid wallet request.')
         ids.add(p['transfer_id']);rows[digest(p)]=p
     with store.edit() as s:
-        # Revisions belong to an authenticated Dashboard session, not the RAM
+        # Revisions belong to an authenticated Wallet Server session, not the RAM
         # workspace lifetime. A profile reset can legitimately restart at zero.
         # Store only token hashes; never discard local operation/approval records.
         new_session=session is not None and session!=s.get('sync_session')
@@ -44,7 +44,7 @@ def apply_snapshot(store,revision,requests,session=None):
                 else:
                     # Keep an unchanged sender review across a temporary peer
                     # disconnect. Re-signing it would change the independently
-                    # compared code while Dashboard retains the frozen original.
+                    # compared code while Wallet Server retains the frozen original.
                     payload=s.get('transfer_previews',{}).pop(key,None)
                     if payload and row['proposal']['direction']=='send':
                         cache=s.setdefault('sync_review_cache',{});cache[key]=payload
@@ -77,7 +77,7 @@ def apply_snapshot(store,revision,requests,session=None):
         changed=new_session or revision!=previous or before!=digest(s['pending'])
         offered_receive=sum(p['direction']=='receive' for p in requests);offered_send=len(requests)-offered_receive;disabled=sum(p['direction']=='receive' and policy_id(p) in s.get('sync_exclusions',{}) for p in requests);visible=sum(row['proposal']['kind']=='wallet_transfer' and not row.get('withdrawn') for row in s['pending'].values())
     from activity_log import event
-    if changed:event('sync.queue','Dashboard snapshot applied · revision='+str(revision)+' · session_rebased='+str(new_session).lower()+' · receiving='+str(offered_receive)+' · sending='+str(offered_send)+' · locally_disabled='+str(disabled)+' · visible='+str(visible))
+    if changed:event('sync.queue','Wallet Server snapshot applied · revision='+str(revision)+' · session_rebased='+str(new_session).lower()+' · receiving='+str(offered_receive)+' · sending='+str(offered_send)+' · locally_disabled='+str(disabled)+' · visible='+str(visible))
 
 
 def choose(store,key,selected,watch_only):
@@ -103,7 +103,7 @@ def rows(store):
         own=socket.gethostname();name=preview.get('public_wallet',{}).get('wallet_name') if p['direction']=='send' else p['public_wallet']['wallet_name']
         result.append({'id':key,'peer_id':p['peer']['node_id'],'direction':p['direction'],'sender':own if p['direction']=='send' else p['peer']['hostname'],'receiver':own if p['direction']=='receive' else p['peer']['hostname'],
                        'sender_ipv6':p.get('node_ipv6') if p['direction']=='send' else p['peer']['ipv6'],'receiver_ipv6':p.get('node_ipv6') if p['direction']=='receive' else p['peer']['ipv6'],
-                       'wallet_name':name or 'Verify with local node','name_verified':p['direction']=='send' and bool(name),'state':row['state'],'watch_only_locked':not p['source_has_private_keys'],'restoration_requested':__import__('signer_restoration').requested(p),'restoring_extinct':p['direction']=='receive' and (__import__('signer_restoration').requested(p) or bool(restoration(store,p['public_wallet']))),'extinct_group':grouped(p['public_wallet']),'extinct_children':children(preview) if preview else [],**choice})
+                       'wallet_name':name or 'Verify with local node','name_verified':p['direction']=='send' and bool(name),'state':row['state'],'watch_only_locked':not p['source_has_private_keys'],'encrypted_relay':p.get('transfer_version')==3,'restoration_requested':__import__('signer_restoration').requested(p),'restoring_extinct':p['direction']=='receive' and (__import__('signer_restoration').requested(p) or bool(restoration(store,p['public_wallet']))),'extinct_group':grouped(p['public_wallet']),'extinct_children':children(preview) if preview else [],**choice})
     return sorted(result,key=lambda r:(r['wallet_name'].casefold(),r['sender'],r['receiver'],r['id']))
 
 

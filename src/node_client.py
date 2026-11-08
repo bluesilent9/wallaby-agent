@@ -1,4 +1,4 @@
-"""Dashboard Agent v1 protocol: separate heartbeat, poll and RPC execution loops."""
+"""Wallet Server Agent v1 protocol: separate heartbeat, poll and RPC execution loops."""
 import base64, concurrent.futures, http.client, json, os, re, socket, threading, time, uuid
 from decimal import Decimal
 from pathlib import Path
@@ -27,11 +27,11 @@ def exchange_http_reason(data):
     except (ValueError,UnicodeError):return None
     if not isinstance(value,dict):return None
     message=value.get('error')
-    if isinstance(message,str) and re.fullmatch(r'Unsupported Agent capabilities: [a-z0-9_]{1,64}(?:, [a-z0-9_]{1,64}){0,15}\. Dashboard V1 Build [0-9]{1,5}; Agent [0-9A-Za-z.+~_-]{1,64}\.',message):return 'capabilities'
+    if isinstance(message,str) and re.fullmatch(r'Unsupported Agent capabilities: [a-z0-9_]{1,64}(?:, [a-z0-9_]{1,64}){0,15}\. (?:Dashboard|Wallet Server) V1 Build [0-9]{1,5}; Agent [0-9A-Za-z.+~_-]{1,64}\.',message):return 'capabilities'
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev65'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev66'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -40,7 +40,13 @@ def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit
         conn.request('GET' if raw is None else 'POST',path,raw,headers)
         response=conn.getresponse();data=response.read(response_limit+1)
         if len(data)>response_limit:raise PublicDataFailure('response_limit','The local/public HTTP response exceeds the configured transport size limit.',{'boundary':'local_core_http' if auth else 'dashboard_http','limit_bytes':response_limit,'observed_bytes_at_least':len(data)})
-        if response.status!=200:raise HTTPFailure(response.status,exchange_http_reason(data) if path=='/agent/v2/exchange' else None)
+        if response.status!=200:
+            reason=exchange_http_reason(data) if path=='/agent/v2/exchange' else None
+            if path=='/agent/v1/relay':
+                try:busy=decode(data).get('error') in ('Relay queue is full. Retry later.','Relay rate limit reached. Retry shortly.')
+                except (ValueError,UnicodeError,AttributeError):busy=False
+                if busy:reason='relay_busy'
+            raise HTTPFailure(response.status,reason)
         try:return decode(data)
         except (ValueError,UnicodeError):raise PublicDataFailure('response_json','The service returned invalid JSON data.') from None
     finally:
@@ -48,7 +54,7 @@ def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit
         conn.close()
 
 def protocol_failure(code,message):
-    return ConnectionFailure('dashboard',code,'Wallaby Dashboard protocol error: '+message+' Check that the Dashboard and Agent Development builds are compatible.')
+    return ConnectionFailure('dashboard',code,'Wallaby Wallet Server protocol error: '+message+' Check that the Wallet Server and Agent Development builds are compatible.')
 
 def adapter_mac():
     candidates=[]
@@ -157,7 +163,7 @@ class NodeClient:
                 if ident in self.seen:continue
                 if len(self.seen)>=10000:raise protocol_failure('session_limit','The session request limit was reached; reconnecting.')
                 if expiry==0:continue
-                # Unacknowledged delivered commands are offered again by Dashboard.
+                # Unacknowledged delivered commands are offered again by Wallet Server.
                 # Never block heartbeat/poll behind occupied Core workers.
                 if not self.pending.acquire(blocking=False):return
                 self.seen.add(ident)
@@ -198,7 +204,7 @@ class NodeClient:
             try:
                 from approval_store import Store
                 if LOCAL_PUBLIC_RPC is not None:result=LOCAL_PUBLIC_RPC(ident,c['method'],params,c['wallet'],max(1,float(expiry)-(time.monotonic()-received)))
-                elif Store().read().get('setup_active') or Store().read().get('active_transfer') or Store().read().get('sync_batch') or Store().read().get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):result={'error':{'code':'synchronisation_busy','message':'Local wallet synchronisation is active. Dashboard requests are temporarily refused.'}}
+                elif Store().read().get('setup_active') or Store().read().get('active_transfer') or Store().read().get('sync_batch') or Store().read().get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):result={'error':{'code':'synchronisation_busy','message':'Local wallet synchronisation is active. Wallet Server requests are temporarily refused.'}}
                 else:result=self.core.call(ident,c['method'],params,c['wallet'],timeout=max(1,float(expiry)-(time.monotonic()-received)))
             except Exception as error:
                 failure=describe('rpc',error)
@@ -220,29 +226,29 @@ class NodeClient:
                 if self.stop.is_set() or self.failed.is_set():return
                 self.consume(self.control_post('heartbeat',{},timeout=5))
                 if not self.stop.is_set() and not self.failed.is_set():
-                    self.status('green' if core_ready else 'amber','Tunnel, Bitcoin Core and Dashboard connected.' if core_ready else 'Planned Bitcoin Core restart. Waiting for local RPC; protected workspace retained.')
+                    self.status('green' if core_ready else 'amber','Tunnel, Bitcoin Core and Wallet Server connected.' if core_ready else 'Planned Bitcoin Core restart. Waiting for local RPC; protected workspace retained.')
             except Exception as error:self.fail(error)
     def run(self):
         try:
             while self.check_core() is False:
                 if self.stop.wait(.5):return
             if self.stop.is_set():return
-            self.status('amber','Local Bitcoin Core RPC connected. Registering with Wallaby Dashboard…')
+            self.status('amber','Local Bitcoin Core RPC connected. Registering with Wallaby Wallet Server…')
             try:mac=adapter_mac()
             except Exception:raise ConnectionFailure('node_identity','adapter','No usable local network adapter identity was found. Check the network interface before registering this node.') from None
             r=self.post('register',{'mac':mac,'hostname':socket.gethostname().split('.')[0],'rpc':{'version':1,'methods':sorted(METHODS)}},timeout=5)
             if self.stop.is_set():return
             if not isinstance(r,dict) or r.get('protocol')!='wallaby-agent' or r.get('version')!=1 or not isinstance(r.get('connection_token'),str) or not r['connection_token']:
-                raise ConnectionFailure('dashboard','protocol','Dashboard registration returned an incompatible Agent protocol or no session token. Check the Dashboard Agent service/version on port 56443.')
+                raise ConnectionFailure('dashboard','protocol','Wallet Server registration returned an incompatible Agent protocol or no session token. Check the Wallet Server Agent service/version on port 56443.')
             self.token=r['connection_token'];self.consume(r)
             from agent_exchange import Exchange
             exchange=Exchange(self.port,self.token)
             exchange.cancelled=lambda:self.stop.is_set() or self.failed.is_set()
             exchange_thread=threading.Thread(target=exchange.run,args=(self.failed,),daemon=True);self.threads.append(exchange_thread);exchange_thread.start()
-            self.status('green','Tunnel, Bitcoin Core and Dashboard connected.')
+            self.status('green','Tunnel, Bitcoin Core and Wallet Server connected.')
             thread=threading.Thread(target=self.heartbeat,daemon=True);self.threads.append(thread);thread.start()
             while not self.stop.is_set() and not self.failed.is_set():self.consume(self.control_post('poll',{'wait_seconds':2},timeout=5))
-            if self.failed.is_set():raise self.error or ConnectionFailure('dashboard','session','Dashboard node session ended unexpectedly. Check the Dashboard Agent service.')
+            if self.failed.is_set():raise self.error or ConnectionFailure('dashboard','session','Wallet Server node session ended unexpectedly. Check the Wallet Server Agent service.')
         except Exception as error:
             # Record the first failure before disconnect/late heartbeat callbacks.
             # A session-limit rotation must not be overwritten by its old token's 401.

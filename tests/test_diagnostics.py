@@ -66,7 +66,7 @@ class DiagnosticsTests(unittest.TestCase):
    process.wait(timeout=5);self.assertEqual(tunnel.failure().code,'authentication');tunnel.close()
  def test_worker_preserves_rpc_and_forwarding_errors(self):
   real_event=threading.Event
-  for original,forwarded,expected in [(ConnectionFailure('rpc','cookie_missing','Choose the cookie.'),None,'cookie_missing'),(ConnectionFailure('dashboard','transport','Dashboard closed the connection.'),ConnectionFailure('ssh_forward','forward_denied','Server denied node forwarding.'),'forward_denied')]:
+  for original,forwarded,expected in [(ConnectionFailure('rpc','cookie_missing','Choose the cookie.'),None,'cookie_missing'),(ConnectionFailure('dashboard','transport','Wallet Server closed the connection.'),ConnectionFailure('ssh_forward','forward_denied','Server denied node forwarding.'),'forward_denied')]:
    class Stop:
     done=False
     def is_set(self):return self.done

@@ -40,6 +40,9 @@ def public_vault(v):
     return v
 
 def validate_proposal(p):
+    if isinstance(p,dict) and p.get("kind")=="wallet_mobile_verification":
+        from mobile_verification import validate
+        return validate(p)
     if isinstance(p,dict) and p.get('kind') in ('wallet_rename','wallet_rename_queue'):
         from rename_requests import validate_task,validate_queue
         return validate_queue(p) if p['kind']=='wallet_rename_queue' else validate_task(p)
@@ -67,7 +70,7 @@ def validate_proposal(p):
         return proposal(p)
     if p.get('kind')=='vault_sync' and set(p)=={'kind','vault'}:public_vault(p['vault'])
     elif p.get('kind')=='sign_psbt':
-        raise ValueError('Legacy immediate-broadcast signing is disabled; update Dashboard.')
+        raise ValueError('Legacy immediate-broadcast signing is disabled; update Wallet Server.')
     else:
         from build8_policy import proposal
         return proposal(p)

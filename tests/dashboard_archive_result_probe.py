@@ -1,4 +1,4 @@
-"""Run Dashboard archive result verification in its own interpreter, unchanged source."""
+"""Run Wallet Server archive result verification in its own interpreter, unchanged source."""
 import sys,json,tempfile,copy,hashlib
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,8 +13,8 @@ with tempfile.TemporaryDirectory() as root:
  altered=copy.deepcopy(receipt);altered['status']='error'
  try:q.accept(node,altered)
  except ValueError:pass
- else:raise AssertionError('Dashboard accepted altered signed outcome')
+ else:raise AssertionError('Wallet Server accepted altered signed outcome')
  try:q.accept('2'*32,receipt)
  except ValueError:pass
- else:raise AssertionError('Dashboard accepted result for another Agent')
+ else:raise AssertionError('Wallet Server accepted result for another Agent')
  print(json.dumps({'status':receipt['status'],'signed_outcome_accepted':True,'terminal_snapshot_empty':True,'replay_idempotent':True,'tampered_result_rejected':True,'wrong_agent_rejected':True,'dashboard_sha256':{name:hashlib.sha256((Path(sys.argv[1])/name).read_bytes()).hexdigest() for name in ('archive_queue.py','wallet_policy_updates.py','setup_signatures.py')}}))

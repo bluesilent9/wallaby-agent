@@ -191,7 +191,7 @@ class Archives:
                 label='Disc '+(r['recovery']['display_name']+' ' if r['recovery'].get('display_name') else '')+r['recovery']['policy_hash'][:12]+' '+r['role']['id'];monitor=label+' policy';routes={label:'archive-key',monitor:'archive-policy'}
                 r.update(node=node,routes=routes,keys=[label],monitor=monitor);self.loaded[ident]=r;self.staged.pop(ident)
             except Exception:node.close();raise
-            return {'message':'Archive key loaded in protected RAM. Request its signature from Dashboard, then review it on Authorise. It will be lost when unloaded or this workspace closes.'}
+            return {'message':'Archive key loaded in protected RAM. Request its signature from Wallet Server, then review it on Authorise. It will be lost when unloaded or this workspace closes.'}
     def unload(self,ident):
         self.enforce()
         with self.lock:

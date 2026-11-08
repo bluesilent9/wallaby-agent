@@ -145,7 +145,7 @@ class CoreBatch(unittest.TestCase):
     for group in ('Old One','Old Two'):
         address=rpc(self.core,'getnewaddress',[],'miner8');body='addr('+address+')';requests.append({'desc':body+'#'+checksum(body),'timestamp':0,'label':group+' | LOST:02/01/2020 00:00:00 UTC'})
     self.assertTrue(all(r['success'] for r in rpc(self.core,'importdescriptors',{'requests':requests},name)))
-    p=paired('Spoofed Dashboard name','send');p['source_has_private_keys']=False;p['public_wallet']={'wallet_name':'Dashboard name','descriptors':[{'desc':requests[0]['desc'],'timestamp':0,'active':False,'internal':False}]}
+    p=paired('Spoofed Wallet Server name','send');p['source_has_private_keys']=False;p['public_wallet']={'wallet_name':'Wallet Server name','descriptors':[{'desc':requests[0]['desc'],'timestamp':0,'active':False,'internal':False}]}
     self.assertEqual(source_wallet(self.core,p),name);details=wallet_details(self.core,p,self.store)
     self.assertEqual(details['public_wallet']['wallet_name'],'Old One');self.assertEqual(len(details['public_wallet']['descriptors']),1);self.assertEqual(details['address_labels'][0]['label'],requests[0]['label']);self.assertEqual(len(details['address_labels']),1)
     from build8_policy import descriptors

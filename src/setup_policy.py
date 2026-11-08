@@ -21,7 +21,7 @@ def proposal(p,allow_expired=False):
         from wallet_retirement import validate
         return validate(p)
     if p.get('kind')=='wallet_setup':
-        if set(p)!={'kind','version','session_id','chain','name','threshold','cosigners','height','expires_at'} or p['version']!=1:raise ValueError('Invalid setup proposal fields.')
+        if set(p)!=({'kind','version','session_id','chain','name','threshold','cosigners','height','expires_at'}|({'peer_transport'} if p.get('version')==2 else set())) or type(p['version']) is not int or p['version'] not in (1,2):raise ValueError('Invalid setup proposal fields.')
         if not HEX.fullmatch(str(p['session_id'])) or p['chain'] not in NETWORK or type(p['expires_at']) is not int or (not allow_expired and not time.time()<p['expires_at']<=time.time()+86400) or (allow_expired and p['expires_at']<=0):raise ValueError('Expired or invalid setup session.')
         text(p['name'],128)
         if '|' in p['name']:raise ValueError('Wallet name must not contain archive separators.')
@@ -33,6 +33,9 @@ def proposal(p,allow_expired=False):
             text(role['id'],64);text(role['name'],128);fingerprint(role['agent_key'])
             if role['id'] in ids:raise ValueError('Duplicate cosigner identity.')
             ids.add(role['id'])
+        if p['version']==2:
+            from peer_protocol import requirements
+            requirements(p['peer_transport'],[r['agent_key'] for r in p['cosigners']])
         return p
     if p.get('kind')=='wallet_setup_policy':
         if set(p)!={'kind','version','proposal','contributions','receive_descriptor','change_descriptor'} or p['version']!=1:raise ValueError('Invalid complete policy message.')

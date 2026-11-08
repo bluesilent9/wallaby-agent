@@ -15,7 +15,7 @@ class Budget(unittest.TestCase):
  def test_initial_failed_start_is_not_misrepresented_as_established_connection_loss(self):
   r=Recovery();r.lost(HTTPFailure(401));self.assertFalse(r.snapshot()['active'])
  def test_notifications_distinguish_core_and_dashboard(self):
-  self.assertIn('Bitcoin Core',notice('rpc'));self.assertIn('Dashboard Server',notice('ssh_forward'));self.assertIn('Dashboard Server',notice('dashboard'))
+  self.assertIn('Bitcoin Core',notice('rpc'));self.assertIn('Wallet Server Server',notice('ssh_forward'));self.assertIn('Wallet Server Server',notice('dashboard'))
 
 class SessionFailure(unittest.TestCase):
  def test_real_session_limit_cannot_be_overwritten_by_late_heartbeat_401(self):

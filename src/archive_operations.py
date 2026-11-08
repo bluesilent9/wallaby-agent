@@ -1,4 +1,4 @@
-"""Local archive approval and RAM-only backup staging. No Dashboard-selected paths."""
+"""Local archive approval and RAM-only backup staging. No Wallet Server-selected paths."""
 import copy,hashlib,shutil,time
 from pathlib import Path
 from approval_store import digest
@@ -28,7 +28,7 @@ class Operations:
                 return review(self,key)
             proof=self.destruction_proof(p)
             return {'kind':'destroy_disc','id':key,'destruction':{'archive_id':p['archive_id'],'label':p['label'],'replacement_image_sha256':p['replacement_image_sha256'],'coverage':proof['members'],'physical_confirmation_only':True,'creator_confirmation_required':proof.get('creator_confirmation_required',False),'creator_fingerprint':proof.get('creator_fingerprint','')}}
-        if not self.regular(p['wallet']):raise ValueError('Dashboard archival is only for persistent node wallets. Use the explicit loaded-disc refresh operation for an archive.')
+        if not self.regular(p['wallet']):raise ValueError('Wallet Server archival is only for persistent node wallets. Use the explicit loaded-disc refresh operation for an archive.')
         info=rpc(self.core,'getwalletinfo',[],p['wallet']);raw=rpc(self.core,'listdescriptors',[False],p['wallet'])
         if not info.get('private_keys_enabled') or info.get('scanning') or descriptors(raw)!=descriptors(p['public_wallet']):raise ValueError('A matching, fully loaded private-key wallet is required. Watch-only, extinct and disc-only sources cannot authorise archiving.')
         policies=[]

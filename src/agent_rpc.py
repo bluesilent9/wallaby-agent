@@ -55,7 +55,7 @@ def capabilities(value):
     return sorted(set(methods)&METHODS)
 
 def request(method,params,wallet):
-    if not isinstance(method,str) or method not in METHODS:raise ValueError('RPC method is not enabled for Dashboard agents.')
+    if not isinstance(method,str) or method not in METHODS:raise ValueError('RPC method is not enabled for Wallet Server agents.')
     if not isinstance(params,(list,dict)):raise ValueError('RPC params must be an array or object.')
     params,size=clean_json(params,MAX_REQUEST_BYTES)
     if wallet is not None and (not isinstance(wallet,str) or len(wallet)>256 or any(ord(c)<32 for c in wallet)):raise ValueError('Invalid wallet name.')
@@ -158,7 +158,7 @@ class RPCBroker:
             self.registry._expire();self._maintain()
             return any(row['owner']==owner and row['state'] in ('queued','delivered','running') for row in self.rows.values())
     def call(self,node_id,method,params=None,wallet=None,timeout_seconds=30):
-        """Synchronous application-side convenience for future Dashboard features."""
+        """Synchronous application-side convenience for future Wallet Server features."""
         queued=self.queue(node_id,method,params,wallet,timeout_seconds)
         with self.condition:
             while True:

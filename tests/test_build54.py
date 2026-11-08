@@ -48,7 +48,7 @@ class Traits(unittest.TestCase):
   key='02'+'79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
   key2='03'+'f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9'
   plain='wpkh('+key+')';multi='wsh(sortedmulti(2,'+key+','+key2+'))';vault='wsh(and_v(v:after(200),multi(2,'+key+','+key2+')))'
-  self.assertEqual(policy_traits(plain),{'vault':False,'multisig':False});self.assertEqual(policy_traits(multi),{'vault':False,'multisig':True});self.assertEqual(policy_traits(vault),{'vault':True,'multisig':True});self.assertEqual(policy_traits('untrusted Dashboard vault label'),{})
+  self.assertEqual(policy_traits(plain),{'vault':False,'multisig':False});self.assertEqual(policy_traits(multi),{'vault':False,'multisig':True});self.assertEqual(policy_traits(vault),{'vault':True,'multisig':True});self.assertEqual(policy_traits('untrusted Wallet Server vault label'),{})
   self.assertFalse(policy_traits('wsh(sortedmulti(1,'+key+','+key2+'))')['multisig'])
   self.assertFalse(policy_traits('wsh(or_i(pk('+key+'),multi(2,'+key+','+key2+')))')['multisig'])
  def test_disc_and_watch_are_only_local_core_facts(self):

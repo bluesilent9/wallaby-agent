@@ -117,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
             from activity_log import DiagnosticLog
             try:return self.reply(200,DiagnosticLog().text().encode('utf-8'),'text/plain; charset=utf-8')
             except (OSError,ValueError):return self.reply(500,{'error':'Diagnostic log storage is unavailable. Check its ownership and permissions.'})
-        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev65'})
+        if self.path=='/api/health':return self.reply(200,{'ok':True,'version':'2.0.0~dev66'})
         if self.path=='/api/state':
             with self.server.config_lock:
                 c=Config();v=copy.deepcopy(c.values)
@@ -125,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
                     cookie=discover_cookie()
                     if cookie:v['cookie']=cookie;c.save(v)
                 return self.reply(200,{'config':v,'status':{k:read_status(k) for k in ['server',*SERVICES]},'version':__import__('worker_upgrade').VERSION,'node_support':node_support(v),'workspace':workspace(self.server)})
-        paths={'/':'index.html','/app.js':'app.js','/logs.js':'logs.js','/cancellation.js':'cancellation.js','/transaction_review.js':'transaction_review.js','/workspace.js':'workspace.js','/authorise_layout.js':'authorise_layout.js','/message.js':'message.js','/disc_operations.js':'disc_operations.js','/synchronisation.js':'synchronisation.js','/wallet_setup.js':'wallet_setup.js','/archives.js':'archives.js','/rename.js':'rename.js','/local_wallets.js':'local_wallets.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
+        paths={'/':'index.html','/app.js':'app.js','/logs.js':'logs.js','/cancellation.js':'cancellation.js','/transaction_review.js':'transaction_review.js','/workspace.js':'workspace.js','/authorise_layout.js':'authorise_layout.js','/message.js':'message.js','/disc_operations.js':'disc_operations.js','/synchronisation.js':'synchronisation.js','/wallet_setup.js':'wallet_setup.js','/archives.js':'archives.js','/rename.js':'rename.js','/local_wallets.js':'local_wallets.js','/peers.js':'peers.js','/style.css':'style.css','/wallaby-agent.svg':'wallaby-agent.svg'}
         asset_path=urlsplit(self.path).path
         if asset_path not in paths:return self.reply(404,{'error':'Not found.'})
         f=ASSETS/paths[asset_path];mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.json':'application/json; charset=utf-8'}[f.suffix]
@@ -140,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Content-Type')!='application/json':return self.reply(415,{'error':'JSON required.'})
         try:
             n=int(self.headers.get('Content-Length','0'))
-            if not 0<n<=(3*1024*1024 if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/protected/')) else 16384):raise ValueError('Invalid request size.')
+            if not 0<n<=(3*1024*1024 if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/peers/','/api/protected/')) else 16384):raise ValueError('Invalid request size.')
             body=decode(self.rfile.read(n))
             if not isinstance(body,dict):raise ValueError('Invalid settings.')
             if self.path=='/api/protected/open' and set(body)=={'page'}:
@@ -195,6 +195,12 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path=='/api/disc/probe' and set(body)=={'device'}:return self.reply(200,call('disc.probe',body['device']))
                 if self.path=='/api/disc/burn' and set(body) in ({'device','confirmed','disc_count','speed'},{'device','confirmed','disc_count','speed','job_id','selected_ids'}):return self.reply(200,call('disc.burn',body['device'],body['confirmed'],body['disc_count'],body['speed'],body.get('job_id'),body.get('selected_ids'),timeout=600))
                 raise ValueError('Invalid disc action.')
+            if self.path.startswith('/api/peers/'):
+                if self.server.preview:raise ValueError('Peer changes are disabled in preview mode.')
+                from protected_memory import inside
+                if not inside():raise ValueError('Open Peer Connections in the protected window first.')
+                from secure_bridge import call
+                return self.reply(200,call('peers.action',self.path.rsplit('/',1)[1],body,timeout=20))
             if self.path=='/api/pick-cookie':return self.reply(200,{'path':picker()})
             if self.path.startswith('/api/synchronisation/'):
                 if self.server.preview:raise ValueError('Transfers are disabled in preview mode.')
@@ -295,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
                         from secure_bridge import call
                         try:protected=call('service_status',timeout=3)
                         except ValueError:protected={}
-                        if protected.get('busy'):raise NodeUnavailable('Finish active wallet work, wait for queued Dashboard deliveries and unload archival wallets before disconnecting the node. Its protected window remains open.')
+                        if protected.get('busy'):raise NodeUnavailable('Finish active wallet work, wait for queued Wallet Server deliveries and unload archival wallets before disconnecting the node. Its protected window remains open.')
                     if body['service']=='node' and not body['enabled']:write_status('node','red','Off',tunnel=False)
                     v['enabled'][body['service']]=body['enabled']
                 else:return self.reply(404,{'error':'Not found.'})
@@ -303,9 +309,9 @@ class Handler(BaseHTTPRequestHandler):
                 else:apply_config(c,v)
             self.reply(200,{'ok':True})
         except NodeUnavailable as error:self.reply(400,{'error':str(error)})
-        except ValueError as error:self.reply(400,{'error':str(error) if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/protected/')) else 'Check the hostname, settings and file paths. IP addresses are not allowed.'})
+        except ValueError as error:self.reply(400,{'error':str(error) if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/peers/','/api/protected/')) else 'Check the hostname, settings and file paths. IP addresses are not allowed.'})
         except (TypeError,KeyError):self.reply(400,{'error':'Invalid request or expired review. Refresh this page and review again.'})
-        except Exception:self.reply(503,{'error':'The wallet operation failed or its outcome is uncertain. Check Core and review again; it was not automatically replayed.' if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/protected/')) else 'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
+        except Exception:self.reply(503,{'error':'The wallet operation failed or its outcome is uncertain. Check Core and review again; it was not automatically replayed.' if self.path.startswith(('/api/vault/','/api/authorise/','/api/synchronisation/','/api/disc/','/api/message/','/api/peers/','/api/protected/')) else 'Settings saved, but the user service manager could not apply them. Check systemd --user and try again.'})
 
 class Server(IPv6HTTPServer):
     daemon_threads=True
@@ -315,7 +321,7 @@ class Server(IPv6HTTPServer):
 def serve(preview=False):
     root=runtime_dir();lock=open(root/'ui.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     server=Server(('::1',0),Handler);server.token=secrets.token_urlsafe(32);server.config_lock=threading.Lock();server.preview=preview
-    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev65'}
+    info={'port':server.server_port,'token':server.token,'pid':os.getpid(),'version':'2.0.0~dev66'}
     fd=os.open(root/'ui.json',os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
     with os.fdopen(fd,'w') as f:json.dump(info,f)
     try:server.serve_forever()
@@ -335,7 +341,7 @@ def bootstrap():
     ctl('daemon-reload')
     try:installed=json.loads((runtime_dir()/'monitor-build.json').read_text()).get('version')
     except (OSError,ValueError):installed=None
-    if installed!='2.0.0~dev65':
+    if installed!='2.0.0~dev66':
         ctl('restart','wallaby-agent-monitor.service')
         for kind,on in Config().values['enabled'].items():
             if on:ctl('restart','wallaby-agent-'+kind+'.service')
@@ -345,7 +351,7 @@ def launch(page='services'):
     bootstrap()
     try:previous=json.loads((runtime_dir()/'ui.json').read_text()).get('version')
     except (OSError,ValueError):previous=None
-    ctl('restart' if previous not in (None,'2.0.0~dev65') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
+    ctl('restart' if previous not in (None,'2.0.0~dev66') or (previous is None and (runtime_dir()/'ui.json').exists()) else 'start','wallaby-agent-ui.service')
     for _ in range(50):
         try:
             d=json.loads((runtime_dir()/'ui.json').read_text());os.kill(d['pid'],0)

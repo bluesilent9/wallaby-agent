@@ -31,7 +31,7 @@ def estimates(core, heights, now=None, expected_chain=None):
             if not 60<=average<=3600:raise ValueError('Unrepresentative timestamp span.')
             seconds=average;sample=tip-first;span=latest-older;source='Local block-header timestamp average'
         except (ValueError,KeyError,TypeError,OSError):pass
-    warning='Rough estimate only. Mining times vary; the block-height rule, not this date, controls spending. No Dashboard forecast or online time lookup is used.'
+    warning='Rough estimate only. Mining times vary; the block-height rule, not this date, controls spending. No Wallet Server forecast or online time lookup is used.'
     if chain.get('initialblockdownload') or chain.get('headers',tip)>tip or latest<now-7200:
         warning+=' This node is catching up or its tip is stale; the estimate may be especially inaccurate.'
     result=[]

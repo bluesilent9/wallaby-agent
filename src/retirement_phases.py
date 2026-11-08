@@ -145,7 +145,7 @@ def receipt(store,p):
 
 def native_sources(core,p):
     # Trust the user's local, caught-up Core wallet as the historical source.
-    # Names and Dashboard balance claims never establish wallet identity.
+    # Names and Wallet Server balance claims never establish wallet identity.
     if p['wallet'] not in ('Wallaby Extinct','Extinct'):return []
     matches=[];chain=check_chain(core,p)
     for wallet in rpc(core,'listwallets'):
@@ -239,7 +239,7 @@ def approve(owner,key,fingerprint_value=None,history_elsewhere_confirmed=False):
             from setup_messages import sign
             message={'version':1,'kind':'wallet_retirement_preservation','request_hash':key,'operation_id':p['operation_id'],'manifest_hash':p['manifest_hash'],'archive_wallet':p['wallet'],'address_count':len(p['manifest']['addresses']),'wallet_deleted':False}
             outcome=result(p,'complete',archive_verified=True,history_verified=True,wallet_deleted=False,deleted_wallets=[],archive_wallet=p['wallet'],address_count=len(p['manifest']['addresses']),archive_receipt=sign(owner.store,message))
-            text='History preserved and independently read back in the existing Extinct wallet. No original wallet was deleted. Dashboard must verify this receipt before offering separate deletion requests.'
+            text='History preserved and independently read back in the existing Extinct wallet. No original wallet was deleted. Wallet Server must verify this receipt before offering separate deletion requests.'
             if owner.store.read().get('history_cleanup'):text+=' A previous public archive copy was retained because cleanup could not finish; inspect it locally before removing it.'
         else:
             # Repeat all local balances, associated policies, transaction and path
@@ -313,5 +313,5 @@ def prepare_history(core,store,key,p):
     return {'message':'Missing public addresses staged without rescanning. Open Synchronisation and authorise This Node history recovery. Pruning stays unchanged. Then review preservation again; original wallets remain intact.','history_prepared':True}
 
 def require_current(p):
-    if p.get('version')!=3:raise ValueError('This combined extinction request is obsolete. Deny it and use Dashboard Build 34 to request separate preservation and deletion. No wallet operation was started.')
+    if p.get('version')!=3:raise ValueError('This combined extinction request is obsolete. Deny it and use Wallet Server Build 34 to request separate preservation and deletion. No wallet operation was started.')
     return validate(p)

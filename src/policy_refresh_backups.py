@@ -79,7 +79,7 @@ def check_destruction(archive_ops,archive,proof):
 def verified(archive_ops,recoveries,image_sha256):
     """Local refresh evidence can intentionally omit optional old archives.
 
-    It is separate from the full-coverage proof sent to Dashboard for generic
+    It is separate from the full-coverage proof sent to Wallet Server for generic
     archive replacement, whose stronger preservation contract is unchanged.
     """
     from policy_refresh import validate_extensions
@@ -106,7 +106,7 @@ def confirm(ops,key,archive,token,confirmed):
 
 
 def guard(store,review):
-    """Also refuse premature funding on this Agent, independently of Dashboard."""
+    """Also refuse premature funding on this Agent, independently of Wallet Server."""
     waiting=[r for r in store.read()['pending'].values() if r.get('state')=='awaiting_backups']
     for row in waiting:
         pair={row['proposal']['receive_descriptor'],row['proposal']['change_descriptor']}

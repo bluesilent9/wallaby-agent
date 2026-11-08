@@ -90,7 +90,7 @@ def complete(c,key,p,original,destroyed,status='complete'):
     message={'version':1,'cancellation_id':p['cancellation_id'],'request_hash':key,'status':status,'policy_request_hashes':sorted(original),'retired_policy_hashes':sorted({policy_id(v) for v in original.values()}) if status=='complete' else [],'descriptors_retained':True,'keys_retained':True,'destroyed_archives':sorted(destroyed)}
     item={'kind':'wallet_policy_refresh_cancel_result','payload':sign(c.store,message)}
     with c.store.edit() as saved:
-        if len(saved['outbox'])>=128:raise ValueError('Dashboard outbox is full; local cancellation outcome retained.')
+        if len(saved['outbox'])>=128:raise ValueError('Wallet Server outbox is full; local cancellation outcome retained.')
         for original_key in original:saved['pending'].pop(original_key,None);c.ops.prepared.pop(original_key,None)
         for ident,value in list(saved['outbox'].items()):
             previous_message=value.get('payload',{}).get('message',{})

@@ -1,4 +1,4 @@
-"""Production rename task/result protocol, using separate Agent/Dashboard interpreters."""
+"""Production rename task/result protocol, using separate Agent/Wallet Server interpreters."""
 import sys,json,tempfile,subprocess
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
@@ -45,4 +45,4 @@ with tempfile.TemporaryDirectory() as root:
  result(store,p,'complete',new_wallet='david_smsf_old_watch',identity_verified=True,archive_skipped=False)
  receipt=next(r['payload'] for r in store.read()['outbox'].values() if r['kind']=='wallet_rename_result');reply=server('accept',receipt=receipt);assert reply['cancel_refused'];op=reply['snapshot']['operations'][0];assert not op['can_cancel'] and op['state']=='active';assert [r['state'] for r in op['targets']].count('complete')==1;assert not reply['proposal']['requests']
  archive={'version':1,'event':'archive_verified','archive_id':'d'*64,'image_sha256':'e'*64,'readback_verified':True,'disc_count':1,'replacements':[],'members':[{'member_id':digest(raw),'policy_hash':digest(raw),'name':'david_smsf','role_id':'node-wallet','public_wallet':raw,'related_policies':[]}]};wire=server('inventory',receipt=sign(store,archive));wire=server('inspect');assert any(t['storage']=='disc' for t in wire['snapshot']['operations'][0]['targets'])
- print('Production Dashboard Build29/Agent Build25: strict queued watch rename, david_smsf_old_watch target, signed per-node completion, other node pending and cancellation locked after first confirmation, verified public archive inventory and archive rename target discovery passed.')
+ print('Production Wallet Server Build29/Agent Build25: strict queued watch rename, david_smsf_old_watch target, signed per-node completion, other node pending and cancellation locked after first confirmation, verified public archive inventory and archive rename target discovery passed.')
