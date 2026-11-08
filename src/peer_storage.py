@@ -14,7 +14,7 @@ def validate(data):
     if data['private_key'] is not None:binary(data['private_key'])
     if not isinstance(data['pairs'],dict) or len(data['pairs'])>64 or not isinstance(data['used'],list) or len(data['used'])>1024 or any(not hexid(x) for x in data['used']):raise ValueError('Peer trust storage limit reached.')
     for ident,p in data['pairs'].items():
-        if not isinstance(p,dict) or set(p)!={'peer','psk','invitation_id','initiator','name'} or participant(p['peer'])['endpoint_id']!=ident or not hexid(p['invitation_id']) or type(p['initiator']) is not bool or not isinstance(p['name'],str) or len(p['name'])>128 or any(ord(c)<32 for c in p['name']):raise ValueError('Invalid local peer grant.')
+        if not isinstance(p,dict) or set(p) not in ({'peer','psk','invitation_id','initiator','name'},{'peer','psk','invitation_id','initiator','name','direct_enabled'}) or 'direct_enabled' in p and type(p['direct_enabled']) is not bool or participant(p['peer'])['endpoint_id']!=ident or not hexid(p['invitation_id']) or type(p['initiator']) is not bool or not isinstance(p['name'],str) or len(p['name'])>128 or any(ord(c)<32 for c in p['name']):raise ValueError('Invalid local peer grant.')
         binary(p['psk'])
     return copy.deepcopy(data)
 class FileStore(BaseFile):

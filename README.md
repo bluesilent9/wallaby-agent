@@ -2,11 +2,13 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** Private keys and passphrases are never sent to the Wallet Server. Policy installation and refresh temporarily handle private descriptors inside the protected local worker; signing unlocks the selected Core wallet. Those protections do not remove the risk of a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 66
+# Wallaby Agent V2 — Development Build 67
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
 
-Build 66 adds persistent local Agent/Mobile pairing, end-to-end encrypted peer channels through Wallet Server, credential-free relay wallet synchronisation, independent multisig creation/refresh agreement and signed mobile review QR records. New peer work requires Wallet Server V1 Build 2; local approval, Core verification and existing recovery safeguards remain. The Server's queue limits constrain bulk block throughput. The separate Mobile app still needs its matching client. [Setup, wire protocol and tested boundaries](AGENT_BUILD66_ENCRYPTED_PEERS.md).
+Build 67 adds direct peer SSH with permanent QR trust, rotating volatile credentials, Agent/Mobile role restrictions, automatic address-change negotiation and local QR-image reading. **Wallet, archive and blockchain streams use direct connections only; there is no Server bulk-relay fallback.** Peer Connections manages QR pairing, renewal, deletion and revocation. Requires Wallet Server V1 Build 3; the Mobile application follows separately. [Workflow, exact Mobile wire handoff and tested boundaries](AGENT_BUILD67_DIRECT_PEERS.md).
+
+Build 66 introduced local pairing, Noise peer channels and independent multisig agreement. Its bulk-relay synchronisation is superseded by Build 67. [Historical protocol](AGENT_BUILD66_ENCRYPTED_PEERS.md).
 
 Build 65 restores each original managed signer independently through a fresh locally approved direct SSH transfer. It verifies actual private-key ownership, retains every historical vault policy, supports safe watch-only history snapshots and keeps ordinary signer cloning blocked. Extinction and restoration never require every signer or a quorum. Requires matching Wallet Server Build 90 restoration invitations. [Role checks, compatibility and tests](AGENT_BUILD65_ORIGINAL_SIGNER_RESTORATION.md).
 

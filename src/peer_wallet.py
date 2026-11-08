@@ -201,7 +201,8 @@ class Transfer:
         if row and row['proposal'].get('transfer_version')==3:
             from peer_mesh import manager
             peers=getattr(self.store,'peers',None)
-            try:manager(self.store).binding(row['proposal']);relay_route={'ready':True,'message':'QR-paired encrypted peer channel ready through Wallet Server. Bulk transfer speed is limited by the Server relay.'}
+            try:
+                channel=manager(self.store).binding(row['proposal']);peers.direct.require(channel);relay_route={'ready':True,'message':'QR-paired direct SSH ready. Wallet and blockchain bytes bypass Wallet Server.'}
             except ValueError as error:relay_route={'ready':False,'message':str(error)}
             streams=list(getattr(getattr(peers,'wallet_bridge',None),'streams',{}).values())
             relay_progress={'sent_bytes':sum(s.tx for s in streams),'received_bytes':sum(s.rx for s in streams),'paused':bool(peers and time.monotonic()<peers.backpressured_until)}

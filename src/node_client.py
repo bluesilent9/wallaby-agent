@@ -31,7 +31,7 @@ def exchange_http_reason(data):
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev66'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev67'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -43,7 +43,7 @@ def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit
         if response.status!=200:
             reason=exchange_http_reason(data) if path=='/agent/v2/exchange' else None
             if path=='/agent/v1/relay':
-                try:busy=decode(data).get('error') in ('Relay queue is full. Retry later.','Relay rate limit reached. Retry shortly.')
+                try:busy=decode(data).get('error') in ('Relay queue is full. Retry later.','Relay rate limit reached. Retry shortly.','Relay request limit reached. Retry shortly.','Relay byte limit reached. Use the direct connection for bulk data or retry shortly.')
                 except (ValueError,UnicodeError,AttributeError):busy=False
                 if busy:reason='relay_busy'
             raise HTTPFailure(response.status,reason)

@@ -59,6 +59,8 @@ class Workspace:
                 self.peers=Peers(self.store)
                 from relay_stream import Bridge
                 self.peers.wallet_bridge=Bridge(self.peers,self.store)
+                from direct_peers import Direct
+                Direct(self.peers).start()
             self.ops=WalletOps(Core(c),self.store);self.ops.core.managed_store=self.store
             from automatic_broadcast import Broadcasts
             self.broadcasts=Broadcasts(self.ops.core,self.store,lambda:not getattr(self,'closing',False) and not self.recovery_state().get('active'))

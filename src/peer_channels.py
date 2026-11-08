@@ -30,6 +30,10 @@ class Channel:
         self.handshake_hash=self.noise.get_handshake_hash().hex();self.seen=time.monotonic()
         if self.local_grant:self.send('grant',digest(self.prologue),{'accepted':True})
     def send(self,kind,operation,body,ttl=None):
+        if kind.startswith('stream_'):
+            direct=getattr(self.owner,'direct',None)
+            if not direct:raise ValueError('Direct peer transport is required for bulk data.')
+            direct.require(self)
         ttl=ttl if ttl is not None else (3600 if kind.startswith('stream_') or kind in ('ping','pong') else 120)
         with self.lock:
             if not self.noise.handshake_finished or not self.local_grant or kind!='grant' and not self.ready:raise ValueError('Finish authenticated local peer pairing first.')
@@ -38,14 +42,18 @@ class Channel:
             raw=canonical(record)
             if len(raw)>48000 or not hexid(operation):raise ValueError('Invalid encrypted application record.')
             if len(self.owner.outgoing)>=120:raise ValueError('Encrypted relay queue is full; wait for delivery before retrying.')
-            ciphertext=self.noise.encrypt(raw);value={**header,'ciphertext':b64(bytes(ciphertext))};frame(value);self.tx+=1;self.owner.queue(value);return header['id']
-    def read(self,value):
+            ciphertext=self.noise.encrypt(raw);value={**header,'ciphertext':b64(bytes(ciphertext))};frame(value);self.tx+=1
+            if kind.startswith('stream_'):self.owner.bulk_frames.add(value['id'])
+            self.owner.queue(value);return header['id']
+    def read(self,value,direct=False):
         if value['sequence']!=self.rx or not self.noise.handshake_finished:raise ValueError('Encrypted peer frames were reordered or replayed. Reconnect securely.')
         record=self.owner.decode(self.noise.decrypt(__import__('base64').b64decode(value['ciphertext'])))
         expected={k:v for k,v in value.items() if k!='ciphertext'}
         if not isinstance(record,dict) or set(record)!={'protocol','version','header','role','operation_hash','payload_type','expires_at','body'} or record['protocol']!=PROTOCOL or type(record['version']) is not int or record['version']!=1 or record['header']!=expected or record['role']!=self.peer['role'] or not hexid(record['operation_hash']) or type(record['expires_at']) is not int or not time.time()<=record['expires_at']<=time.time()+3600:raise ValueError('Encrypted application header, role or expiry mismatch.')
         if not isinstance(record['payload_type'],str) or len(record['payload_type'])>48:raise ValueError('Invalid encrypted payload type.')
-        self.rx+=1;self.seen=time.monotonic();kind=record['payload_type']
+        kind=record['payload_type']
+        if kind.startswith('stream_') and not direct:raise ValueError('Bulk records are forbidden on the Server relay.')
+        self.rx+=1;self.seen=time.monotonic()
         if kind=='grant':
             if record['operation_hash']!=digest(self.prologue) or record['body']!={'accepted':True}:raise ValueError('Invalid local peer grant.')
             self.remote_grant=True
@@ -60,7 +68,7 @@ class Channel:
 class Peers:
     def __init__(self,store,persistence=None,role='agent'):
         from peer_storage import Client
-        self.store=store;self.persistence=persistence or Client();self.lock=threading.RLock();self.channels={};self.invitations={};self.pending={};self.outgoing={};self.acks=[];self.seen_ids={};self.agreements={};self.listeners=[];self.error='';self.registered=False;self.last_directory=[];self.closed_reports=[];self.backpressured_until=0;self.importing=None;self.stop=threading.Event();self.rpc=None;self.thread=None
+        self.store=store;self.persistence=persistence or Client();self.lock=threading.RLock();self.channels={};self.invitations={};self.pending={};self.outgoing={};self.bulk_frames=set();self.acks=[];self.seen_ids={};self.agreements={};self.listeners=[];self.error='';self.registered=False;self.last_directory=[];self.closed_reports=[];self.backpressured_until=0;self.importing=None;self.stop=threading.Event();self.rpc=None;self.thread=None
         saved=self.persistence.read()
         if saved['private_key'] is None:
             saved['private_key']=b64(X25519PrivateKey.generate().private_bytes(serialization.Encoding.Raw,serialization.PrivateFormat.Raw,serialization.NoEncryption()));saved['revision']+=1;self.persistence.commit(saved['revision']-1,saved)
@@ -75,6 +83,7 @@ class Peers:
         with self.lock:
             if len(self.outgoing)>=128:raise ValueError('Local encrypted relay queue is full; no application operation was repeated.')
             self.outgoing[value['id']]=value
+            if getattr(self,'direct',None) and hasattr(self.direct,'wake'):self.direct.wake.set()
     def prune_local(self):
         for ident,c in list(self.channels.items()):
             if not c.ready and time.monotonic()-c.created>120:self.drop(ident)
@@ -105,6 +114,7 @@ class Peers:
     def persist(self,c):
         saved=self.persistence.read();existing=saved['pairs'].get(c.peer['endpoint_id'])
         value={'peer':c.peer,'psk':c.psk,'invitation_id':c.invitation,'initiator':c.initiator,'name':existing['name'] if existing else c.peer['role'].title()+' '+fingerprint(c.peer['identity_key'])}
+        if existing and existing.get('direct_enabled') is not None:value['direct_enabled']=existing['direct_enabled']
         if existing and existing!=value:raise ValueError('Pinned peer keys or roles changed; revoke and pair locally again.')
         if not existing:
             saved['pairs'][c.peer['endpoint_id']]=value
@@ -133,9 +143,11 @@ class Peers:
             if c.ready:self.closed_reports.append(c)
             c.ready=False
             self.outgoing={k:v for k,v in self.outgoing.items() if v['channel_id']!=c.id}
+            self.bulk_frames.intersection_update(self.outgoing)
+            if getattr(self,'direct',None):self.direct.closed(ident)
             for listener in list(self.listeners):
                 if hasattr(listener,'closed'):listener.closed(ident)
-    def accept(self,value,directory):
+    def accept(self,value,directory,direct=False):
         frame(value);ident=value['from']
         if value['to']!=self.identity['endpoint_id']:raise ValueError('Peer frame is addressed to another endpoint.')
         with self.lock:
@@ -163,7 +175,7 @@ class Peers:
                 if value['kind']=='handshake':
                     c.handshake(value)
                     if not c.local_grant:self.pending[ident]=c
-                else:c.read(value)
+                else:c.read(value,direct)
             except Exception:self.drop(ident);raise
             if len(self.seen_ids)>=1024:self.seen_ids.pop(next(iter(self.seen_ids)))
             self.seen_ids[value['id']]=digest(value)
@@ -178,6 +190,10 @@ class Peers:
         if c.peer['endpoint_id']!=value[other+'_endpoint'] or c.peer['noise_public_key']!=value[other+'_noise_key']:raise ValueError('Server substituted a pinned wallet peer.')
         return c
     def application(self,c,record):
+        if record['payload_type']=='peer.direct':
+            direct=getattr(self,'direct',None)
+            if not direct:raise ValueError('Direct peer negotiation is unavailable.')
+            return direct.handle(c,record)
         if record['payload_type']=='policy_agreement':
             if c.peer['role']!='agent':raise ValueError('A Mobile cannot approve an Agent policy.')
             body=record['body']
@@ -208,7 +224,7 @@ class Peers:
         saved=self.persistence.read();rows=[]
         for ident,value in saved['pairs'].items():
             c=self.channels.get(ident);ready=bool(c and c.ready and time.monotonic()-c.seen<=75)
-            rows.append({'id':ident,'role':value['peer']['role'],'name':value['name'],'fingerprint':fingerprint(value['peer']['identity_key']),'ready':ready,'channel_code':c.handshake_hash if c and c.noise.handshake_finished else None})
+            rows.append({'id':ident,'role':value['peer']['role'],'name':value['name'],'fingerprint':fingerprint(value['peer']['identity_key']),'ready':ready,'channel_code':c.handshake_hash if c and c.noise.handshake_finished else None,'direct':self.direct.status(ident) if getattr(self,'direct',None) else None})
         pending=[{'id':i,'role':c.peer['role'],'fingerprint':fingerprint(c.peer['identity_key']),'identity_key':c.peer['identity_key'],'channel_code':c.handshake_hash,'expires_at':int(time.time()+max(0,120-(time.monotonic()-c.created)))} for i,c in self.pending.items()]
         return {'identity':self.identity,'pairs':rows,'pending':pending,'error':self.error,'registered':self.registered}
     def connect(self,rpc):
@@ -235,7 +251,8 @@ class Peers:
                 c=Channel(self,pair['peer'],pair['psk'],pair['invitation_id'],True,known=True);self.channels[ident]=c;c.first()
         if time.monotonic()>=self.backpressured_until:
             from node_client import HTTPFailure
-            for value in list(self.outgoing.values())[:8]:
+            for value in list(self.outgoing.values())[:16]:
+                if value['id'] in self.bulk_frames or getattr(self,'direct',None) and self.direct.holds(value):continue
                 try:self.rpc({'action':'send','frame':value})
                 except HTTPFailure as error:
                     if error.safe_reason!='relay_busy':raise
@@ -258,6 +275,9 @@ class Peers:
             if c.ready and time.monotonic()>=self.backpressured_until and time.monotonic()-getattr(c,'pinged',0)>20:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16)});c.pinged=time.monotonic()
             if c.ready and any(r.get('endpoint_id')==c.peer['endpoint_id'] and r.get('noise_public_key')==c.peer['noise_public_key'] for r in directory) and time.monotonic()-getattr(c,'reported',0)>30:
                 self.control('channel',{'peer_id':c.peer['endpoint_id'],'peer_role':c.peer['role'],'peer_noise_public_key':c.peer['noise_public_key'],'channel_id':c.id,'handshake_hash':c.handshake_hash,'state':'ready' if time.monotonic()-c.seen<=75 else 'closed','paired_by_qr':True});c.reported=time.monotonic()
+                if getattr(self,'direct',None):
+                    active=self.direct.active.get(c.peer['endpoint_id']);ready=self.direct.ready(c.peer['endpoint_id'])
+                    self.control('path',{'peer_id':c.peer['endpoint_id'],'channel_id':c.id,'epoch_id':active.epoch if ready else '0'*64,'transport':'direct-ssh' if ready else 'relay','state':'ready'})
     def run(self):
         import http.client
         while not self.stop.is_set():
@@ -271,4 +291,5 @@ class Peers:
             self.stop.wait(delay)
     def close(self):
         self.stop.set()
+        if getattr(self,'direct',None):self.direct.close()
         for ident in list(self.channels):self.drop(ident)

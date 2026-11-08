@@ -19,6 +19,12 @@ def action(workspace,name,data):
     from mobile_verification import qr,review,facts
     peers=workspace.peers
     if name=='status' and not data:return peers.status()
+    if name=='decode-qr' and set(data)=={'image'}:
+        from peer_qr import decode
+        return decode(data['image'])
+    if name in ('direct-delete','direct-reconnect') and set(data)=={'id'}:
+        if not hexid(data['id']) or data['id'] not in peers.persistence.read()['pairs']:raise ValueError('Unknown paired device.')
+        return peers.direct.delete(data['id']) if name=='direct-delete' else peers.direct.reconnect(data['id'])
     if name=='invite' and set(data)=={'role'}:
         envelope=peers.create_invitation(data['role'],route(Config().values));return {'envelope':envelope,'qr_svg':qr(envelope),'expires_at':envelope['message']['expires_at']}
     if name=='import' and set(data)=={'envelope','independent'}:

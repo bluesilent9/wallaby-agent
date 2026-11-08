@@ -21,11 +21,19 @@ class Stream:
     def write(self,data):
         raw=bytes(data)
         with self.lock:
-            for offset in range(0,len(raw),CHUNK):
-                part=raw[offset:offset+CHUNK];done=threading.Event();self.acks[self.tx]=done;position=self.tx
-                try:self.message('stream_data',{'offset':position,'data':base64.b64encode(part).decode(),'sha256':hashlib.sha256(part).hexdigest()});self.wait(done)
+            pending=[]
+            def finish():
+                position,done=pending.pop(0)
+                try:self.wait(done)
                 finally:self.acks.pop(position,None)
-                self.tx+=len(part)
+            try:
+                for offset in range(0,len(raw),CHUNK):
+                    if len(pending)>=4:finish()
+                    part=raw[offset:offset+CHUNK];done=threading.Event();position=self.tx;self.acks[position]=done;pending.append((position,done))
+                    self.message('stream_data',{'offset':position,'data':base64.b64encode(part).decode(),'sha256':hashlib.sha256(part).hexdigest()});self.tx+=len(part)
+                while pending:finish()
+            finally:
+                for position,_ in pending:self.acks.pop(position,None)
         return len(raw)
     def read(self,size=-1):
         if not 0<=size<=1024*1024:raise ValueError('Bounded encrypted reads are required.')
@@ -44,7 +52,7 @@ class Stream:
 class Bridge:
     def __init__(self,peers,store):self.peers=peers;self.store=store;self.streams={};self.sockets={};self.lock=threading.RLock();peers.listeners.append(self)
     def open(self,p):
-        channel=self.peers.binding(p);stream=Stream(self,channel,wire_hash(p),secrets.token_hex(32))
+        channel=self.peers.binding(p);self.peers.direct.require(channel);stream=Stream(self,channel,wire_hash(p),secrets.token_hex(32))
         with self.lock:
             if len(self.streams)>=4:raise ValueError('Another encrypted wallet stream is active.')
             self.streams[stream.id]=stream
@@ -61,6 +69,7 @@ class Bridge:
     def __call__(self,channel,record):
         kind=record['payload_type']
         if not kind.startswith('stream_'):return False
+        self.peers.direct.require(channel)
         if channel.peer['role']!='agent':raise ValueError('Private wallet transfers require Agent permission.')
         body=record['body']
         if not isinstance(body,dict) or not hexid(body.get('stream_id')):raise ValueError('Invalid encrypted stream identity.')

@@ -1,3 +1,9 @@
+# Build 67 validation
+
+Real restricted Paramiko SSH + fresh inner Noise, simultaneous renewal/cutover, one reachable orientation, hard expiry, persistent direct deletion without QR/key loss, Agent-server/Mobile-client roles, local QR-image decoding and actual Wallet Server Build 3 dispatcher integration are tested in `tests/test_build67.py`. Real Core 31 isolated regtest transfers cover private single-signature wallets, original multisig vault signer restoration and watch-only vault history. Bulk frame IDs are absent from relay traffic; relay bulk receipt is refused. Existing pairing/replay/role/downgrade, extinction/LOST/original-role and disc/transaction UI regressions are retained. See AGENT_BUILD67_DIRECT_PEERS.md for precise limits and Mobile protocol.
+
+Tests never install services, modify real wallets/SSH accounts/firewalls or burn discs. Actual Android/network/Qt/systemd deployment remains device testing. Installer extraction/source parity is audited independently.
+
 # Build 66 validation
 
 Final logs accompany this build. New peer checks cover QR roles/expiry/reuse, both SSHSIG and Noise identity bindings, wrong PSK, local grants, revocation/restart, altered headers/ciphertext, replay/order rejection, matching policy agreement, downgrade refusal, exact-frame retention under ambiguous delivery/backpressure, durable bounded storage and public mobile review records. Tests use the actual companion Wallet Server Build 2 SecureRelay dispatcher for registration, signed mesh reports, restart and encrypted wallet delivery.
