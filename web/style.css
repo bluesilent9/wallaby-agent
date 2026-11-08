@@ -41,3 +41,6 @@ button.is-busy:disabled{cursor:wait}
 .peer-qr{display:block;width:min(80vw,560px);height:auto;background:white;image-rendering:pixelated}#peer-list code{overflow-wrap:anywhere}#peer-import{width:100%}
 
 #page-peers input[type=checkbox]{width:auto;margin-right:10px}#page-peers label:has(input[type=checkbox]){display:flex;align-items:center;gap:8px}.peer-qr{width:min(100%,52vh);max-height:52vh;object-fit:contain;margin-inline:auto}
+#block-download-controls .block-sharing{display:flex;align-items:center;gap:.6rem;margin:1rem 0}
+#block-download-controls .block-sharing input[type=checkbox]{width:auto;display:inline-block;margin:0}
+#block-download-controls .actions{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:1rem}

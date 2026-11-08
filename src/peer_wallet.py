@@ -51,7 +51,7 @@ def frame_write(stream,value):
 def read_exact(stream,n):
     data=bytearray()
     while len(data)<n:
-        part=stream.read(n-len(data))
+        part=stream.read(min(n-len(data),1024*1024))
         if not part:raise ValueError('Direct SSH connection ended before confirmation.')
         data.extend(part)
     return bytes(data)

@@ -51,7 +51,7 @@ class Workspace:
         self.environment.update({key:value for key,value in environment.items() if value})
         c=Config().values;c['cookie']=c['cookie'] or discover_cookie()
         if self.ops is None or any(self.ops.core.config.get(k)!=c[k] for k in ('cookie','rpc_port')):
-            if self.ops and (self.busy() or self.archives and (self.archives.loaded or self.archives.staged)):raise ValueError('Finish protected wallet work before changing the Core connection.')
+            if self.ops and (self.store.read().get('chain_sync',{}).get('mode')=='ssh_only' or self.busy() or self.archives and (self.archives.loaded or self.archives.staged)):raise ValueError('Finish protected wallet work before changing the Core connection.')
             if self.node_stop:self.node_stop.set()
             if self.transfer:self.transfer.close()
             self.ops=WalletOps(Core(c),self.store);self.ops.core.managed_store=self.store
@@ -83,6 +83,7 @@ class Workspace:
             agent_exchange.LOCAL_RETIREMENT=self.retirement
             agent_exchange.LOCAL_ARCHIVES=self.archive_ops
             agent_exchange.LOCAL_BROADCASTS=self.broadcasts
+        if getattr(getattr(self,'peers',None),'blocks',None):self.peers.blocks.core=self.ops.core
         self.start_peer_support()
         self.setup.environment=self.environment
         if getattr(self,'archives',None):self.archives.environment=self.environment
@@ -101,6 +102,8 @@ class Workspace:
                 from direct_peers import Direct
                 candidate=Peers(self.store)
                 candidate.wallet_bridge=Bridge(candidate,self.store);direct=Direct(candidate)
+                from block_download import Blocks
+                candidate.blocks=Blocks(candidate,self.store,self.ops.core)
                 with self.lock:
                     if self.closing:
                         candidate.close();self.store.peers=None;return
@@ -145,7 +148,7 @@ class Workspace:
         writing=False
         active=s.get('setup_active')
         setup_reserved=bool(active and (active not in sessions or sessions[active]['phase'] not in ('contributed','awaiting_disc','complete')))
-        return bool(archive_busy or setup_busy or writing or (not public_reads and getattr(self,'public_reviews',None) and self.public_reviews.active) or (not public_reads and getattr(self,'broadcasts',None) and self.broadcasts.active) or public_reads and setup_reserved or
+        return bool((not public_reads and (s.get('block_download',{}).get('running') or getattr(getattr(getattr(self,'peers',None),'blocks',None),'serving',{}))) or archive_busy or setup_busy or writing or (not public_reads and getattr(self,'public_reviews',None) and self.public_reviews.active) or (not public_reads and getattr(self,'broadcasts',None) and self.broadcasts.active) or public_reads and setup_reserved or
             (not public_reads and any(v['proposal']['kind'] in ('destroy_disc','archive_cancel','builder_cancel') for v in s['pending'].values())) or
             self.archives and self.archives.reading or s.get('history_jobs') or
             any(k!=ignore_rename and row['proposal']['kind']=='wallet_rename' and row['state']!='pending' for k,row in s['pending'].items()) or

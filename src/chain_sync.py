@@ -8,12 +8,14 @@ def publish(store,**facts):
     with store.edit() as s:s.setdefault('chain_sync',{}).update(facts)
 
 
-def send(core,stream,read,write):
+def send(core,stream,read,write,progressive=False):
     tip=rpc(core,'getblockchaininfo')
-    if tip.get('initialblockdownload') or tip['blocks']!=tip['headers']:raise ValueError('The sending Core must finish catching up before it can update another node.')
-    write(stream,{'operation':'chain_sync','version':1,'chain':tip['chain'],'height':tip['blocks'],'hash':tip['bestblockhash']})
+    if not progressive and (tip.get('initialblockdownload') or tip['blocks']!=tip['headers']):raise ValueError('For a source still downloading, use the separate Blockchain over direct SSH controls. Wallet transfer requires the source to finish catching up.')
+    offer={'operation':'chain_sync','version':2 if progressive else 1,'chain':tip['chain'],'height':tip['blocks'],'hash':tip['bestblockhash']}
+    if progressive:offer.update(source_syncing=bool(tip.get('initialblockdownload') or tip['blocks']<tip['headers']),source_headers=tip['headers'])
+    write(stream,offer)
     peer=read(stream)
-    if peer.get('status')!='chain_state' or peer.get('chain')!=tip['chain'] or type(peer.get('height')) is not int:raise ValueError('Receiver did not accept direct Core catch-up.')
+    if peer.get('status')!='chain_state' or peer.get('chain')!=tip['chain'] or type(peer.get('height')) is not int or not 0<=peer['height']<=2**31:raise ValueError('Receiver did not accept direct Core catch-up.')
     def peer_hash(height):
         write(stream,{'operation':'chain_hash','height':height});r=read(stream)
         if r.get('height')!=height or not isinstance(r.get('hash'),str):raise ValueError('Invalid receiver chain locator.')
@@ -49,10 +51,15 @@ def send(core,stream,read,write):
 
 
 def receive(core,store,stream,hello,read,write,read_exact):
-    if set(hello)!={'operation','version','chain','height','hash'} or hello['version']!=1 or type(hello['height']) is not int or not 0<=hello['height']<=2**31 or not isinstance(hello['hash'],str) or len(hello['hash'])!=64:raise ValueError('Invalid direct Core catch-up offer.')
+    fields={'operation','version','chain','height','hash'}
+    if hello.get('version')==2:
+        fields|={'source_syncing','source_headers'}
+        if type(hello.get('source_syncing')) is not bool or type(hello.get('source_headers')) is not int or hello['source_headers']<hello.get('height',0):raise ValueError('Invalid source download state.')
+    if set(hello)!=fields or hello.get('operation')!='chain_sync' or type(hello['version']) is not int or hello['version'] not in (1,2) or type(hello['height']) is not int or not 0<=hello['height']<=2**31 or not isinstance(hello['hash'],str) or len(hello['hash'])!=64:raise ValueError('Invalid direct Core catch-up offer.')
     chain=rpc(core,'getblockchaininfo')
     if chain['chain']!=hello['chain']:raise ValueError('Direct Core catch-up uses a different network.')
-    old=rpc(core,'getnetworkinfo')['networkactive']
+    saved=store.read().get('chain_sync',{})
+    old=saved.get('network_was_active',False) if saved.get('network_paused') else rpc(core,'getnetworkinfo')['networkactive']
     rpc(core,'setnetworkactive',[False]);publish(store,state='receiving',network_paused=True,network_was_active=old,current_height=chain['blocks'],target_height=hello['height'],message='Core peer connections paused. Receiving validated blocks over SSH only.')
     try:
         write(stream,{'status':'chain_state','chain':chain['chain'],'height':chain['blocks'],'hash':chain['bestblockhash']})
@@ -82,7 +89,8 @@ def receive(core,store,stream,hello,read,write,read_exact):
         for name in rpc(core,'listwallets'):
             info=rpc(core,'getwalletinfo',[],name)
             if info.get('scanning') or info.get('lastprocessedblock',{}).get('height',-1)<hello['height']:raise ValueError('A local wallet has not processed the transferred chain. Internet remains paused.')
-        publish(store,state='caught_up',current_height=hello['height'],message='Core reached the sending node’s verified tip. Internet peers remain paused until the SSH transfer completes.')
+        actual=rpc(core,'getblockchaininfo')
+        publish(store,state='caught_up',current_height=actual['blocks'],source_height=hello['height'],source_syncing=hello.get('source_syncing'),source_headers=hello.get('source_headers'),message='Available source blocks checked. Existing receiver blocks were retained. This does not claim that either node has reached the current network tip.')
         write(stream,{'status':'chain_complete','height':hello['height'],'hash':hello['hash']})
     except Exception:
         publish(store,state='interrupted',message='SSH catch-up interrupted. Core Internet peers remain paused; verified blocks were retained. Reconnect to resume or explicitly resume Internet connections.')
@@ -92,6 +100,9 @@ def receive(core,store,stream,hello,read,write,read_exact):
 def finish(core,store):
     state=store.read().get('chain_sync',{})
     if state.get('network_paused') and state.get('state')=='caught_up':
+        if state.get('mode')=='ssh_only':
+            publish(store,state='waiting_source',message='Available source blocks checked. SSH-only mode keeps Internet peers paused; the source may still be downloading.')
+            return
         if state.get('network_was_active'):rpc(core,'setnetworkactive',[True])
         publish(store,network_paused=False,state='complete',message='SSH catch-up complete. The previous Core peer-connection setting was restored.')
 
@@ -99,5 +110,12 @@ def finish(core,store):
 def resume_network(core,store):
     saved=store.read()
     if saved.get('active_transfer') or saved.get('sync_batch'):raise ValueError('End the active SSH synchronisation before resuming Internet peers.')
-    rpc(core,'setnetworkactive',[True]);publish(store,network_paused=False,state='internet_resumed',message='Core Internet peer connections resumed by local user.')
+    if saved.get('block_download',{}).get('running'):raise ValueError('Stop direct block receiving before resuming Internet peers.')
+    recovery=saved.get('recovery',{})
+    if recovery.get('plan',{}).get('replay') and not recovery.get('replay_ready') and recovery.get('state') in ('starting','stopping','downloading','rescanning'):raise ValueError('Wait until recovery wallets are registered before resuming Internet peers.')
+    publish(store,mode='internet',network_paused=False,state='internet_resumed',message='Core Internet peer connections resumed by local user.')
+    try:rpc(core,'setnetworkactive',[True])
+    except Exception:
+        publish(store,mode='ssh_only',network_paused=True,state='interrupted',message='Core did not confirm Internet resumption. SSH-only mode retained.');raise
+    with store.edit() as state:state.setdefault('block_download',{})['prepared']=False
     return {'ok':True}

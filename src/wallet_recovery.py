@@ -180,6 +180,8 @@ class Recovery:
             plan['launch']=launch
             plan['network_was_active']=bool(rpc(self.core,'getnetworkinfo')['networkactive']);plan['restore_network_after']=plan['network_was_active']
         elif mode=='resume':plan['network_was_active']=previous['plan'].get('network_was_active',True)
+        if self.store.read().get('chain_sync',{}).get('mode')=='ssh_only':
+            plan.update(ssh_only=True,restore_network_after=False,resume_network=False)
         key=digest(plan)
         with self.store.edit() as s:s['recovery_plan']={'id':key,'plan':plan}
         messages={
@@ -187,6 +189,7 @@ class Recovery:
             'resume':'Continue preparing wallets while Core network activity is paused, then resume the blockchain download with the same pruning settings. No new reindex or wallet restoration is blindly repeated.',
             'rescan':'Authorise restoring queued encrypted wallets and rescanning wallet history using retained blocks already on disk. Pruning settings stay unchanged. No additional backups are created.',
             'monitor':'Core is already downloading. The Agent will monitor the existing download with pruning unchanged. A wallet must be registered before the blocks it needs are pruned; otherwise a new locally authorised reindex may be required.'}
+        if plan.get('ssh_only'):messages[mode]+=' SSH-only mode is selected: Internet peers remain paused after wallet registration. Start receiving blocks from your paired Agent when ready.'
         return {'id':key,'mode':mode,'wallets':plan['wallets'],'message':messages[mode],'pruning':plan['pruning']}
 
     def start(self,key):
@@ -198,6 +201,7 @@ class Recovery:
             if self.thread and self.thread.is_alive():raise ValueError('Recovery is already running.')
             if saved.get('recovery',{}).get('state') not in TERMINAL|{None}:raise ValueError('Previous recovery is still active. Inspect its status before continuing.')
             plan=p['plan']
+            if bool(plan.get('ssh_only'))!=(self.store.read().get('chain_sync',{}).get('mode')=='ssh_only'):raise ValueError('Blockchain source mode changed. Review a fresh recovery plan before restarting Core.')
             binding={'cookie':str(Path(self.core.config['cookie']).expanduser().resolve()),'rpc_port':self.core.config['rpc_port']}
             if plan.get('core_binding')!=binding or rpc(self.core,'getblockchaininfo')['chain']!=plan['chain']:raise ValueError('Core connection changed. Review a fresh recovery plan.')
             if pruning_identity(rpc(self.core,'getblockchaininfo'))!=plan['pruning']:raise ValueError('Core pruning settings changed. Review a fresh recovery plan.')
@@ -345,17 +349,18 @@ class Recovery:
             with self.store.edit() as saved:
                 saved['history_jobs'][key].update(registered_for_replay=True,monitor_wallets=monitors)
         with self.store.edit() as saved:saved['recovery']['replay_ready']=True
-        rpc(self.core,'setnetworkactive',[True])
+        rpc(self.core,'setnetworkactive',[not plan.get('ssh_only',False)])
         self.update('downloading','Wallets and vaults are registered. Downloading and recording history while keeping the existing pruning settings.')
     def run(self,plan):
         try:
             if plan['mode']=='download':self.restart(plan['launch'],['-reindex=1','-networkactive=0'])
             if plan.get('replay'):self.prepare_replay(plan)
             else:
-                if plan.get('resume_network'):rpc(self.core,'setnetworkactive',[True])
+                if plan.get('resume_network') and not plan.get('ssh_only'):rpc(self.core,'setnetworkactive',[True])
                 self.update('downloading' if plan['mode']=='monitor' else 'rescanning','Waiting for the local blockchain and wallet histories. Pruning settings are unchanged.')
             while True:
                 chain=self.wait_rpc()
+                if plan.get('ssh_only') and self.store.read().get('chain_sync',{}).get('mode')=='ssh_only' and rpc(self.core,'getnetworkinfo')['networkactive']:rpc(self.core,'setnetworkactive',[False])
                 if pruning_identity(chain)!=plan['pruning']:raise ValueError('Core pruning settings changed during recovery. Recovery stopped for local review.')
                 if not chain.get('initialblockdownload') and chain.get('headers',chain['blocks'])==chain['blocks'] and chain['blocks']>=plan['target_height']:break
                 time.sleep(5)
@@ -387,7 +392,7 @@ class Recovery:
             for name in plan['wallets']:
                 info=rpc(self.core,'getwalletinfo',[],name)
                 if info.get('scanning') or info.get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('A wallet has not finished processing the recovered chain.')
-            if plan.get('restore_network_after') is False:rpc(self.core,'setnetworkactive',[False])
+            if plan.get('restore_network_after') is False and (not plan.get('ssh_only') or self.store.read().get('chain_sync',{}).get('mode')=='ssh_only'):rpc(self.core,'setnetworkactive',[False])
             self.update('complete','History recovery completed. Wallet and vault history is stored in Core. The original pruning settings were kept throughout.')
             with self.store.edit() as saved:saved['recovery']['finished']=time.time()
         except Exception as error:

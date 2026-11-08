@@ -1,3 +1,7 @@
+# Build 69 validation
+
+Isolated Core and real loopback SSH checks cover progressive public-block rounds, a source behind or at genesis, IBD metadata, retained receiver chains, both SSH orientations, three-Agent daisy chaining, offline replay-wallet registration, bound recovery source mode, pruning/validation failures and explicit Internet resumption. Existing direct wallet role and startup regressions remain covered. Browser checks exercise the separate block controls and existing wallet/disc flows. See AGENT_BUILD69_BLOCK_DOWNLOAD.md for limits and the accompanying test logs.
+
 # Build 68 validation
 
 See AGENT_BUILD68_STARTUP_RECOVERY.md and the accompanying Build 68 test log for startup, guarded recovery, direct SSH/Core and browser checks. Fixtures use isolated data directories; no live user wallet or service is touched.

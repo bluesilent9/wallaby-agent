@@ -6,7 +6,7 @@ window.updateTransfer=function(t){
  document.querySelector('[data-page="synchronisation"]').disabled=!workspace?.protected?.viewer;
 
  // Requests never open a browser or change the user's page.
- if(document.activeElement?.closest('#transfer-content form, #transfer-content input'))return;
+ if(document.activeElement?.closest('#transfer-content form, #transfer-content input, #block-download-controls select'))return;
  const signature=JSON.stringify(t);if(signature===transferSignature)return;transferSignature=signature;
  renderSync(t);
 };
@@ -35,6 +35,7 @@ function renderSync(t){
  if(t.success_until>Date.now()/1000)root.append(el('section',{class:'transfer-success',role:'status'},'Success!'));
  if(t.error)root.append(el('p',{class:'warning',role:'alert'},t.error));
  if(t.proposal)root.append(renderWallet(t));
+ root.append(el('section',{id:'block-download-controls',class:'server-card result-card'}));window.loadBlockDownload?.();
  root.append(batchControls(t,rows));
  if(t.recovery)root.append(recoveryCard(t.recovery));
 }
@@ -69,7 +70,7 @@ function renderWallet(t){
 }
 function batchControls(t,rows){
  const box=el('section',{class:'server-card result-card'},el('h3',{},'Transfer selected wallets'));
- if(t.chain_sync?.message){box.append(el('p',{role:'status'},t.chain_sync.message));if(t.chain_sync.current_height!==undefined)box.append(el('p',{},'SSH blocks: '+blockHeight(t.chain_sync.current_height)+' / '+blockHeight(t.chain_sync.target_height)));if(t.chain_sync.network_paused&&!t.busy)box.append(button('Resume Core Internet connections','secondary',async()=>{await api('synchronisation/resume-network',{});transferSignature='';}));}
+ if(t.chain_sync?.message){box.append(el('p',{role:'status'},t.chain_sync.message));if(t.chain_sync.current_height!==undefined)box.append(el('p',{},'SSH blocks: '+blockHeight(t.chain_sync.current_height)+' / '+blockHeight(t.chain_sync.target_height)));if(t.chain_sync.network_paused&&t.chain_sync.mode!=='ssh_only'&&!t.busy)box.append(button('Resume Core Internet connections','secondary',async()=>{await api('synchronisation/resume-network',{});transferSignature='';}));}
 
  if(t.relay_progress&&(t.relay_progress.sent_bytes||t.relay_progress.received_bytes))box.append(el('p',{role:'status'},'Encrypted stream · sent '+t.relay_progress.sent_bytes.toLocaleString()+' bytes · received '+t.relay_progress.received_bytes.toLocaleString()+' bytes'+(t.relay_progress.paused?' · connection control is waiting; bulk data requires direct SSH.':'')));
  if(t.busy){box.append(el('p',{role:'status'},t.sending?'Sending selected wallets, one at a time…':'Receiving authorisation is active for the selected wallets.'));

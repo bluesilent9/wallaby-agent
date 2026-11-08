@@ -19,6 +19,14 @@ def action(workspace,name,data):
     from mobile_verification import qr,review,facts
     peers=workspace.peers
     if name=='status' and not data:return peers.status()
+    if name.startswith('block-'):
+        blocks=peers.blocks
+        if name=='block-status' and not data:return {**blocks.state(),'pairs':[{k:p[k] for k in ('id','name','role')} for p in peers.status()['pairs'] if p['role']=='agent']}
+        if name=='block-prepare' and set(data)=={'id'}:return blocks.prepare(data['id'])
+        if name=='block-serve' and set(data)=={'enabled'}:return blocks.sharing(data['enabled'])
+        if name=='block-start' and not data:return blocks.start()
+        if name=='block-stop' and not data:return blocks.end()
+        raise ValueError('Invalid local block action.')
     if name=='decode-qr' and set(data)=={'image'}:
         from peer_qr import decode
         return decode(data['image'])

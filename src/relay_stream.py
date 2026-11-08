@@ -50,17 +50,42 @@ class Stream:
     def close(self):self.dead=True
 
 class Bridge:
-    def __init__(self,peers,store):self.peers=peers;self.store=store;self.streams={};self.sockets={};self.lock=threading.RLock();peers.listeners.append(self)
+    def __init__(self,peers,store):self.peers=peers;self.store=store;self.streams={};self.sockets={};self.retired={};self.lock=threading.RLock();peers.listeners.append(self)
     def open(self,p):
         channel=self.peers.binding(p);self.peers.direct.require(channel);stream=Stream(self,channel,wire_hash(p),secrets.token_hex(32))
         with self.lock:
             if len(self.streams)>=4:raise ValueError('Another encrypted wallet stream is active.')
             self.streams[stream.id]=stream
         stream.message('stream_open',{'transfer_id':p['transfer_id']});stream.wait(stream.opened);return stream
+    def open_blocks(self,channel,cancel=None):
+        self.peers.direct.require(channel)
+        if channel.peer['role']!='agent':raise ValueError('Block transfer requires paired Agent permission.')
+        token=secrets.token_hex(32);stream=Stream(self,channel,digest({'chain_download_v2':token}),secrets.token_hex(32))
+        with self.lock:
+            if len(self.streams)>=4:raise ValueError('Encrypted stream limit reached.')
+            self.streams[stream.id]=stream
+        try:
+            stream.message('stream_open',{'block_request':token})
+            deadline=time.monotonic()+20
+            while not stream.opened.wait(.1):
+                if stream.dead or cancel and cancel.is_set() or time.monotonic()>=deadline:raise ValueError('Direct block source did not accept this request.')
+            if stream.dead:raise ValueError('Source has not enabled block serving.')
+            return stream
+        except Exception:self.abort(stream);raise
+    def abort(self,stream):
+        if not stream.dead:
+            try:stream.message('stream_close',{})
+            except Exception:pass
+        self.remove(stream)
     def closed(self,peer):
         for stream in list(self.streams.values()):
             if stream.channel.peer['endpoint_id']==peer:self.remove(stream)
     def remove(self,stream):
+        now=time.monotonic()
+        with self.lock:
+            self.retired={i:v for i,v in self.retired.items() if now-v[2]<60}
+            self.retired[stream.id]=(stream.channel,stream.operation,now)
+            while len(self.retired)>64:self.retired.pop(next(iter(self.retired)))
         stream.close();self.streams.pop(stream.id,None);sock=self.sockets.pop(stream.id,None)
         if sock:
             try:sock.shutdown(socket.SHUT_RDWR)
@@ -74,7 +99,19 @@ class Bridge:
         body=record['body']
         if not isinstance(body,dict) or not hexid(body.get('stream_id')):raise ValueError('Invalid encrypted stream identity.')
         ident=body['stream_id'];stream=self.streams.get(ident)
+        retired=self.retired.get(ident)
+        if not stream and retired and retired[0] is channel and retired[1]==record['operation_hash'] and time.monotonic()-retired[2]<60 and kind in ('stream_ack','stream_data','stream_ready','stream_close'):return True
+        if kind=='stream_open' and retired:raise ValueError('A closed stream identity cannot be reused.')
         if kind=='stream_open':
+            if set(body)=={'stream_id','block_request'}:
+                token=body['block_request']
+                if stream or not hexid(token) or record['operation_hash']!=digest({'chain_download_v2':token}):raise ValueError('Invalid direct block request.')
+                if len(self.streams)>=4:raise ValueError('Encrypted stream limit reached.')
+                stream=Stream(self,channel,record['operation_hash'],ident);self.streams[ident]=stream
+                blocks=getattr(self.peers,'blocks',None)
+                if not blocks or not blocks.accept(stream):self.abort(stream)
+                else:stream.message('stream_ready',{})
+                return True
             if set(body)!={'stream_id','transfer_id'} or stream:raise ValueError('Duplicate or invalid encrypted stream request.')
             state=self.store.read();batch=state.get('sync_batch',{});keys=batch.get('keys',[]) if batch.get('direction')=='receive' else [state.get('active_transfer')]
             rows=[state['pending'][k]['proposal'] for k in keys if k in state['pending'] and state['pending'][k]['state']=='pending' and not state['pending'][k].get('withdrawn') and state['pending'][k]['proposal'].get('transfer_version')==3 and state['pending'][k]['proposal']['transfer_id']==body['transfer_id']]
