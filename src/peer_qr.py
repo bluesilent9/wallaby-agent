@@ -20,6 +20,6 @@ def decode(encoded):
                 results=zxingcpp.read_barcodes(image,formats=zxingcpp.BarcodeFormat.QRCode)
         if len(results)!=1 or not results[0].valid or len(results[0].text)>16384:raise ValueError('Choose an image containing exactly one clear pairing QR.')
         envelope=strict_json(results[0].text.encode())
-        if not isinstance(envelope,dict) or not isinstance(envelope.get('message'),dict) or envelope['message'].get('kind')!='agent_invitation':raise ValueError('This is not an Agent pairing QR.')
+        if not isinstance(envelope,dict) or not isinstance(envelope.get('message'),dict) or envelope['message'].get('kind')!='agent_invitation':raise ValueError('This is not a device pairing QR.')
         return {'envelope':envelope,'message':'QR read locally. Confirm its independent source, then connect to validate its signature and expiry.'}
     except (OSError,SyntaxError,Image.DecompressionBombError,Image.DecompressionBombWarning):raise ValueError('The QR image is invalid or too large.')

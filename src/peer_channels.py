@@ -58,16 +58,19 @@ class Channel:
             if record['operation_hash']!=digest(self.prologue) or record['body']!={'accepted':True}:raise ValueError('Invalid local peer grant.')
             self.remote_grant=True
             if self.local_grant:
-                if not self.ready:self.owner.persist(self);self.ready=True
+                if not self.ready:
+                    self.owner.persist(self);self.ready=True
+                    self.send('ping',digest(self.prologue),{'nonce':secrets.token_hex(16),'device_name':self.owner.device_name})
             return
         if not self.ready or not self.local_grant:raise ValueError('Peer has not been granted application authority locally.')
-        if kind=='ping':self.send('pong',record['operation_hash'],record['body']);return
+        if kind=='ping':self.owner.peer_name(self,record['body']);self.send('pong',record['operation_hash'],record['body']);return
         if kind=='pong':return
         self.owner.application(self,record)
 
 class Peers:
     def __init__(self,store,persistence=None,role='agent'):
         from peer_storage import Client
+        self.device_name=__import__('socket').gethostname()[:128]
         self.store=store;self.persistence=persistence or Client();self.lock=threading.RLock();self.channels={};self.invitations={};self.pending={};self.outgoing={};self.bulk_frames=set();self.acks=[];self.seen_ids={};self.agreements={};self.listeners=[];self.error='';self.registered=False;self.last_directory=[];self.closed_reports=[];self.backpressured_until=0;self.importing=None;self.stop=threading.Event();self.rpc=None;self.thread=None
         saved=self.persistence.read()
         if saved['private_key'] is None:
@@ -91,9 +94,11 @@ class Peers:
     def create_invitation(self,role,relay):
         self.prune_local()
         if self.pending:raise ValueError('Approve or reject the pending local pairing before creating another invitation.')
-        if self.identity['role']!='agent' or role not in ('agent','mobile'):raise ValueError('Only a trusted Agent may grant Agent or Mobile permissions.')
+        auto=role=='auto'
+        if role not in ('agent','mobile','auto') or self.identity['role']=='mobile' and not auto:raise ValueError('Invalid pairing role.')
         self.validate_route(relay);now=int(time.time());ident=secrets.token_hex(32)
         message={'protocol':'wallaby-wallet-peer-pair','version':1,'kind':'agent_invitation','invitation_id':ident,'issuer_role':'agent','allowed_peer_role':role,'issuer_identity_key':self.identity['identity_key'],'issuer_noise_public_key':self.identity['noise_public_key'],'issuer_endpoint_id':self.identity['endpoint_id'],'cipher_suite':CIPHER,'pairing_secret':b64(secrets.token_bytes(32)),'expires_at':now+120,'relay':relay}
+        if auto:message.update(version=2,issuer_role=self.identity['role'],allowed_peer_role='auto' if self.identity['role']=='agent' else 'agent',issuer_name=self.valid_name(self.device_name))
         with self.lock:self.invitations={ident:message}
         return sign(self.store,message,INVITATION)
     @staticmethod
@@ -103,17 +108,34 @@ class Peers:
         if not isinstance(route,dict) or set(route)!={'host','port','user','host_public_key','host_fingerprint','agent_port','mobile_port'} or hostname(route['host'])!=route['host'] or type(route['port']) is not int or not 1<=route['port']<=65535 or not isinstance(route['user'],str) or not re.fullmatch('[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}',route['user']) or fingerprint(route['host_public_key'])!=route['host_fingerprint'] or route['agent_port']!=56443 or route['mobile_port']!=56444:raise ValueError('Invalid independently pinned Server SSH route.')
     def import_invitation(self,envelope):
         m=envelope.get('message',{}) if isinstance(envelope,dict) else {};fields={'protocol','version','kind','invitation_id','issuer_role','allowed_peer_role','issuer_identity_key','issuer_noise_public_key','issuer_endpoint_id','cipher_suite','pairing_secret','expires_at','relay'}
-        if set(m)!=fields or m['protocol']!='wallaby-wallet-peer-pair' or type(m['version']) is not int or m['version']!=1 or m['kind']!='agent_invitation' or m['issuer_role']!='agent' or m['allowed_peer_role']!=self.identity['role'] or m['cipher_suite']!=CIPHER or not hexid(m['invitation_id']) or type(m['expires_at']) is not int or not time.time()<m['expires_at']<=time.time()+120 or m['issuer_endpoint_id']!=endpoint('agent',m['issuer_identity_key']):raise ValueError('Expired, wrong-role or invalid pairing invitation.')
+        version=m.get('version')
+        if version==2:fields.add('issuer_name')
+        if set(m)!=fields or m['protocol']!='wallaby-wallet-peer-pair' or type(version) is not int or version not in (1,2) or m['kind']!='agent_invitation' or m['issuer_role'] not in ('agent','mobile') or version==1 and m['issuer_role']!='agent' or m['allowed_peer_role'] not in ((self.identity['role'],'auto') if version==2 else (self.identity['role'],)) or m['issuer_role']==self.identity['role']=='mobile' or m['cipher_suite']!=CIPHER or not hexid(m['invitation_id']) or type(m['expires_at']) is not int or not time.time()<m['expires_at']<=time.time()+120 or m['issuer_endpoint_id']!=endpoint(m['issuer_role'],m['issuer_identity_key']):raise ValueError('Expired, wrong-role or invalid pairing invitation. Automatic pairing requires a matching updated Agent or Mobile.')
+        if version==2:
+            self.valid_name(m['issuer_name'])
+            if m['issuer_role']=='mobile' and m['allowed_peer_role']!='agent':raise ValueError('A Mobile can pair only with an Agent.')
         binary(m['pairing_secret']);binary(m['issuer_noise_public_key']);self.validate_route(m['relay']);verify(self.store,envelope,m['issuer_identity_key'],INVITATION)
         saved=self.persistence.read()
         if self.importing and self.importing['invitation_id']==m['invitation_id'] and m['issuer_endpoint_id'] in self.channels:raise ValueError('This pairing invitation is already in progress.')
         if m['invitation_id'] in saved['used'] or m['issuer_endpoint_id'] in saved['pairs'] or m['issuer_endpoint_id']==self.identity['endpoint_id']:raise ValueError('Invitation was already used or peer already paired. Revoke the old local pairing before replacing it.')
-        peer={'endpoint_id':m['issuer_endpoint_id'],'role':'agent','identity_key':m['issuer_identity_key'],'noise_public_key':m['issuer_noise_public_key']}
+        peer={'endpoint_id':m['issuer_endpoint_id'],'role':m['issuer_role'],'identity_key':m['issuer_identity_key'],'noise_public_key':m['issuer_noise_public_key']}
         # The user imports the QR directly from the trusted Agent screen, not Server.
         c=Channel(self,peer,m['pairing_secret'],m['invitation_id'],True);self.channels[peer['endpoint_id']]=c;self.importing=m;c.first();return {'message':'Connecting securely. The other Agent must approve this device locally.','peer':peer}
+    @staticmethod
+    def valid_name(name):
+        if not isinstance(name,str) or not name.strip() or len(name)>128 or any(ord(ch)<32 for ch in name):raise ValueError('Invalid peer device name.')
+        return name
+    def peer_name(self,c,body):
+        # Authenticated display metadata only; roles and pinned keys cannot change.
+        if not isinstance(body,dict) or 'device_name' not in body:return
+        name=self.valid_name(body['device_name']);saved=self.persistence.read();row=saved['pairs'].get(c.peer['endpoint_id'])
+        if row and row['peer']==c.peer and row['name']!=name:
+            row['name']=name;saved['revision']+=1;self.persistence.commit(saved['revision']-1,saved)
     def persist(self,c):
         saved=self.persistence.read();existing=saved['pairs'].get(c.peer['endpoint_id'])
-        value={'peer':c.peer,'psk':c.psk,'invitation_id':c.invitation,'initiator':c.initiator,'name':existing['name'] if existing else c.peer['role'].title()+' '+fingerprint(c.peer['identity_key'])}
+        label=existing['name'] if existing else c.peer['role'].title()+' '+fingerprint(c.peer['identity_key'])
+        if not existing and self.importing and self.importing['invitation_id']==c.invitation:label=self.importing.get('issuer_name',label)
+        value={'peer':c.peer,'psk':c.psk,'invitation_id':c.invitation,'initiator':c.initiator,'name':label}
         if existing and existing.get('direct_enabled') is not None:value['direct_enabled']=existing['direct_enabled']
         if existing and existing!=value:raise ValueError('Pinned peer keys or roles changed; revoke and pair locally again.')
         if not existing:
@@ -130,7 +152,9 @@ class Peers:
             if c.invitation in saved['used']:raise ValueError('This invitation has already been accepted.')
             c.local_grant=True
             if c.remote_grant:self.persist(c)
-            c.send('grant',digest(c.prologue),{'accepted':True});c.ready=c.remote_grant;return {'message':'Local peer permission granted. Compare the same channel code on both devices.'}
+            c.send('grant',digest(c.prologue),{'accepted':True});c.ready=c.remote_grant
+            if c.ready:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name})
+            return {'message':'Local peer permission granted. Compare the same channel code on both devices.'}
     def revoke(self,ident):
         with self.lock:
             saved=self.persistence.read();saved['pairs'].pop(ident,None);saved['revision']+=1;self.persistence.commit(saved['revision']-1,saved);self.drop(ident);self.pending.pop(ident,None)
@@ -167,7 +191,7 @@ class Peers:
                     m=invitations[0];matches=[r for r in directory if r.get('endpoint_id')==ident]
                     if len(matches)!=1:raise ValueError('Peer discovery is missing; no trust granted.')
                     row=matches[0];peer=participant({k:row[k] for k in ('endpoint_id','role','identity_key','noise_public_key')})
-                    if peer['role']!=m['allowed_peer_role'] or peer['role']==self.identity['role']=='mobile':raise ValueError('Mobile cannot claim Agent authority.')
+                    if m['allowed_peer_role'] not in ('auto',peer['role']) or peer['role']==self.identity['role']=='mobile':raise ValueError('Mobile cannot claim Agent authority.')
                     psk=m['pairing_secret'];invitation=m['invitation_id'];known=False
                 c=Channel(self,peer,psk,invitation,False,value['channel_id'],known);self.channels[ident]=c
             if not c or c.id!=value['channel_id']:raise ValueError('Unknown or stale peer channel.')
@@ -272,7 +296,7 @@ class Peers:
                 if value['id'] not in self.acks:self.acks.append(value['id'])
         if self.acks:self.rpc({'action':'ack','ids':self.acks[:16]});self.acks=self.acks[16:]
         for c in list(self.channels.values()):
-            if c.ready and time.monotonic()>=self.backpressured_until and time.monotonic()-getattr(c,'pinged',0)>20:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16)});c.pinged=time.monotonic()
+            if c.ready and time.monotonic()>=self.backpressured_until and time.monotonic()-getattr(c,'pinged',0)>20:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name});c.pinged=time.monotonic()
             if c.ready and any(r.get('endpoint_id')==c.peer['endpoint_id'] and r.get('noise_public_key')==c.peer['noise_public_key'] for r in directory) and time.monotonic()-getattr(c,'reported',0)>30:
                 self.control('channel',{'peer_id':c.peer['endpoint_id'],'peer_role':c.peer['role'],'peer_noise_public_key':c.peer['noise_public_key'],'channel_id':c.id,'handshake_hash':c.handshake_hash,'state':'ready' if time.monotonic()-c.seen<=75 else 'closed','paired_by_qr':True});c.reported=time.monotonic()
                 if getattr(self,'direct',None):

@@ -9,6 +9,25 @@ from protected_memory import enforce,root
 
 close_error=''
 
+def camera_permission_allowed(origin,requested,kind,video_kind):
+    return kind==video_kind and same_origin(requested,origin)
+
+def install_camera_permissions(page,origin,confirm):
+    """Only local camera capture, explicitly confirmed; never audio or desktop."""
+    from PyQt6.QtWebEngineCore import QWebEnginePage
+    if hasattr(page,'permissionRequested'):
+        from PyQt6.QtWebEngineCore import QWebEnginePermission
+        def requested(permission):
+            allowed=camera_permission_allowed(origin,permission.origin().toString(),permission.permissionType(),QWebEnginePermission.PermissionType.MediaVideoCapture)
+            if allowed and confirm():permission.grant()
+            else:permission.deny()
+        page.permissionRequested.connect(requested)
+    else:
+        def requested(security_origin,feature):
+            allowed=camera_permission_allowed(origin,security_origin.toString(),feature,QWebEnginePage.Feature.MediaVideoCapture)
+            page.setFeaturePermission(security_origin,feature,QWebEnginePage.PermissionPolicy.PermissionGrantedByUser if allowed and confirm() else QWebEnginePage.PermissionPolicy.PermissionDeniedByUser)
+        page.featurePermissionRequested.connect(requested)
+
 def close_allowed():
     global close_error
     close_error=''
@@ -55,6 +74,7 @@ def main():
             if not same_origin(url.toString(),origin):info.block(True);return
             info.setHttpHeader(b'X-Wallaby-Protected-View',token.encode())
     app=QApplication(sys.argv);profile=QWebEngineProfile(app);profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.NoCache);profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
+    if hasattr(profile,'setPersistentPermissionsPolicy'):profile.setPersistentPermissionsPolicy(QWebEngineProfile.PersistentPermissionsPolicy.AskEveryTime)
     profile.setCachePath(str(root()/'viewer-cache'));profile.setPersistentStoragePath(str(root()/'viewer-data'));interceptor=Interceptor(profile);profile.setUrlRequestInterceptor(interceptor)
     class Page(QWebEnginePage):
         def acceptNavigationRequest(self,url,kind,main):return same_origin(url.toString(),origin)
@@ -65,6 +85,7 @@ def main():
                 QMessageBox.information(self,'Protected workspace could not close',close_error or 'The worker did not confirm safe closure. Retry after active operations finish.');event.ignore();return
             self.closing=True;event.accept()
     view=QWebEngineView();page=Page(profile,view);view.setPage(page)
+    install_camera_permissions(page,origin,lambda:QMessageBox.question(view,'Read a QR code','Allow the local QR reader to use your camera? Camera images stay in this protected workspace. The microphone is not used.',QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)==QMessageBox.StandardButton.Yes)
     page.renderProcessTerminated.connect(lambda status,code:recover_renderer(view,page,window,status,code))
     page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard,False);page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows,False)
     profile.downloadRequested.connect(lambda download:download.cancel());window=Window();window.setWindowTitle('Wallaby Agent · Protected Bitcoin Workspace');window.resize(1240,850);window.setCentralWidget(view);view.load(QUrl(origin+'/?page='+settings['page']));window.show();window.raise_();window.activateWindow();app.exec()

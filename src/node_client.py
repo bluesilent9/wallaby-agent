@@ -31,7 +31,7 @@ def exchange_http_reason(data):
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev73'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev74'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()

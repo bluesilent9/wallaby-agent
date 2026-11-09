@@ -49,3 +49,5 @@ button.is-busy:disabled{cursor:wait}
 .sync-table-scroll{overflow-x:auto}.sync-queue select{min-width:195px;max-width:250px}.sync-queue .no-agent,.no-agent:disabled{color:#b12828;opacity:1}.sync-queue td{vertical-align:top}.sync-queue td label{display:block;white-space:nowrap}.sync-queue td button{margin:4px 0;display:block}#sync-count:not(:empty){margin-left:6px;font-weight:700}
 
 .service-icon img{width:32px;height:32px;object-fit:contain}
+
+dialog video{display:block;width:min(720px,75vw);max-height:60vh;background:#102623;object-fit:contain} .peer-connection h3{overflow-wrap:anywhere}

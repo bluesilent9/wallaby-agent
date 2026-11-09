@@ -1,3 +1,7 @@
+# Build 74 validation
+
+See AGENT_BUILD74_CAMERA_PAIRING.md and the accompanying Build 74 test log. Native Qt and real browser fake-camera tests passed; physical camera and installed service testing remain device checks.
+
 # Build 73 validation
 
 See AGENT_BUILD73_SYNC_VISIBILITY.md and the Build 73 release test log for current evidence.
