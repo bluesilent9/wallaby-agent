@@ -12,11 +12,11 @@ class Table(Offers):
  def test_all_local_offered_and_denied_wallets_sort_together_and_count_once(self):
   observe(self.store,'listwallets',None,['Zebra local','alpha local'])
   apply(self.store,self.snapshot,'session')
-  r=state(self.store,[]);self.assertEqual([x['wallet_name'] for x in r['wallets']],['alpha local','Other family wallet','Zebra local']);self.assertEqual(r['pending_count'],1)
-  change(self.store,self.offer['id'],True);r=state(self.store,[]);self.assertEqual(len(r['wallets']),3);self.assertEqual(r['pending_count'],0);self.assertTrue(r['wallets'][1]['denied'])
+  r=state(self.store,[]);self.assertEqual([x['wallet_name'] for x in r['wallets']],['Other family wallet']);self.assertEqual(r['pending_count'],1)
+  change(self.store,self.offer['id'],True);r=state(self.store,[]);self.assertEqual(len(r['wallets']),1);self.assertEqual(r['pending_count'],0);self.assertTrue(r['wallets'][0]['denied'])
   # Server can withdraw the offer after learning the denial; its row stays.
   with self.store.edit() as s:s['sync_offers']={}
-  self.assertEqual(len(state(self.store,[])['wallets']),3)
+  self.assertEqual(len(state(self.store,[])['wallets']),1)
   enable(self.store,policy_id(self.p));self.assertEqual(state(self.store,[])['pending_count'],0)
  def test_local_inventory_matches_exact_policy_and_unloads_stale_names(self):
   observe(self.store,'listwallets',None,['Local Wallet']);observe(self.store,'listdescriptors','Local Wallet',self.p['public_wallet']);observe(self.store,'getwalletinfo','Local Wallet',{'private_keys_enabled':True});apply(self.store,self.snapshot,'session')
@@ -43,7 +43,7 @@ class Table(Offers):
  def test_sending_does_not_get_hidden_by_receive_denial_and_attempts_not_counted(self):
   send=copy.deepcopy(self.snapshot);send['offers'][0]['direction']='send';apply(self.store,send,'session')
   with self.store.edit() as s:s['sync_exclusions']={policy_id(self.p):{'policy_id':policy_id(self.p),'wallet_name':'Other family wallet'}}
-  self.assertEqual(state(self.store,[])['pending_count'],1)
+  self.assertEqual(state(self.store,[])['pending_count'],0)
 
  def test_multiple_multisig_accounts_are_one_wallet_with_separate_signer_labels(self):
   from vendor.embit import ec
@@ -53,7 +53,9 @@ class Table(Offers):
   observe(self.store,'listwallets',None,['Treasury Russia Signer','Treasury Australia Signer'])
   for name,label in [('Treasury Russia Signer','Russia'),('Treasury Australia Signer','Australia')]:
    observe(self.store,'listdescriptors',name,raw);observe(self.store,'getwalletinfo',name,{'private_keys_enabled':True,'wallaby_managed':{'logical_name':'Treasury','role_name':label}})
-  r=state(self.store,[]);self.assertEqual(len(r['wallets']),1);self.assertEqual(r['wallets'][0]['wallet_name'],'Treasury');self.assertTrue(r['wallets'][0]['multisig']);self.assertEqual({s['label'] for s in r['wallets'][0]['signers']},{'Russia','Australia'});self.assertEqual(r['pending_count'],0)
+  p=copy.deepcopy(self.p);p['public_wallet']=raw;p['direction']='send';apply_snapshot(self.store,1,[p]);snapshot=copy.deepcopy(self.snapshot);snapshot['offers'][0].update(direction='send',public_wallet=raw,status='ready');apply(self.store,snapshot,'session')
+  with patch('sync_table.direct_ready',return_value=True):r=state(self.store,rows(self.store))
+  self.assertEqual(len(r['wallets']),1);self.assertEqual(r['wallets'][0]['wallet_name'],'Treasury');self.assertTrue(r['wallets'][0]['multisig']);self.assertEqual({s['label'] for s in r['wallets'][0]['signers']},{'Russia','Australia'});self.assertEqual(r['pending_count'],1)
 
  def test_legacy_multiple_peer_selection_cannot_silently_transfer_both(self):
   first,second=self.requests()

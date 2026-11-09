@@ -1,3 +1,7 @@
+# Build 73 validation
+
+See AGENT_BUILD73_SYNC_VISIBILITY.md and the Build 73 release test log for current evidence.
+
 # Build 72 validation
 
 See AGENT_BUILD72_RECEIVER_PERMISSIONS.md and the supplied Build 72 test log for current release evidence.

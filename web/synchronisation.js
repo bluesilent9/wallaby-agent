@@ -14,7 +14,7 @@ function transferCommand(title,command){return el('section',{},el('strong',{},ti
 function checkBox(label,checked,disabled,onChange){const input=el('input',{type:'checkbox','aria-label':label});input.checked=checked;input.disabled=disabled;input.addEventListener('change',()=>{input.blur();run(()=>onChange(input.checked));});return input;}
 const syncPeerChoices=new Map();
 function renderSync(t){
- const root=$('#transfer-content'),rows=t.rows||[],list=el('section',{class:'server-card result-card',id:'sync-wallet-table'},el('h3',{},'Wallet synchronisation'),el('p',{class:'hint'},'All local and discovered wallets are listed together. Choose a directly connected Agent, select the wallet and review it before authorising a transfer. Disabled wallets stay in this table.'));
+ const root=$('#transfer-content'),rows=t.rows||[],list=el('section',{class:'server-card result-card',id:'sync-wallet-table'},el('h3',{},'Wallet synchronisation'),el('p',{class:'hint'},'Sending wallets appear when a recipient is directly connected. Missing receiving wallets and your denied wallets stay listed while waiting for a sender. Select and review a wallet before authorising its transfer.'));
  const table=el('table',{class:'transfer-history sync-queue'}),body=el('tbody');
  table.append(el('thead',{},el('tr',{},...['Wallet Name','Signer','Send to','Receive from','Watch Only','Select','Status / Actions'].map(x=>el('th',{},x)))));
  const wallets=[...(t.wallets||[])].sort((a,b)=>a.wallet_name.localeCompare(b.wallet_name,undefined,{sensitivity:'base'})||a.policy_id.localeCompare(b.policy_id));
@@ -51,8 +51,8 @@ function renderSync(t){
   tr.append(nameCell,signer,el('td',{},menus.send),el('td',{},menus.receive),watchCell,checks,actions);body.append(tr);
  }
  table.append(body);list.append(el('div',{class:'sync-table-scroll'},table));
- if(!wallets.length)list.append(el('p',{},'No wallets reported yet. Waiting for local and Server inventory.'));
- if(t.offer_server_support===false)list.append(el('p',{role:'status'},'Update Wallet Server to receive discovered wallet offers. Local wallets and disabled entries remain listed.'));
+ if(!wallets.length)list.append(el('p',{},'No wallets awaiting synchronisation.'));
+ if(t.offer_server_support===false)list.append(el('p',{role:'status'},'Update Wallet Server to receive discovered wallet offers. Denied receiving wallets remain listed.'));
  list.append(batchControls(t,rows.filter(r=>chosenIds.has(r.id))));root.replaceChildren(list);
  if(t.success_until>Date.now()/1000)root.append(el('section',{class:'transfer-success',role:'status'},'Success!'));
  if(t.error)root.append(el('p',{class:'warning',role:'alert'},t.error));

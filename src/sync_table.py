@@ -84,7 +84,17 @@ def state(store,requests):
         for direction in ('send','receive'):
             row[direction].sort(key=lambda r:((r['receiver'] if direction=='send' else r['sender']).casefold(),r['id']))
         row['pending']=bool(any(r['state']=='pending' for r in row['send']) or not row['denied'] and any(r['state']=='pending' for r in row['receive']) or any(o['direction']=='send' or not row['denied'] for o in row['offers']))
-    rows=sorted(groups.values(),key=lambda r:(r['wallet_name'].casefold(),r['policy_id']))
+    # A synchronisation table is not a general local-wallet inventory. Incoming
+    # discoveries and persistent local denials remain visible without a sender;
+    # outgoing work needs a currently usable recipient. Retain attempted outcomes
+    # for inspection rather than hiding work that may already have occurred.
+    visible=[]
+    for row in groups.values():
+        row['send']=[r for r in row['send'] if r['direct_ready'] or r['state']!='pending']
+        row['offers']=[o for o in row['offers'] if o['direction']=='receive']
+        row['pending']=bool(any(r['state']=='pending' for r in row['send']) or not row['denied'] and (any(r['state']=='pending' for r in row['receive']) or row['offers']))
+        if row['denied'] or row['receive'] or row['offers'] or row['send']:visible.append(row)
+    rows=sorted(visible,key=lambda r:(r['wallet_name'].casefold(),r['policy_id']))
     return {'wallets':rows,'pending_count':sum(row['pending'] for row in rows)}
 
 def choose(store,key,selected,watch_only):

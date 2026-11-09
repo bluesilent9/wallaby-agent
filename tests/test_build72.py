@@ -15,7 +15,7 @@ class ReceiverPermissions(Table):
   p,snap=self.outgoing();observe(self.store,'listwallets',None,['Local wallet']);observe(self.store,'listdescriptors','Local wallet',p['public_wallet'])
   with patch('sync_table.direct_ready',return_value=True):
    self.assertEqual(state(self.store,rows(self.store))['pending_count'],1);choose(self.store,digest(p),True,False)
-   withdrawn=copy.deepcopy(snap);withdrawn.update(revision=2,offers=[]);apply(self.store,withdrawn,'session');r=state(self.store,rows(self.store));self.assertEqual(r['pending_count'],0);self.assertEqual(len(r['wallets']),1);self.assertFalse(r['wallets'][0]['send']);self.assertFalse(self.store.read()['sync_choices'][digest(p)]['selected'])
+   withdrawn=copy.deepcopy(snap);withdrawn.update(revision=2,offers=[]);apply(self.store,withdrawn,'session');r=state(self.store,rows(self.store));self.assertEqual(r['pending_count'],0);self.assertFalse(r['wallets']);self.assertFalse(self.store.read()['sync_choices'][digest(p)]['selected'])
    with self.assertRaisesRegex(ValueError,'receiver'):choose(self.store,digest(p),True,False)
    target=Mock();target.store=self.store
    with self.assertRaisesRegex(ValueError,'receiver'):BatchTransfer.validate_batch(target,[digest(p)],'send')
