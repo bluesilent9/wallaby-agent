@@ -29,15 +29,21 @@ def action(workspace,name,data):
         raise ValueError('Invalid local block action.')
     if name=='decode-qr' and set(data)=={'image'}:
         from peer_qr import decode
-        return decode(data['image'])
+        try:return decode(data['image'])
+        except ValueError as error:
+            if str(error) in ('Choose an image containing exactly one clear pairing QR.','This is not a device pairing QR.'):return {'found':False}
+            raise
     if name in ('direct-delete','direct-reconnect') and set(data)=={'id'}:
         if not hexid(data['id']) or data['id'] not in peers.persistence.read()['pairs']:raise ValueError('Unknown paired device.')
         return peers.direct.delete(data['id']) if name=='direct-delete' else peers.direct.reconnect(data['id'])
     if name=='invite' and (not data or set(data)=={'role'}):
-        envelope=peers.create_invitation(data.get('role','auto'),route(Config().values));return {'envelope':envelope,'qr_svg':qr(envelope),'expires_at':envelope['message']['expires_at']}
+        envelope=peers.create_invitation(data.get('role','connect'),route(Config().values));return {'envelope':envelope,'qr_svg':qr(envelope),'expires_at':envelope['message']['expires_at']}
     if name=='import' and set(data)=={'envelope','independent'}:
         if data['independent'] is not True:raise ValueError('Import only a QR obtained directly from the other Agent, independently of Server.')
-        return peers.import_invitation(data['envelope'])
+        try:return peers.import_invitation(data['envelope'])
+        except ValueError:
+            from diagnostics import LocalActionFailure
+            raise LocalActionFailure('pairing_qr_refused','The pairing QR could not be accepted. It may be expired, already used or from an incompatible device. Generate a fresh QR on the updated device and scan again. Existing saved connections were retained.') from None
     if name in ('approve','revoke') and set(data)=={'id'}:
         if not hexid(data['id']):raise ValueError('Invalid peer identity.')
         return getattr(peers,name)(data['id'])

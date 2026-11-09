@@ -89,16 +89,19 @@ class Peers:
             if getattr(self,'direct',None) and hasattr(self.direct,'wake'):self.direct.wake.set()
     def prune_local(self):
         for ident,c in list(self.channels.items()):
-            if not c.ready and time.monotonic()-c.created>120:self.drop(ident)
+            if not c.ready and time.monotonic()-c.created>120:
+                self.drop(ident)
+                self.connection_error('pairing_expired','Pairing did not complete within two minutes. Keep both devices connected to Wallaby Wallet, generate a fresh QR and scan again.')
         self.invitations={k:v for k,v in self.invitations.items() if v['expires_at']>time.time()}
     def create_invitation(self,role,relay):
         self.prune_local()
         if self.pending:raise ValueError('Approve or reject the pending local pairing before creating another invitation.')
-        auto=role=='auto'
-        if role not in ('agent','mobile','auto') or self.identity['role']=='mobile' and not auto:raise ValueError('Invalid pairing role.')
+        auto=role in ('auto','connect')
+        if role not in ('agent','mobile','auto','connect') or self.identity['role']=='mobile' and not auto:raise ValueError('Invalid pairing role.')
         self.validate_route(relay);now=int(time.time());ident=secrets.token_hex(32)
         message={'protocol':'wallaby-wallet-peer-pair','version':1,'kind':'agent_invitation','invitation_id':ident,'issuer_role':'agent','allowed_peer_role':role,'issuer_identity_key':self.identity['identity_key'],'issuer_noise_public_key':self.identity['noise_public_key'],'issuer_endpoint_id':self.identity['endpoint_id'],'cipher_suite':CIPHER,'pairing_secret':b64(secrets.token_bytes(32)),'expires_at':now+120,'relay':relay}
         if auto:message.update(version=2,issuer_role=self.identity['role'],allowed_peer_role='auto' if self.identity['role']=='agent' else 'agent',issuer_name=self.valid_name(self.device_name))
+        if role=='connect':message.update(version=3,pairing_mode='scan-connect')
         with self.lock:self.invitations={ident:message}
         return sign(self.store,message,INVITATION)
     @staticmethod
@@ -109,9 +112,11 @@ class Peers:
     def import_invitation(self,envelope):
         m=envelope.get('message',{}) if isinstance(envelope,dict) else {};fields={'protocol','version','kind','invitation_id','issuer_role','allowed_peer_role','issuer_identity_key','issuer_noise_public_key','issuer_endpoint_id','cipher_suite','pairing_secret','expires_at','relay'}
         version=m.get('version')
-        if version==2:fields.add('issuer_name')
-        if set(m)!=fields or m['protocol']!='wallaby-wallet-peer-pair' or type(version) is not int or version not in (1,2) or m['kind']!='agent_invitation' or m['issuer_role'] not in ('agent','mobile') or version==1 and m['issuer_role']!='agent' or m['allowed_peer_role'] not in ((self.identity['role'],'auto') if version==2 else (self.identity['role'],)) or m['issuer_role']==self.identity['role']=='mobile' or m['cipher_suite']!=CIPHER or not hexid(m['invitation_id']) or type(m['expires_at']) is not int or not time.time()<m['expires_at']<=time.time()+120 or m['issuer_endpoint_id']!=endpoint(m['issuer_role'],m['issuer_identity_key']):raise ValueError('Expired, wrong-role or invalid pairing invitation. Automatic pairing requires a matching updated Agent or Mobile.')
-        if version==2:
+        if version in (2,3):fields.add('issuer_name')
+        if version==3:fields.add('pairing_mode')
+        if set(m)!=fields or m['protocol']!='wallaby-wallet-peer-pair' or type(version) is not int or version not in (1,2,3) or m['kind']!='agent_invitation' or m['issuer_role'] not in ('agent','mobile') or version==1 and m['issuer_role']!='agent' or m['allowed_peer_role'] not in ((self.identity['role'],'auto') if version in (2,3) else (self.identity['role'],)) or m['issuer_role']==self.identity['role']=='mobile' or m['cipher_suite']!=CIPHER or not hexid(m['invitation_id']) or type(m['expires_at']) is not int or not time.time()<m['expires_at']<=time.time()+120 or m['issuer_endpoint_id']!=endpoint(m['issuer_role'],m['issuer_identity_key']):raise ValueError('Expired, wrong-role or invalid pairing invitation. Automatic pairing requires a matching updated Agent or Mobile.')
+        if version==3 and m['pairing_mode']!='scan-connect':raise ValueError('Invalid QR connection mode.')
+        if version in (2,3):
             self.valid_name(m['issuer_name'])
             if m['issuer_role']=='mobile' and m['allowed_peer_role']!='agent':raise ValueError('A Mobile can pair only with an Agent.')
         binary(m['pairing_secret']);binary(m['issuer_noise_public_key']);self.validate_route(m['relay']);verify(self.store,envelope,m['issuer_identity_key'],INVITATION)
@@ -120,7 +125,9 @@ class Peers:
         if m['invitation_id'] in saved['used'] or m['issuer_endpoint_id'] in saved['pairs'] or m['issuer_endpoint_id']==self.identity['endpoint_id']:raise ValueError('Invitation was already used or peer already paired. Revoke the old local pairing before replacing it.')
         peer={'endpoint_id':m['issuer_endpoint_id'],'role':m['issuer_role'],'identity_key':m['issuer_identity_key'],'noise_public_key':m['issuer_noise_public_key']}
         # The user imports the QR directly from the trusted Agent screen, not Server.
-        c=Channel(self,peer,m['pairing_secret'],m['invitation_id'],True);self.channels[peer['endpoint_id']]=c;self.importing=m;c.first();return {'message':'Connecting securely. The other Agent must approve this device locally.','peer':peer}
+        c=Channel(self,peer,m['pairing_secret'],m['invitation_id'],True);self.channels[peer['endpoint_id']]=c;self.importing=m;c.first()
+        self.diagnostic('pairing_started','QR accepted; authenticated pairing started')
+        return {'message':'Connecting securely. Direct connection setup starts automatically.' if version==3 else 'Older pairing format: confirm this device on the QR-generating device.','peer':peer,'automatic':version==3}
     @staticmethod
     def valid_name(name):
         if not isinstance(name,str) or not name.strip() or len(name)>128 or any(ord(ch)<32 for ch in name):raise ValueError('Invalid peer device name.')
@@ -142,6 +149,7 @@ class Peers:
             saved['pairs'][c.peer['endpoint_id']]=value
             if c.invitation not in saved['used']:saved['used'].append(c.invitation)
             saved['revision']+=1;self.persistence.commit(saved['revision']-1,saved)
+            self.diagnostic('pairing_saved','Authenticated pairing saved; direct SSH setup follows')
         self.invitations.pop(c.invitation,None);self.pending.pop(c.peer['endpoint_id'],None)
         if self.importing and self.importing['invitation_id']==c.invitation:self.importing=None
     def approve(self,ident):
@@ -189,6 +197,7 @@ class Peers:
                     invitations=[m for m in self.invitations.values() if m['expires_at']>time.time() and m['invitation_id'] not in saved['used']]
                     if len(invitations)!=1 or self.pending:raise ValueError('No unused local QR invitation is awaiting a peer.')
                     m=invitations[0];matches=[r for r in directory if r.get('endpoint_id')==ident]
+                    if any(other.invitation==m['invitation_id'] and not other.known for other in self.channels.values()):raise ValueError('This QR invitation is already connecting another channel.')
                     if len(matches)!=1:raise ValueError('Peer discovery is missing; no trust granted.')
                     row=matches[0];peer=participant({k:row[k] for k in ('endpoint_id','role','identity_key','noise_public_key')})
                     if m['allowed_peer_role'] not in ('auto',peer['role']) or peer['role']==self.identity['role']=='mobile':raise ValueError('Mobile cannot claim Agent authority.')
@@ -198,6 +207,14 @@ class Peers:
             try:
                 if value['kind']=='handshake':
                     c.handshake(value)
+                    invitation=self.invitations.get(c.invitation)
+                    if not c.local_grant and invitation and invitation.get('version')==3 and invitation.get('pairing_mode')=='scan-connect':
+                        # Generating this one-use QR and scanning it are the local
+                        # pairing actions. Grant only after PSK, typed identity,
+                        # static key and signed transcript verification succeed.
+                        c.local_grant=True
+                        c.send('grant',digest(c.prologue),{'accepted':True})
+                        self.diagnostic('pairing_authenticated','QR peer authenticated; completing automatic pairing')
                     if not c.local_grant:self.pending[ident]=c
                 else:c.read(value,direct)
             except Exception:self.drop(ident);raise
@@ -243,6 +260,14 @@ class Peers:
         return True
     def status(self):
         with self.lock:return self._status()
+    def diagnostic(self,code,message):
+        # Fixed messages only: never log QR secrets, frames, keys or raw errors.
+        from activity_log import event
+        if code!=getattr(self,'last_diagnostic',None):event('peers.connection',message+' · code='+code)
+        self.last_diagnostic=code
+    def connection_error(self,code,message):
+        self.error=message;self.error_until=time.monotonic()+30
+        self.diagnostic(code,message)
     def _status(self):
         self.prune_local()
         saved=self.persistence.read();rows=[]
@@ -250,7 +275,8 @@ class Peers:
             c=self.channels.get(ident);ready=bool(c and c.ready and time.monotonic()-c.seen<=75)
             rows.append({'id':ident,'role':value['peer']['role'],'name':value['name'],'fingerprint':fingerprint(value['peer']['identity_key']),'ready':ready,'channel_code':c.handshake_hash if c and c.noise.handshake_finished else None,'direct':self.direct.status(ident) if getattr(self,'direct',None) else None})
         pending=[{'id':i,'role':c.peer['role'],'fingerprint':fingerprint(c.peer['identity_key']),'identity_key':c.peer['identity_key'],'channel_code':c.handshake_hash,'expires_at':int(time.time()+max(0,120-(time.monotonic()-c.created)))} for i,c in self.pending.items()]
-        return {'identity':self.identity,'pairs':rows,'pending':pending,'error':self.error,'registered':self.registered}
+        connecting=[{'role':c.peer['role'],'message':'Authenticating scanned QR and waiting for the other device.'} for ident,c in self.channels.items() if ident not in saved['pairs'] and ident not in self.pending]
+        return {'identity':self.identity,'pairs':rows,'pending':pending,'connecting':connecting,'error':self.error,'registered':self.registered}
     def connect(self,rpc):
         self.rpc=rpc
         if not self.thread or not self.thread.is_alive():self.stop.clear();self.thread=threading.Thread(target=self.run,daemon=True,name='encrypted-peer-relay');self.thread.start()
@@ -291,7 +317,7 @@ class Peers:
         if not isinstance(frames,list) or len(frames)>16:raise ValueError('Oversized untrusted relay delivery.')
         for value in frames:
             try:self.accept(value,directory)
-            except Exception:self.error='An unauthenticated, expired or inconsistent peer message was refused. Reconnect or pair locally again.'
+            except Exception:self.connection_error('peer_message_refused','An unauthenticated, expired or inconsistent peer message was refused. Generate a new QR and scan again.')
             else:
                 if value['id'] not in self.acks:self.acks.append(value['id'])
         if self.acks:self.rpc({'action':'ack','ids':self.acks[:16]});self.acks=self.acks[16:]
@@ -304,14 +330,28 @@ class Peers:
                     self.control('path',{'peer_id':c.peer['endpoint_id'],'channel_id':c.id,'epoch_id':active.epoch if ready else '0'*64,'transport':'direct-ssh' if ready else 'relay','state':'ready'})
     def run(self):
         import http.client
+        from node_client import HTTPFailure
         while not self.stop.is_set():
-            try:self.tick();self.error='' if time.monotonic()>=self.backpressured_until else self.error;delay=.3
+            try:
+                self.tick()
+                if time.monotonic()>=max(self.backpressured_until,getattr(self,'error_until',0)):self.error=''
+                delay=.3
             except (OSError,TimeoutError,http.client.HTTPException):
-                self.error='Encrypted relay connection interrupted. Exact ciphertext is retained for delivery; no wallet operation is repeated.';delay=3
+                self.connection_error('relay_transport','Pairing connection interrupted. Check that both devices are connected to Wallaby Wallet. Pending connection messages are retained.');delay=3
+            except HTTPFailure as error:
+                # Rate limiting applies to discovery/receive/control as well as
+                # send. Retain the same handshake and ciphertext while paused.
+                if error.safe_reason=='relay_busy':
+                    self.backpressured_until=time.monotonic()+5
+                    self.connection_error('relay_busy','Pairing service is busy. Connection setup is paused briefly and will resume automatically.');delay=5
+                else:
+                    self.registered=False
+                    for ident in list(self.channels):self.drop(ident)
+                    self.connection_error('relay_http','Pairing service rejected the connection. Check Wallaby Wallet access and matching device versions. Saved peer trust is retained.');delay=3
             except Exception:
                 self.registered=False
                 for ident in list(self.channels):self.drop(ident)
-                self.error='Encrypted relay unavailable. Peer trust is retained; no wallet operation was replayed.';delay=3
+                self.connection_error('relay_protocol','Pairing service unavailable or incompatible. Check both device connections and the Wallet Server version. Saved peer trust is retained.');delay=3
             self.stop.wait(delay)
     def close(self):
         self.stop.set()

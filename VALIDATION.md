@@ -1,3 +1,7 @@
+# Build 75 validation
+
+See AGENT_BUILD75_SCAN_CONNECT.md and the Build 75 test log for automatic unpaired-to-direct pairing, role restrictions, preserved backpressure state, real Core transfer and camera UI checks.
+
 # Build 74 validation
 
 See AGENT_BUILD74_CAMERA_PAIRING.md and the accompanying Build 74 test log. Native Qt and real browser fake-camera tests passed; physical camera and installed service testing remain device checks.
