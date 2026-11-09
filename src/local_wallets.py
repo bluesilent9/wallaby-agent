@@ -18,6 +18,10 @@ class LocalWallets:
         # A blank local Core wallet is valid but has no policy to classify.
         # Keep the remote public-inventory validator strict.
         managed=classify(store.read() if store is not None else {},name,raw) if raw.get('descriptors') else None
+        store=getattr(self.core,'managed_store',None)
+        if store is not None:
+            from sync_table import observe
+            observe(store,'listdescriptors',name,raw);observe(store,'getwalletinfo',name,{**info,'wallaby_managed':managed})
         from wallet_traits import local_traits
         return {'traits':local_traits(self.core,[name],raw=raw),'managed':managed,'wallet':name,'sats':str(total),'private_keys_enabled':info.get('private_keys_enabled') is True,'encrypted':'unlocked_until' in info,'scanning':bool(info.get('scanning')),'format':info.get('format'),'storage':info.get('wallaby_storage','node'),'balances':balances,'policy':digest(rpc(self.core,'listdescriptors',[False],name))}
     def source(self,name):
@@ -26,7 +30,10 @@ class LocalWallets:
         return source
     def listing(self):
         rows=[]
-        for name in sorted(rpc(self.core,'listwallets'),key=str.casefold):
+        names=rpc(self.core,'listwallets')
+        store=getattr(self.core,'managed_store',None)
+        if store is not None:__import__('sync_table').observe(store,'listwallets',None,names)
+        for name in sorted(names,key=str.casefold):
             try:
                 facts=self.facts(name);reason=''
                 if facts['storage']=='disc':continue

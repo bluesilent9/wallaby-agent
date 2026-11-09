@@ -14,16 +14,20 @@ class BatchTransfer(Transfer):
             release(self.store);self.error='Agent restarted during synchronisation. Inspect attempted wallets; no transfer was repeated.'
     def state(self):
         result=super().state();from sync_offers import rows as offers
-        result['offers']=offers(self.store);result['offers_received']=bool(self.store.read().get('sync_offers_received'));result['offer_server_support']=self.store.read().get('sync_offer_server_support');result['sync_denials']=list(self.store.read().get('sync_exclusions',{}).values());result['recovery']=self.recovery.state();result['busy']=bool(self.store.read().get('sync_batch'));return result
+        result['offers']=offers(self.store);result['offers_received']=bool(self.store.read().get('sync_offers_received'));result['offer_server_support']=self.store.read().get('sync_offer_server_support');result['sync_denials']=list(self.store.read().get('sync_exclusions',{}).values());result.update(__import__('sync_table').state(self.store,result['rows']));result['recovery']=self.recovery.state();result['busy']=bool(self.store.read().get('sync_batch'));return result
     def complete(self,key):
         super().complete(key)
         if self.store.read().get('sync_batch'):self.success_until=0
     def validate_batch(self,keys,direction):
         saved=self.store.read()
+        from sync_preferences import policy_id
+        identities=[policy_id(saved['pending'][key]['proposal']) for key in keys if key in saved['pending']]
+        if len(identities)!=len(keys) or len(set(identities))!=len(identities):raise ValueError('Select one peer for each wallet in the table again. Older overlapping selections cannot be transferred together.')
         for key in keys:
             row=saved['pending'].get(key)
             if not row or row.get('withdrawn') or row['state']!='pending' or row['proposal']['direction']!=direction:raise ValueError('Selected requests changed. Review them again.')
             p=row['proposal']
+            if p.get('transfer_version')==3 and not __import__('sync_table').direct_ready(self.store,p):raise ValueError('No Agent Detected. Reconnect the directly paired Agent and review the selected wallets again.')
             from managed_accounts import guard
             guard(self.core,p,self.store,public_preview=True)
             if p.get('transfer_version') not in (2,3):raise ValueError('Multiple and watch-only transfers require the documented Build 8 queue/transfer protocol from Wallet Server.')

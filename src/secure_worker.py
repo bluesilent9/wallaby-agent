@@ -180,6 +180,9 @@ class Workspace:
                 for record in getattr(self.archives,'loaded',{}).values():
                     if wallet in record['routes']:retired+=record['recovery'].get('retired_policy_hashes',[])
                 if retired:result['result']['wallaby_retired_policies']=sorted(set(retired))
+            if 'result' in result:
+                from sync_table import observe
+                observe(self.store,name,wallet,result['result'])
             return result
         finally:self.lock.release()
     def public_busy_notice(self,reason):
@@ -565,6 +568,9 @@ class Workspace:
                 if name=='firewall':
                     from peer_wallet import check_firewall
                     return check_firewall(self.transfer)
+                if name=='route':
+                    from sync_table import choose
+                    return choose(self.store,*args)
                 if name=='selection':
                     from sync_queue import choose
                     choose(self.store,*args);return {'ok':True}

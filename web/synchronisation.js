@@ -6,60 +6,59 @@ window.updateTransfer=function(t){
  document.querySelector('[data-page="synchronisation"]').disabled=!workspace?.protected?.viewer;
 
  // Requests never open a browser or change the user's page.
- if(document.activeElement?.closest('#transfer-content form, #transfer-content input, #block-download-controls select'))return;
+ if(document.activeElement?.closest('#transfer-content form, #transfer-content input, #transfer-content select'))return;
  const signature=JSON.stringify(t);if(signature===transferSignature)return;transferSignature=signature;
  renderSync(t);
 };
 function transferCommand(title,command){return el('section',{},el('strong',{},title),el('pre',{class:'policy-code'},command),button('Copy command','secondary',async()=>{await navigator.clipboard.writeText(command);notify({message:'Command copied.'});}));}
-function checkBox(label,checked,disabled,onChange){const input=el('input',{type:'checkbox','aria-label':label});input.checked=checked;input.disabled=disabled;input.addEventListener('change',()=>run(()=>onChange(input.checked)));return input;}
+function checkBox(label,checked,disabled,onChange){const input=el('input',{type:'checkbox','aria-label':label});input.checked=checked;input.disabled=disabled;input.addEventListener('change',()=>{input.blur();run(()=>onChange(input.checked));});return input;}
+const syncPeerChoices=new Map();
 function renderSync(t){
- const root=$('#transfer-content'),rows=t.rows||[],list=el('section',{class:'server-card result-card'},el('h3',{},'Wallets awaiting synchronisation'),el('p',{class:'hint'},'Select the wallets to transfer. Click a row to review its public descriptors, funded addresses and vaults. Wallet Server controls this list; unchecking a wallet leaves its request pending.'));
+ const root=$('#transfer-content'),rows=t.rows||[],list=el('section',{class:'server-card result-card',id:'sync-wallet-table'},el('h3',{},'Wallet synchronisation'),el('p',{class:'hint'},'All local and discovered wallets are listed together. Choose a directly connected Agent, select the wallet and review it before authorising a transfer. Disabled wallets stay in this table.'));
  const table=el('table',{class:'transfer-history sync-queue'}),body=el('tbody');
- table.append(el('thead',{},el('tr',{},...['Send','Sending Agent','Receiving Agent','Wallet Name','Watch Only'].map(x=>el('th',{},x)))));
- for(const r of rows){
-  const row=el('tr',{class:r.id===t.id?'selected-row':'','aria-selected':String(r.id===t.id)}),select=checkBox('Send '+r.wallet_name,r.selected,t.busy||r.state!=='pending',selected=>api('synchronisation/selection',{id:r.id,selected,watch_only:r.watch_only})),watch=checkBox('Watch only '+r.wallet_name,r.watch_only,t.busy||r.watch_only_locked||r.state!=='pending',watch_only=>api('synchronisation/selection',{id:r.id,selected:r.selected,watch_only}));
-  select.addEventListener('click',e=>e.stopPropagation());watch.addEventListener('click',e=>e.stopPropagation());
-  const review=button(r.wallet_name,'row-review',async()=>{await api('synchronisation/review',{id:r.id});transferSignature='';});review.disabled=t.busy;
-  const children=r.extinct_group?el('details',{class:'extinct-children'},
-    el('summary',{},'Retired wallets ('+(r.extinct_children||[]).length+')'),
-    ...(r.extinct_children||[]).map(c=>el('div',{},el('strong',{},c.name),el('small',{},c.addresses.length+' address(es) · '+pipe(c.amount_sats)))),
-    el('p',{class:'hint'},r.name_verified?'Children verified from local Core labels.':'Children from the sender’s signed preview; compare its code and identity.')):null;
-  row.append(el('td',{},select),el('td',{},r.sender),el('td',{},r.receiver),el('td',{},review,children,el('small',{},r.direction==='send'?(r.name_verified?'Name verified by local Core':'Waiting for local verification'):'Name supplied by Wallet Server'),r.restoration_requested||r.restoring_extinct?el('small',{class:'warning'},'Restore original wallet role via direct SSH — requires local approval'):null,r.state!=='pending'?el('small',{},r.state==='recovery_required'?'Received — history recovery required':r.state):null),el('td',{},watch,r.watch_only_locked?el('small',{},'Source is watch-only'):null));
-  if(r.direction==='receive'&&r.state==='pending'){const deny=button('Deny wallet synchronisation','secondary',async()=>{const result=await api('authorise/disable-sync',{id:r.id});notify({message:result.message});transferSignature='';});deny.disabled=!!t.busy;deny.addEventListener('click',e=>e.stopPropagation());row.children[3].append(deny);}
-  children?.addEventListener('click',e=>e.stopPropagation());
-  row.addEventListener('click',()=>{if(!t.busy)run(async()=>{await api('synchronisation/review',{id:r.id});transferSignature='';});});body.append(row);
+ table.append(el('thead',{},el('tr',{},...['Wallet Name','Signer','Send to','Receive from','Watch Only','Select','Status / Actions'].map(x=>el('th',{},x)))));
+ const wallets=[...(t.wallets||[])].sort((a,b)=>a.wallet_name.localeCompare(b.wallet_name,undefined,{sensitivity:'base'})||a.policy_id.localeCompare(b.policy_id));
+ const chosenIds=new Set();
+ for(const w of wallets){
+  const tr=el('tr',{'data-wallet':w.policy_id}),actions=el('td'),menus={},chosen={};
+  for(const direction of ['send','receive']){
+   const options=(w[direction]||[]).filter(r=>r.direct_ready&&r.state==='pending'&&!(direction==='receive'&&w.denied));
+   const key=w.policy_id+'|'+direction,previous=syncPeerChoices.get(key),current=options.find(r=>r.selected)||options.find(r=>r.id===previous)||options[0];
+   const select=el('select',{'aria-label':(direction==='send'?'Send to ':'Receive from ')+w.wallet_name});
+   if(!options.length)select.append(el('option',{value:''},'No Agent Detected'));
+   for(const r of options)select.append(el('option',{value:r.id},direction==='send'?r.receiver:r.sender));
+   select.disabled=!!t.busy||!options.length;select.classList.toggle('no-agent',!options.length);
+   if(current){select.value=current.id;chosen[direction]=current;syncPeerChoices.set(key,current.id);}
+   select.addEventListener('change',()=>{const target=options.find(r=>r.id===select.value);if(!target)return;select.blur();syncPeerChoices.set(key,target.id);run(async()=>{await api('synchronisation/route',{id:target.id,selected:!!current?.selected,watch_only:target.watch_only});transferSignature='';});});menus[direction]=select;
+  }
+  const active=chosen.receive||chosen.send,checks=el('td'),watchCell=el('td');
+  for(const direction of ['send','receive']){
+   const r=chosen[direction];if(!r)continue;chosenIds.add(r.id);
+   const select=checkBox((direction==='send'?'Send ':'Receive ')+w.wallet_name,!!r.selected,!!t.busy,selected=>api('synchronisation/route',{id:r.id,selected,watch_only:r.watch_only}));
+   checks.append(el('label',{},select,direction==='send'?'Send':'Receive'));
+   const watch=checkBox('Watch only '+direction+' '+w.wallet_name,!!r.watch_only,!!t.busy||r.watch_only_locked,watch_only=>api('synchronisation/route',{id:r.id,selected:!!r.selected,watch_only}));watchCell.append(el('label',{},watch,direction==='send'?'Send':'Receive'));if(r.watch_only_locked)watchCell.append(el('small',{},'Source is watch-only'));
+   const review=button('Review '+(direction==='send'?'send':'receive'),'secondary',async()=>{await api('synchronisation/review',{id:r.id});transferSignature='';});review.disabled=!!t.busy;actions.append(review);
+  }
+  if(!active){const watch=checkBox('Watch only '+w.wallet_name,!!w.local_wallets?.length&&!w.local_private,true,()=>{});watchCell.append(watch);}
+  if(w.denied){actions.append(el('p',{class:'warning'},'Incoming synchronisation disabled'),button('Enable receiving','secondary',async()=>{await api('authorise/enable-sync',{id:w.policy_id});transferSignature='';}));}
+  else if(w.deny_id){const deny=button('Deny receiving','secondary',async()=>{await api('authorise/disable-sync',{id:w.deny_id});transferSignature='';});deny.disabled=!!t.busy;actions.append(deny);}
+  if(w.local_wallets?.length)actions.append(el('small',{},'On this Agent'));
+  if(w.pending&&!active&&!w.denied)actions.append(el('small',{class:'warning'},'No Agent Detected'),el('small',{},'Connect a suitable Agent in Peer Connections. Transfer readiness and policy review are also required.'));
+  for(const r of [...(w.send||[]),...(w.receive||[])].filter(r=>r.state!=='pending')){actions.append(el('p',{},r.state==='recovery_required'?'Received — history recovery required':r.state));const inspect=button('Inspect previous transfer','secondary',async()=>{await api('synchronisation/review',{id:r.id});transferSignature='';});inspect.disabled=!!t.busy;actions.append(inspect);}
+  const nameCell=el('td',{},el('strong',{},w.wallet_name),...(w.local_wallets||[]).filter(name=>name!==w.wallet_name).map(name=>el('small',{},name)));
+  const grouped=[...(w.send||[]),...(w.receive||[])].find(r=>r.extinct_group&&r.extinct_children?.length);if(grouped)nameCell.append(el('details',{},el('summary',{},'Retired wallets ('+grouped.extinct_children.length+')'),...grouped.extinct_children.map(c=>el('div',{},el('strong',{},c.name),el('small',{},c.addresses.length+' address(es) · '+pipe(c.amount_sats)))),el('p',{class:'hint'},grouped.name_verified?'Children verified from local Core labels.':'Children from the sender’s signed preview; compare its code and identity.')));
+  const signer=el('td');if(w.multisig){for(const s of w.signers||[])signer.append(el('strong',{},s.label),s.account!==s.label?el('small',{},s.account):null);if(chosen.receive)signer.append(el('small',{},chosen.receive.signer_label?'Source account: '+chosen.receive.signer_label:'Source signer details require signed review'));if(!(w.signers||[]).length&&!chosen.receive)signer.append(el('small',{},'No local signing account'));}else signer.append(el('small',{},w.local_wallets?.length?(w.local_private?'Single-signature':'Watch-only'):active?.watch_only_locked?'Watch-only source':'Checked during review'));
+  tr.append(nameCell,signer,el('td',{},menus.send),el('td',{},menus.receive),watchCell,checks,actions);body.append(tr);
  }
- table.append(body);list.append(table);if(!rows.length)list.append(el('p',{},'No wallet synchronisation requests.'));
- const nodes=el('section',{class:'server-card result-card'},el('h3',{},'Computers in this request list')),seen=new Set();
- for(const r of rows)for(const [name,address]of [[r.sender,r.sender_ipv6],[r.receiver,r.receiver_ipv6]]){const key=name+'|'+address;if(!seen.has(key)){seen.add(key);nodes.append(el('div',{class:'node-address'},el('strong',{},name),el('code',{},address||'IPv6 identity not supplied')));}}
- root.replaceChildren(syncOfferCard(t),list,syncDenialCard(t));if(seen.size)root.append(nodes);
+ table.append(body);list.append(el('div',{class:'sync-table-scroll'},table));
+ if(!wallets.length)list.append(el('p',{},'No wallets reported yet. Waiting for local and Server inventory.'));
+ if(t.offer_server_support===false)list.append(el('p',{role:'status'},'Update Wallet Server to receive discovered wallet offers. Local wallets and disabled entries remain listed.'));
+ list.append(batchControls(t,rows.filter(r=>chosenIds.has(r.id))));root.replaceChildren(list);
  if(t.success_until>Date.now()/1000)root.append(el('section',{class:'transfer-success',role:'status'},'Success!'));
  if(t.error)root.append(el('p',{class:'warning',role:'alert'},t.error));
  if(t.proposal)root.append(renderWallet(t));
  root.append(el('section',{id:'block-download-controls',class:'server-card result-card'}));window.loadBlockDownload?.();
- root.append(batchControls(t,rows));
  if(t.recovery)root.append(recoveryCard(t.recovery));
-}
-function syncOfferCard(t){
- const card=el('section',{class:'server-card result-card',id:'public-sync-offers'},el('h3',{},'Wallet offers waiting for transfer readiness'),el('p',{},'Wallets detected on other Agents are offered here before pairing. An offer does not authorise a transfer. Source names come from Wallet Server; pairing and the signed wallet review verify the actual source.'));
- const waiting=(t.offers||[]).filter(o=>!o.request_id);
- if(t.offer_server_support===false)card.append(el('p',{role:'status'},'Update Wallet Server to the matching build to receive public wallet offers before pairing. Existing local denials are retained.'));
- else if(!t.offers_received)card.append(el('p',{role:'status'},'Waiting for Wallet Server’s public wallet-offer inventory. Pairing is not required to see offers. Use the matching updated Server build.'));
- else if(!waiting.length)card.append(el('p',{},'No additional wallet offers are waiting. Transfer-ready requests appear below; denied wallets are listed separately.'));
- const messages={secure_pairing_required:'Pair this Agent with the other Agent in Peer Connections to enable wallet transfer.',peer_offline:'Waiting for the other Agent to reconnect. Its public offer remains visible.',permissions_pending:'Waiting for current local permission status. This public offer remains visible.',discovery_pending:'Waiting for the inventories and exact transfer request.',review_paused:'Transfer readiness is paused; review the node and policy status.',history_recovery:'History recovery is still required; wallet transfer will not be repeated automatically.',local_outcome:'An earlier operation needs reconciliation before another transfer.',earlier_operation:'An earlier operation needs reconciliation before another transfer.',peer_changed:'The source connection changed; a fresh transfer review is required.',preview_changed:'The signed preview changed; reconcile the old review first.',preview_expired:'The old transfer needs a fresh review.',invalid_pair:'The exact paired request is incomplete.',disabled:'Incoming synchronisation is disabled.',ready:'Waiting for the matching executable transfer request.'};
- for(const offer of waiting){const item=el('article',{class:'approval-item'},el('strong',{},offer.public_wallet.wallet_name),el('p',{},(offer.direction==='receive'?'Receive from ':'Offer to ')+offer.peer.hostname),el('p',{role:'status'},messages[offer.status]||'Waiting for transfer readiness.'));
-  if(offer.status==='secure_pairing_required')item.append(button('Open Peer Connections','secondary',()=>showPage('peers')));
-  if(offer.direction==='receive'){const deny=button('Deny wallet synchronisation','secondary',async()=>{const result=await api('authorise/disable-sync',{id:offer.id});notify({message:result.message});transferSignature='';});deny.disabled=!!t.busy;item.append(deny);}
-  const details=el('details',{},el('summary',{},'Public wallet policy — Server-supplied offer'));for(const row of offer.public_wallet.descriptors)details.append(el('pre',{class:'policy-code'},row.desc));item.append(details);card.append(item);
- }
- return card;
-}
-function syncDenialCard(t){
- const card=el('section',{class:'server-card result-card',id:'sync-denial-list'},el('h3',{},'Wallet synchronisation deny list'),el('p',{},'These local choices persist across restarts. They apply to this receiving Agent and the exact wallet policy, regardless of which source offers it.'));
- const rows=t.sync_denials||workspace?.exclusions||[];
- if(!rows.length)card.append(el('p',{},'No wallets are denied on this Agent.'));
- for(const row of rows){const allow=button('Remove deny entry','secondary',async()=>{const result=await api('authorise/enable-sync',{id:row.policy_id});notify({message:result.message});transferSignature='';});allow.disabled=!!t.busy;card.append(el('article',{class:'approval-item'},el('strong',{},row.wallet_name),allow));}
- return card;
 }
 function renderWallet(t){
  const p=t.proposal,receive=p.direction==='receive',setup=t.setup,box=el('section',{class:'server-card result-card'},el('h3',{},receive?'Receiving wallet details':'Sending wallet details'),el('p',{},'Wallet: '+(t.details?.public_wallet?.wallet_name||p.public_wallet.wallet_name)),el('p',{class:'hint'},'Wallet names are labels. Compare the public descriptors and signed preview code with the other computer using a channel independent of Wallet Server.'));
@@ -108,7 +107,7 @@ function batchControls(t,rows){
   for(const[id,{address,name}]of peers){const field=el('fieldset',{'data-peer':id},el('legend',{},name+' · '+address));for(const[key,label,type]of [['username','Receiving username','text'],['password','Computer login password','password'],['fingerprint','Receiving SSH fingerprint (compare directly)','text']]){const input=el('input',{name:key,type,required:'',autocomplete:'off'});field.append(el('label',{},label,input));if(key==='password'){const toggle=el('button',{type:'button',class:'secondary','aria-label':'Show computer login password','aria-pressed':'false'},'Show password');toggle.addEventListener('click',()=>{const visible=input.type==='password';input.type=visible?'text':'password';toggle.textContent=visible?'Hide password':'Show password';toggle.setAttribute('aria-pressed',String(visible));toggle.setAttribute('aria-label',visible?'Hide computer login password':'Show computer login password');});field.append(toggle);}}form.append(field);}
   form.append(el('button',{type:'submit'},'Send selected wallets'));form.addEventListener('submit',e=>{e.preventDefault();e.submitter?.blur();const credentials=Object.create(null);for(const field of form.querySelectorAll('fieldset')){const data={};for(const input of field.querySelectorAll('input')){data[input.name]=input.value;if(input.name==='password'){input.value='';input.type='password';}}for(const toggle of field.querySelectorAll('button')){toggle.textContent='Show password';toggle.setAttribute('aria-pressed','false');toggle.setAttribute('aria-label','Show computer login password');}credentials[field.dataset.peer]=data;}run(async()=>{await api('synchronisation/send-batch',{credentials});notify({message:'Selected transfers started. Each wallet is checked independently; passwords remain in memory only.'});});});box.append(form);
  }
- if(!receive.length&&!send.length)box.append(el('p',{},'Tick Send beside the wallets you want to synchronise.'));
+ if(!receive.length&&!send.length)box.append(el('p',{},'Select Send or Receive beside the wallets you want to synchronise.'));
  return box;
 }
 function recoveryCard(r){

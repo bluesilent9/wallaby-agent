@@ -1,3 +1,7 @@
+# Build 71 validation
+
+See AGENT_BUILD71_UNIFIED_SYNC.md and the supplied Build 71 test log for current release evidence.
+
 # Build 70 validation
 
 See AGENT_BUILD70_SYNC_OFFERS.md and the supplied Build 70 test log for current release evidence. Tests use isolated wallets and invented public notices.

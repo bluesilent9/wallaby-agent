@@ -44,3 +44,6 @@ button.is-busy:disabled{cursor:wait}
 #block-download-controls .block-sharing{display:flex;align-items:center;gap:.6rem;margin:1rem 0}
 #block-download-controls .block-sharing input[type=checkbox]{width:auto;display:inline-block;margin:0}
 #block-download-controls .actions{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:1rem}
+
+/* One alphabetic wallet table; offline peers never look selectable. */
+.sync-table-scroll{overflow-x:auto}.sync-queue select{min-width:195px;max-width:250px}.sync-queue .no-agent,.no-agent:disabled{color:#b12828;opacity:1}.sync-queue td{vertical-align:top}.sync-queue td label{display:block;white-space:nowrap}.sync-queue td button{margin:4px 0;display:block}#sync-count:not(:empty){margin-left:6px;font-weight:700}
