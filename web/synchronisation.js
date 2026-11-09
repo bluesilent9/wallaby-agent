@@ -25,19 +25,41 @@ function renderSync(t){
     ...(r.extinct_children||[]).map(c=>el('div',{},el('strong',{},c.name),el('small',{},c.addresses.length+' address(es) · '+pipe(c.amount_sats)))),
     el('p',{class:'hint'},r.name_verified?'Children verified from local Core labels.':'Children from the sender’s signed preview; compare its code and identity.')):null;
   row.append(el('td',{},select),el('td',{},r.sender),el('td',{},r.receiver),el('td',{},review,children,el('small',{},r.direction==='send'?(r.name_verified?'Name verified by local Core':'Waiting for local verification'):'Name supplied by Wallet Server'),r.restoration_requested||r.restoring_extinct?el('small',{class:'warning'},'Restore original wallet role via direct SSH — requires local approval'):null,r.state!=='pending'?el('small',{},r.state==='recovery_required'?'Received — history recovery required':r.state):null),el('td',{},watch,r.watch_only_locked?el('small',{},'Source is watch-only'):null));
+  if(r.direction==='receive'&&r.state==='pending'){const deny=button('Deny wallet synchronisation','secondary',async()=>{const result=await api('authorise/disable-sync',{id:r.id});notify({message:result.message});transferSignature='';});deny.disabled=!!t.busy;deny.addEventListener('click',e=>e.stopPropagation());row.children[3].append(deny);}
   children?.addEventListener('click',e=>e.stopPropagation());
   row.addEventListener('click',()=>{if(!t.busy)run(async()=>{await api('synchronisation/review',{id:r.id});transferSignature='';});});body.append(row);
  }
  table.append(body);list.append(table);if(!rows.length)list.append(el('p',{},'No wallet synchronisation requests.'));
  const nodes=el('section',{class:'server-card result-card'},el('h3',{},'Computers in this request list')),seen=new Set();
  for(const r of rows)for(const [name,address]of [[r.sender,r.sender_ipv6],[r.receiver,r.receiver_ipv6]]){const key=name+'|'+address;if(!seen.has(key)){seen.add(key);nodes.append(el('div',{class:'node-address'},el('strong',{},name),el('code',{},address||'IPv6 identity not supplied')));}}
- root.replaceChildren(list);if(seen.size)root.append(nodes);
+ root.replaceChildren(syncOfferCard(t),list,syncDenialCard(t));if(seen.size)root.append(nodes);
  if(t.success_until>Date.now()/1000)root.append(el('section',{class:'transfer-success',role:'status'},'Success!'));
  if(t.error)root.append(el('p',{class:'warning',role:'alert'},t.error));
  if(t.proposal)root.append(renderWallet(t));
  root.append(el('section',{id:'block-download-controls',class:'server-card result-card'}));window.loadBlockDownload?.();
  root.append(batchControls(t,rows));
  if(t.recovery)root.append(recoveryCard(t.recovery));
+}
+function syncOfferCard(t){
+ const card=el('section',{class:'server-card result-card',id:'public-sync-offers'},el('h3',{},'Wallet offers waiting for transfer readiness'),el('p',{},'Wallets detected on other Agents are offered here before pairing. An offer does not authorise a transfer. Source names come from Wallet Server; pairing and the signed wallet review verify the actual source.'));
+ const waiting=(t.offers||[]).filter(o=>!o.request_id);
+ if(t.offer_server_support===false)card.append(el('p',{role:'status'},'Update Wallet Server to the matching build to receive public wallet offers before pairing. Existing local denials are retained.'));
+ else if(!t.offers_received)card.append(el('p',{role:'status'},'Waiting for Wallet Server’s public wallet-offer inventory. Pairing is not required to see offers. Use the matching updated Server build.'));
+ else if(!waiting.length)card.append(el('p',{},'No additional wallet offers are waiting. Transfer-ready requests appear below; denied wallets are listed separately.'));
+ const messages={secure_pairing_required:'Pair this Agent with the other Agent in Peer Connections to enable wallet transfer.',peer_offline:'Waiting for the other Agent to reconnect. Its public offer remains visible.',permissions_pending:'Waiting for current local permission status. This public offer remains visible.',discovery_pending:'Waiting for the inventories and exact transfer request.',review_paused:'Transfer readiness is paused; review the node and policy status.',history_recovery:'History recovery is still required; wallet transfer will not be repeated automatically.',local_outcome:'An earlier operation needs reconciliation before another transfer.',earlier_operation:'An earlier operation needs reconciliation before another transfer.',peer_changed:'The source connection changed; a fresh transfer review is required.',preview_changed:'The signed preview changed; reconcile the old review first.',preview_expired:'The old transfer needs a fresh review.',invalid_pair:'The exact paired request is incomplete.',disabled:'Incoming synchronisation is disabled.',ready:'Waiting for the matching executable transfer request.'};
+ for(const offer of waiting){const item=el('article',{class:'approval-item'},el('strong',{},offer.public_wallet.wallet_name),el('p',{},(offer.direction==='receive'?'Receive from ':'Offer to ')+offer.peer.hostname),el('p',{role:'status'},messages[offer.status]||'Waiting for transfer readiness.'));
+  if(offer.status==='secure_pairing_required')item.append(button('Open Peer Connections','secondary',()=>showPage('peers')));
+  if(offer.direction==='receive'){const deny=button('Deny wallet synchronisation','secondary',async()=>{const result=await api('authorise/disable-sync',{id:offer.id});notify({message:result.message});transferSignature='';});deny.disabled=!!t.busy;item.append(deny);}
+  const details=el('details',{},el('summary',{},'Public wallet policy — Server-supplied offer'));for(const row of offer.public_wallet.descriptors)details.append(el('pre',{class:'policy-code'},row.desc));item.append(details);card.append(item);
+ }
+ return card;
+}
+function syncDenialCard(t){
+ const card=el('section',{class:'server-card result-card',id:'sync-denial-list'},el('h3',{},'Wallet synchronisation deny list'),el('p',{},'These local choices persist across restarts. They apply to this receiving Agent and the exact wallet policy, regardless of which source offers it.'));
+ const rows=t.sync_denials||workspace?.exclusions||[];
+ if(!rows.length)card.append(el('p',{},'No wallets are denied on this Agent.'));
+ for(const row of rows){const allow=button('Remove deny entry','secondary',async()=>{const result=await api('authorise/enable-sync',{id:row.policy_id});notify({message:result.message});transferSignature='';});allow.disabled=!!t.busy;card.append(el('article',{class:'approval-item'},el('strong',{},row.wallet_name),allow));}
+ return card;
 }
 function renderWallet(t){
  const p=t.proposal,receive=p.direction==='receive',setup=t.setup,box=el('section',{class:'server-card result-card'},el('h3',{},receive?'Receiving wallet details':'Sending wallet details'),el('p',{},'Wallet: '+(t.details?.public_wallet?.wallet_name||p.public_wallet.wallet_name)),el('p',{class:'hint'},'Wallet names are labels. Compare the public descriptors and signed preview code with the other computer using a channel independent of Wallet Server.'));

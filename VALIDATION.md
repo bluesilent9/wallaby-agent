@@ -1,3 +1,7 @@
+# Build 70 validation
+
+See AGENT_BUILD70_SYNC_OFFERS.md and the supplied Build 70 test log for current release evidence. Tests use isolated wallets and invented public notices.
+
 # Build 69 validation
 
 Isolated Core and real loopback SSH checks cover progressive public-block rounds, a source behind or at genesis, IBD metadata, retained receiver chains, both SSH orientations, three-Agent daisy chaining, offline replay-wallet registration, bound recovery source mode, pruning/validation failures and explicit Internet resumption. Existing direct wallet role and startup regressions remain covered. Browser checks exercise the separate block controls and existing wallet/disc flows. See AGENT_BUILD69_BLOCK_DOWNLOAD.md for limits and the accompanying test logs.

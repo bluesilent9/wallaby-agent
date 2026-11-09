@@ -58,6 +58,7 @@ class Store:
     def receive(self,proposal):
         from vault_policy import validate_proposal
         p=validate_proposal(proposal)
+        if p['kind']=='wallet_sync_offers':raise ValueError('Public wallet offers are not authorisation requests. Apply their authenticated snapshot separately.')
         if p['kind']=='wallet_rename_queue':
             from rename_requests import snapshot
             snapshot(self,p);return True

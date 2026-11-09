@@ -40,6 +40,9 @@ def public_vault(v):
     return v
 
 def validate_proposal(p):
+    if isinstance(p,dict) and p.get('kind')=='wallet_sync_offers':
+        from sync_offers import validate
+        return validate(p)
     if isinstance(p,dict) and p.get("kind")=="wallet_mobile_verification":
         from mobile_verification import validate
         return validate(p)

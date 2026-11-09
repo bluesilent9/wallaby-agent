@@ -37,6 +37,7 @@ class Exchange:
         ordered=sorted(state['outbox'].items(),key=lambda pair:0 if pair[1]['kind']=='wallet_setup_identity' else 1 if pair[1]['kind'] in ('partial_sign_result','broadcast_result') else 2)
         items=[{'id':key,**row} for key,row in ordered if not held_item(state,row)][:8]
         body={'version':1,'outbox':items,'known_vaults':sorted(state['vaults'])[:128],'capabilities':['node_identity','partial_signing','broadcast','automatic_broadcast_v1','wallet_transfer','wallet_retirement_v3','archive_inventory_v1','wallet_retirement_cancel_v1','builder_cancellation_v1','wallet_archive_queue_v1','wallet_archive_cancel_v1','wallet_policy_refresh_v1','wallet_policy_refresh_batch_v1','wallet_policy_refresh_cancel_v1','wallet_rename_v1']}
+        if time.monotonic()>=getattr(self,'offer_capability_retry',0):body['capabilities'].append('wallet_sync_offers_v1')
         if getattr(self.store,'peers',None):body['capabilities']+=['wallet_relay_v1','wallet_policy_refresh_relay_v1']
         from mobile_verification import legacy_facts_available
         if legacy_facts_available():body['capabilities'].append('wallet_mobile_verification_v1')
@@ -54,11 +55,20 @@ class Exchange:
         self.phase='http'
         try:r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)
         except HTTPFailure as error:
-            if error.status in (404,405,501):
+            if error.status==400 and error.safe_reason=='capabilities' and 'wallet_sync_offers_v1' in body['capabilities']:
+                # Only this optional public notice capability can be omitted.
+                # No pairing, encryption, signing or transfer authority changes.
+                body['capabilities'].remove('wallet_sync_offers_v1')
+                r=http_json(self.port,'/agent/v2/exchange',body,self.token,timeout=10)
+                self.offer_capability_retry=time.monotonic()+60
+                with self.store.edit() as saved:saved['sync_offer_server_support']=False;saved['sync_offers_received']=False;saved.pop('sync_offers',None)
+            elif error.status in (404,405,501):
                 self.unsupported=True
                 with self.store.edit() as s:s['sync']='Wallet Server does not yet support vault/signing exchange. Public data and unsigned PSBT exports remain queued locally.'
                 return
-            raise
+            else:raise
+        if 'wallet_sync_offers_v1' in body['capabilities']:
+            with self.store.edit() as saved:saved['sync_offer_server_support']=True
         if self.cancelled():return
         self.phase='response'
         if not isinstance(r,dict) or set(r)!={'version','accepted','proposals'} or type(r['version']) is not int or r['version']!=1 or not isinstance(r['accepted'],list) or not isinstance(r['proposals'],list) or len(r['proposals'])>16:raise ValueError('Invalid Wallet Server exchange response.')
@@ -80,7 +90,7 @@ class Exchange:
         self.phase='proposal_validation'
         for p in r['proposals']:
             # Record only a fixed known kind, never remote strings or payloads.
-            known={'wallet_mobile_verification','wallet_rename','wallet_rename_queue','builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc','archive_cancel'}
+            known={'wallet_sync_offers','wallet_mobile_verification','wallet_rename','wallet_rename_queue','builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc','archive_cancel'}
             self.proposal_kind=p.get('kind') if isinstance(p,dict) and p.get('kind') in known else 'unknown'
             if self.proposal_kind=='wallet_retire':
                 from retirement_phases import require_current
@@ -100,6 +110,10 @@ class Exchange:
                 LOCAL_RETIREMENT.cancel_remote(p['request_hash'])
         for p in proposals:
             self.proposal_kind=p['kind']
+            if p['kind']=='wallet_sync_offers':
+                from sync_offers import apply
+                from approval_store import digest
+                apply(self.store,p,digest({'token':self.token}))
             if p['kind']=='wallet_sync_queue':
                 from sync_queue import apply_snapshot
                 from approval_store import digest
@@ -108,7 +122,7 @@ class Exchange:
         if LOCAL_ARCHIVES is not None and LOCAL_ARCHIVES.store.path==self.store.path:LOCAL_ARCHIVES.cancellations.observe(mark_only=True)
         for p in proposals:
             self.proposal_kind=p['kind']
-            if p['kind'] in ('builder_cancel','wallet_retire_cancel') or blocked(self.store.read(),p):continue
+            if p['kind'] in ('builder_cancel','wallet_retire_cancel','wallet_sync_offers') or blocked(self.store.read(),p):continue
             if p['kind']=='wallet_mobile_verification':
                 from mobile_verification import facts
                 self.store.queue('wallet_mobile_verification_record',facts(self.store,p['challenge']))

@@ -13,7 +13,8 @@ class BatchTransfer(Transfer):
         if saved.get('sync_batch') or saved.get('active_transfer'):
             release(self.store);self.error='Agent restarted during synchronisation. Inspect attempted wallets; no transfer was repeated.'
     def state(self):
-        result=super().state();result['recovery']=self.recovery.state();result['busy']=bool(self.store.read().get('sync_batch'));return result
+        result=super().state();from sync_offers import rows as offers
+        result['offers']=offers(self.store);result['offers_received']=bool(self.store.read().get('sync_offers_received'));result['offer_server_support']=self.store.read().get('sync_offer_server_support');result['sync_denials']=list(self.store.read().get('sync_exclusions',{}).values());result['recovery']=self.recovery.state();result['busy']=bool(self.store.read().get('sync_batch'));return result
     def complete(self,key):
         super().complete(key)
         if self.store.read().get('sync_batch'):self.success_until=0
