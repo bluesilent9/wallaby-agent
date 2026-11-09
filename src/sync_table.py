@@ -37,6 +37,21 @@ def direct_ready(store,p):
         return True
     except (ValueError,AttributeError):return False
 
+def sender_enabled(saved,p):
+    """A connected path never substitutes for current receiver permission.
+
+    The Server's authenticated full offer snapshot can restrict a stale frozen
+    request, but cannot grant signing/import authority. Re-enabling returns the
+    same request after the receiver's current signed preferences are observed.
+    """
+    if p.get('direction')!='send':return True
+    if not saved.get('sync_offers_received'):return False
+    ident=policy_id(p)
+    return any(o['direction']=='send' and o['transfer_id']==p['transfer_id']
+        and o['peer']['node_id']==p['peer']['node_id'] and policy_id(o)==ident
+        and o['status'] not in ('disabled','permissions_pending')
+        for o in saved.get('sync_offers',{}).values())
+
 def state(store,requests):
     saved=store.read();groups={};denials=saved.get('sync_exclusions',{})
     def group(ident,name):
@@ -49,16 +64,19 @@ def state(store,requests):
         if local.get('private_keys_enabled') is True:row['signers'].append({'account':name,'label':managed.get('role_name') or name})
         row['local_private']=row.get('local_private',False) or local.get('private_keys_enabled') is True
     for offer in saved.get('sync_offers',{}).values():
+        if offer['direction']=='send' and offer['status'] in ('disabled','permissions_pending'):continue
         ident=policy_id(offer);row=group(ident,offer['public_wallet']['wallet_name'])
         row['multisig']=row.get('multisig',False) or multisig(offer['public_wallet'])
         row['offers'].append({'direction':offer['direction'],'status':offer['status']})
         if offer['direction']=='receive':row['deny_id']=offer['id']
     for r in requests:
-        p=saved['pending'][r['id']]['proposal'];ident=policy_id(p);row=group(ident,r['wallet_name'])
+        p=saved['pending'][r['id']]['proposal'];enabled=sender_enabled(saved,p)
+        if r['state']=='pending' and not enabled:continue
+        ident=policy_id(p);row=group(ident,r['wallet_name'])
         if r['direction']=='receive':row['deny_id']=r['id']
         row['multisig']=row.get('multisig',False) or multisig(p['public_wallet'])
         preview=saved.get('transfer_previews',{}).get(r['id'],{}).get('preview',{})
-        option=copy.deepcopy(r);option['signer_label']=preview.get('public_wallet',{}).get('wallet_name');option['direct_ready']=direct_ready(store,p)
+        option=copy.deepcopy(r);option['signer_label']=preview.get('public_wallet',{}).get('wallet_name');option['direct_ready']=enabled and direct_ready(store,p)
         row[r['direction']].append(option)
     for ident,d in denials.items():group(ident,d['wallet_name'])
     for row in groups.values():
@@ -75,6 +93,7 @@ def choose(store,key,selected,watch_only):
         row=s['pending'].get(key)
         if not row or row['proposal'].get('kind')!='wallet_transfer':raise ValueError('Refresh the wallet table; this request changed.')
         p=row['proposal']
+        if not sender_enabled(s,p):raise ValueError('The receiver has not enabled this wallet. Wait for its current permission update; no transfer was selected.')
         if not direct_ready(store,p):raise ValueError('No Agent Detected. Reconnect the directly paired Agent before selecting this transfer.')
         if type(selected) is not bool or type(watch_only) is not bool:raise ValueError('Invalid wallet selection.')
         if s.get('active_transfer') or s.get('sync_batch') or row.get('withdrawn') or row['state']!='pending':raise ValueError('Finish the current operation before changing routes.')

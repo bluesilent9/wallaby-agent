@@ -1,3 +1,7 @@
+# Build 72 validation
+
+See AGENT_BUILD72_RECEIVER_PERMISSIONS.md and the supplied Build 72 test log for current release evidence.
+
 # Build 71 validation
 
 See AGENT_BUILD71_UNIFIED_SYNC.md and the supplied Build 71 test log for current release evidence.

@@ -32,6 +32,16 @@ def apply(store,p,session):
         previous=s.get('sync_offer_revision',-1);content=digest(p['offers'])
         if p['revision']<previous or p['revision']==previous and content!=s.get('sync_offer_snapshot_hash'):raise ValueError('Stale or conflicting public wallet-offer snapshot.')
         s['sync_offers']={o['id']:copy.deepcopy(o) for o in p['offers']};s['sync_offer_revision']=p['revision'];s['sync_offer_snapshot_hash']=content;s['sync_offers_received']=True
+        # Withdrawal restricts an unstarted sender selection. Re-enabling may
+        # restore visibility, but cannot silently restore a previously ticked
+        # recipient. Frozen batches and attempted outcomes remain untouched.
+        if not s.get('sync_batch'):
+            from sync_table import sender_enabled
+            for key,row in s['pending'].items():
+                q=row['proposal']
+                if q.get('kind')=='wallet_transfer' and q['direction']=='send' and row['state']=='pending' and key!=s.get('active_transfer') and not sender_enabled(s,q):
+                    choice=s.get('sync_choices',{}).get(key)
+                    if choice:choice['selected']=False
 
 def rows(store):
     from sync_preferences import policy_id

@@ -15,7 +15,7 @@ from node_client import http_json,HTTPFailure
 
 class Exchange:
     def __init__(self,port,token,store=None):self.port=port;self.token=token;self.store=store;self.unsupported=False;self.phase='local_outbox';self.proposal_kind='none';self.cancelled=lambda:False
-    def once(self,previews=True):
+    def once(self,previews=True,flush_preferences=True):
         if self.cancelled():return
         self.phase='local_outbox';self.proposal_kind='none'
         from protected_memory import required,inside
@@ -100,6 +100,7 @@ class Exchange:
             require_current(self.store,checked)
             proposals.append(checked)
         self.phase='proposal_application'
+        preference_reply=False
         for p in proposals:
             self.proposal_kind=p['kind']
             if p['kind']=='builder_cancel':
@@ -131,7 +132,7 @@ class Exchange:
                 receive(self.store,{k:p[k] for k in ('preview','public_key','signature')})
             elif p['kind']=='wallet_sync_preferences':
                 from sync_preferences import exchange
-                exchange(self.store,p)
+                exchange(self.store,p);preference_reply=True
             elif p['kind']=='wallet_setup_complete':
                 from setup_completion import apply
                 from configuration import Config,discover_cookie
@@ -158,6 +159,7 @@ class Exchange:
         with self.store.edit() as s:
             self.preview_ready=not s.get('sync_batch') and not s.get('active_transfer') and any(row['proposal']['kind']=='wallet_transfer' and row['proposal']['direction']=='send' and row['proposal'].get('preview_challenge') and key not in s.get('transfer_previews',{}) for key,row in s['pending'].items())
             s['sync']='Wallet Server exchange connected. Pending changes require local authorisation.';s['last_exchange']=time.time();s.pop('exchange_error',None)
+        if preference_reply and flush_preferences and not self.cancelled():self.once(previews=False,flush_preferences=False)
     def prepare_preview(self):
         if self.cancelled():return
         saved=self.store.read()
