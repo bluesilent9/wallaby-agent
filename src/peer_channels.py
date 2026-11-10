@@ -279,7 +279,9 @@ class Peers:
         return {'identity':self.identity,'pairs':rows,'pending':pending,'connecting':connecting,'error':self.error,'registered':self.registered}
     def connect(self,rpc):
         self.rpc=rpc
-        if not self.thread or not self.thread.is_alive():self.stop.clear();self.thread=threading.Thread(target=self.run,daemon=True,name='encrypted-peer-relay');self.thread.start()
+        if not self.thread or not self.thread.is_alive():
+            self.diagnostic('relay_attached','Peer service attached to the authenticated node connection')
+            self.stop.clear();self.thread=threading.Thread(target=self.run,daemon=True,name='encrypted-peer-relay');self.thread.start()
     def control(self,kind,fields):
         challenge=self.rpc({'action':'challenge'})
         if challenge.get('endpoint_id')!=self.identity['endpoint_id'] or challenge.get('role')!=self.identity['role'] or not hexid(challenge.get('challenge')):raise ValueError('Server returned a different relay identity.')

@@ -99,7 +99,7 @@ class ThreeAgentControl(unittest.TestCase):
      else:reply={}
      raw=json.dumps(reply).encode();self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
    server=IPv6HTTPServer(('::1',0),Handler);server_thread=threading.Thread(target=server.serve_forever,daemon=True);server_thread.start()
-   def exchange(port,token):
+   def exchange(port,token,workspace_store=None):
     from test_build8 import paired
     store=Store(Path(tmp)/token);store.receive(paired('Background wallet','send'));stores[token]=store;return Exchange(port,token,store)
    def slow_preview(self):preview_started.set();release.wait(8)

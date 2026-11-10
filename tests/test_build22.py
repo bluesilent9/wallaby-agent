@@ -34,7 +34,7 @@ class SessionFailure(unittest.TestCase):
   client.post=post;client.heartbeat();self.assertNotIn('green',[c.args[0] for c in status.call_args_list])
 
 def worker(clock=None):
- w=Workspace.__new__(Workspace);w.recovery=Recovery(clock or time.monotonic);w.node_epoch=0;w.node_generation=None;w.node_stop=threading.Event();w.node_status={'color':'red','message':'Off'};w.ops=SimpleNamespace(core=SimpleNamespace(config={}));w.viewers=[];w.closing=False;return w
+ w=Workspace.__new__(Workspace);w.store=Mock(name='workspace_store');w.recovery=Recovery(clock or time.monotonic);w.node_epoch=0;w.node_generation=None;w.node_stop=threading.Event();w.node_status={'color':'red','message':'Off'};w.ops=SimpleNamespace(core=SimpleNamespace(config={}));w.viewers=[];w.closing=False;return w
 
 class AutomaticRecovery(unittest.TestCase):
  def test_failed_session_is_recreated_and_old_callbacks_cannot_override_new_success(self):
@@ -113,5 +113,5 @@ class HTTPRecovery(unittest.TestCase):
   with patch('node_client.NodeClient',Client),patch('node_client.Core',return_value=SimpleNamespace(ready=lambda:None)),patch('node_client.adapter_mac',return_value='00:11:22:33:44:55'),patch('agent_exchange.Exchange',return_value=SimpleNamespace(run=lambda *_:None)),patch('activity_log.event'):
    owner.start_node(server.server_port)
    try:
-    self.assertTrue(ready.wait(5));self.assertEqual(registrations,['session-0','session-1']);self.assertEqual(clients[0].error.code,'session_limit');self.assertEqual(owner.node_status['color'],'green');self.assertFalse(owner.recovery.snapshot()['active']);self.assertEqual(len(clients[0].seen),10000)
+    self.assertTrue(ready.wait(5));self.assertEqual(registrations,['session-0','session-1']);self.assertTrue(all(c.store is owner.store for c in clients));self.assertEqual(clients[0].error.code,'session_limit');self.assertEqual(owner.node_status['color'],'green');self.assertFalse(owner.recovery.snapshot()['active']);self.assertEqual(len(clients[0].seen),10000)
    finally:owner.node_stop.set();owner.node.join(6);self.assertFalse(owner.node.is_alive())

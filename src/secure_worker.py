@@ -275,6 +275,10 @@ class Workspace:
                 def degraded(error,current=current):
                     if current():self.connection_lost(error)
                 client=NodeClient(self.ops.core.config,port,stop,status);client.on_failure=failure;client.on_degraded=degraded;client.planned_core_restart=self.planned_core_restart
+                # The exchange must share the live workspace Store object, not
+                # merely reopen its file: the optional peer service is attached
+                # to this object after asynchronous initialisation completes.
+                client.store=self.store
                 try:client.run()
                 except Exception as error:failure(error)
                 if not self.recovery_state().get('active'):return

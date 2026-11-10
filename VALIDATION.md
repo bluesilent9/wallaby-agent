@@ -1,3 +1,7 @@
+# Build 76 validation
+
+See AGENT_BUILD76_PEER_STARTUP.md and the accompanying Build 76 logs. A normal two-worker/Core/HTTP startup test reproduces the failure on original Build 75 and passes with the shared-workspace fix, including late optional initialization and direct SSH.
+
 # Build 75 validation
 
 See AGENT_BUILD75_SCAN_CONNECT.md and the Build 75 test log for automatic unpaired-to-direct pairing, role restrictions, preserved backpressure state, real Core transfer and camera UI checks.
