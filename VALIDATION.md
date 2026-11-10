@@ -1,3 +1,9 @@
+# Build 78 validation
+
+Extinct history update tests use isolated Bitcoin Core 31 wallets and an authorised direct receiving socket. They cover identical addresses with missing spent-history records, repeated merges, recipient-only histories and LOST labels, signature/checksum/network/coverage rejection, legacy local evidence, restored/active owner refusal, unused addresses and empty labels. Read-only discovery summaries are bounded and independent of moving confirmation counts. Native rollback/cleanup, legacy wire compatibility, worker startup/QR pairing, progressive chain catch-up and all JavaScript suites are checked. Real optical media and production systemd installation are not exercised by these fixtures.
+
+Matching Wallet Server Build 7 is required for automatic history-difference offers; the Server never supplies historical records or local consent. Existing grouped-sync descriptor bounds remain enforced; oversized archives are refused, never partially imported. See AGENT_BUILD78_EXTINCT_SYNC_PROTOCOL.md.
+
 # Build 77 validation
 
 See AGENT_BUILD77_WHOLE_EXTINCT_UPGRADE.md and the accompanying Build 77 logs for whole-archive migration, real pruned-block recovery/reindex, retained LOST labels, later reuse and existing preservation/deletion safeguards.

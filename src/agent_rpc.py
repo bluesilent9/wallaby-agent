@@ -9,7 +9,7 @@ from decimal import Decimal
 import json,re,time,uuid
 
 NODE_METHODS=frozenset('wallaby_mempool_snapshot getblockchaininfo getblockcount getbestblockhash getblockhash getblockheader getblock getchaintips getdifficulty getmempoolinfo getrawmempool getmempoolentry getmempoolancestors getmempooldescendants gettxout gettxoutsetinfo getrawtransaction gettxoutproof verifytxoutproof getnetworkinfo getnettotals getpeerinfo getconnectioncount getindexinfo estimatesmartfee deriveaddresses getdescriptorinfo validateaddress decoderawtransaction decodescript decodepsbt analyzepsbt listwallets listwalletdir getdescriptoractivity'.split())
-WALLET_METHODS=frozenset('getwalletinfo getbalances getbalance listunspent gettransaction listtransactions listsinceblock getaddressinfo getaddressesbylabel listlabels listaddressgroupings listreceivedbyaddress listreceivedbylabel listdescriptors'.split())
+WALLET_METHODS=frozenset('wallaby_extinct_summary getwalletinfo getbalances getbalance listunspent gettransaction listtransactions listsinceblock getaddressinfo getaddressesbylabel listlabels listaddressgroupings listreceivedbyaddress listreceivedbylabel listdescriptors'.split())
 METHODS=NODE_METHODS|WALLET_METHODS
 MAX_REQUEST_BYTES=4*1024*1024
 MAX_RESULT_BYTES=16*1024*1024
@@ -64,6 +64,7 @@ def request(method,params,wallet):
     if method=='wallaby_mempool_snapshot':
         from mempool_snapshot import params as validate_snapshot
         validate_snapshot(params)
+    if method=='wallaby_extinct_summary' and (params not in ([],{}) or wallet not in ('Wallaby Extinct','Extinct')):raise ValueError('Extinct summaries require an exact local archive and no parameters.')
     if method=='listdescriptors' and params not in ([],[False],{}, {'private':False}):raise ValueError('Only public listdescriptors false exports are permitted.')
     return params,size
 

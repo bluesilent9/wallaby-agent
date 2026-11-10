@@ -12,7 +12,7 @@ from wallet_labels import fixed_address,address_only,read_labels
 from core_history import database,HISTORY_KEY,TX_KEY,supported
 
 
-def snapshot(core,wallet):
+def snapshot(core,wallet,*,with_transactions=False):
     from peer_wallet import work_dir
     from core_ram_path import for_core
     supported(core)
@@ -25,6 +25,13 @@ def snapshot(core,wallet):
         with database(path) as db:
             row=db.execute('select value from main where key=?',(HISTORY_KEY,)).fetchone()
             txids=sorted(k[3:][::-1].hex() for (k,) in db.execute('select key from main where substr(key,1,3)=?',(TX_KEY,)))
+            transactions=[]
+            if with_transactions:
+                from core_history import parse_record
+                for key,value in db.execute('select key,value from main where substr(key,1,3)=?',(TX_KEY,)):
+                    _,offset=parse_record(key,value)
+                    transactions.append({'txid':key[3:][::-1].hex(),'blockhash':value[offset:offset+32][::-1].hex()})
+                transactions.sort(key=lambda r:r['txid'])
     if len(txids)>100000:raise ValueError('The Extinct wallet exceeds the bounded migration transaction limit.')
     marker=None
     if row:
@@ -39,7 +46,7 @@ def snapshot(core,wallet):
             if type(candidate['height']) is not int or candidate['height']<0 or not isinstance(candidate['tip'],str) or not re.fullmatch('[0-9a-f]{64}',candidate['tip']):raise ValueError('Invalid coverage chain')
             marker=candidate
         except (ValueError,TypeError,KeyError,AttributeError):pass
-    return {'raw':raw,'info':info,'addresses':addresses,'txids':txids,'marker':marker}
+    return {'raw':raw,'info':info,'addresses':addresses,'txids':txids,'marker':marker,**({'transactions':transactions} if with_transactions else {})}
 
 
 def valid(core,state,allow_additions=False,require_current=True):

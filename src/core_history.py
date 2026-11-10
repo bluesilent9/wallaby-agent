@@ -62,8 +62,8 @@ def collect(core,names,txids,folder):
     return [found[k] for k in sorted(found)]
 
 
-def validate_rows(core,rows,manifest):
-    if not isinstance(rows,list) or not rows or len(rows)>10000:raise ValueError('Invalid native history record count.')
+def validate_rows(core,rows,manifest,*,allow_unfunded=False):
+    if not isinstance(rows,list) or not rows and not allow_unfunded or len(rows)>10000:raise ValueError('Invalid native history record count.')
     expected={r['txid']:r['blockhash'] for r in manifest['transactions']};found={};outputs={};transactions=[]
     for row in rows:
         if not isinstance(row,dict) or set(row)!={'txid','blockhash','record'} or row['txid'] in found or expected.get(row['txid'])!=row['blockhash']:raise ValueError('Native history differs from the exact approved transaction manifest.')
@@ -78,7 +78,7 @@ def validate_rows(core,rows,manifest):
             address=out['scriptPubKey'].get('address')
             if address in {r['address'] for r in manifest['addresses']}:outputs[(row['txid'],out['n'])]=address
         found[row['txid']]=value
-    if set(found)!=set(expected) or set(outputs.values())!={r['address'] for r in manifest['addresses']}:raise ValueError('Native history does not cover every approved address and transaction.')
+    if set(found)!=set(expected) or not allow_unfunded and set(outputs.values())!={r['address'] for r in manifest['addresses']}:raise ValueError('Native history does not cover every approved address and transaction.')
     for tx in transactions:
         if not any((tx['txid'],v['n']) in outputs for v in tx['vout']) and not any((i.get('txid'),i.get('vout')) in outputs for i in tx['vin']):raise ValueError('An unrelated transaction was included in the native history.')
     return found
@@ -112,8 +112,8 @@ def archive_order(value,offset):
     rebuilt=compact_write(len(pairs))+b''.join(compact_write(len(k))+k+compact_write(len(v))+v for k,v in pairs)
     return value[:begin]+rebuilt+value[end:]
 
-def merge_backup(core,path,rows,manifest):
-    supported(core);found=validate_rows(core,rows,manifest)
+def merge_backup(core,path,rows,manifest,*,allow_unfunded=False):
+    supported(core);found=validate_rows(core,rows,manifest,allow_unfunded=allow_unfunded)
     from wallet_labels import fixed_address
     with database(path,True) as db:
         for key,value in db.execute('select key,value from main').fetchall():
@@ -144,7 +144,7 @@ def merge_backup(core,path,rows,manifest):
     return len(found)
 
 
-def install(core,store,archive,rows,manifest,coverage=None):
+def install(core,store,archive,rows,manifest,coverage=None,*,allow_unfunded=False):
     from peer_wallet import work_dir
     from core_ram_path import for_core
     from wallet_deletion import target,delete
@@ -159,7 +159,7 @@ def install(core,store,archive,rows,manifest,coverage=None):
         backup=Path(d)/'archive.dat';rpc(core,'backupwallet',[for_core(core,backup)],archive)
         # Preserve the entire old archive, including unrelated children and LOST
         # labels. Add only exact public tx records to this non-swapping copy.
-        if rows:merge_backup(core,backup,rows,manifest)
+        if rows:merge_backup(core,backup,rows,manifest,allow_unfunded=allow_unfunded)
         if coverage is not None:
             with database(backup,True) as db:db.execute('insert or replace into main(key,value) values(?,?)',(HISTORY_KEY,json.dumps(coverage,sort_keys=True,separators=(',',':')).encode()))
         rpc(core,'restorewallet',{'wallet_name':stage,'backup_file':for_core(core,backup),'load_on_startup':False},timeout=86400)
@@ -205,7 +205,7 @@ def check(core,wallet,raw,rows,manifest):
     if info.get('private_keys_enabled') is not False or info.get('scanning') or descriptors(rpc(core,'listdescriptors',[False],wallet))!=descriptors(raw):raise ValueError('Restored public archive capability or policy differs.')
     for row in manifest['addresses']:
         found=rpc(core,'getaddressinfo',[row['address']],wallet)
-        if not (found.get('ismine') or found.get('iswatchonly')) or found.get('labels')!=[row['label']]:raise ValueError('Extinct address or LOST label readback failed.')
+        if not (found.get('ismine') or found.get('iswatchonly')) or (found.get('labels') or [''])!=[row['label']]:raise ValueError('Extinct address or LOST label readback failed.')
     for row in rows:
         found=rpc(core,'gettransaction',[row['txid'],True],wallet);tx,_=parse_record(TX_KEY+bytes.fromhex(row['txid'])[::-1],bytes.fromhex(row['record']))
         if found.get('hex')!=tx.serialize().hex() or found.get('blockhash')!=row['blockhash'] or found.get('confirmations',0)<=0:raise ValueError('Core did not retain the complete confirmed transaction history.')

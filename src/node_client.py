@@ -31,7 +31,7 @@ def exchange_http_reason(data):
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev77'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev78'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -90,6 +90,11 @@ class Core:
         except (PermissionError,IsADirectoryError):raise ConnectionFailure('rpc','cookie_access','The Bitcoin Core cookie cannot be read by this desktop user. Choose the correct .cookie file and check its permissions.') from None
         except UnicodeError:raise ConnectionFailure('rpc','cookie_invalid','The selected file is not a Bitcoin Core text cookie. Choose the correct .cookie file.') from None
         if ':' not in cookie or '\n' in cookie:raise ConnectionFailure('rpc','cookie_invalid','The selected file is not a valid Bitcoin Core RPC cookie. Choose the .cookie file; do not enter its contents.')
+        if method=='wallaby_extinct_summary':
+            from extinct_history_sync import summary
+            request(method,params,wallet)
+            value,_=clean_json(summary(self,wallet),MAX_RESULT_BYTES)
+            return {'result':value}
         if method=='wallaby_mempool_snapshot':
             if wallet is not None:raise ValueError('Mempool snapshots do not use wallet endpoints.')
             from mempool_snapshot import Snapshot,LOCAL_BYTES

@@ -314,7 +314,7 @@ class Transfer:
             from signer_restoration import requested,offer,verify_received,finish as finish_restoration,candidates
             if candidates(self.store.read(),p['public_wallet']) and not requested(p):raise ValueError('This wallet needs a Build 65 restoration invitation and signed restoration preview.')
             restoration_offer=offer(self.store,p,watch)
-            ready={'status':'ready','features':['chain_sync_v1','core_history_v1','restore_roles_v1']}
+            ready={'status':'ready','features':['chain_sync_v1','core_history_v1','restore_roles_v1','core_history_v2']}
             if restoration_offer:ready['restoration']=restoration_offer
             if p.get('transfer_version') in (2,3):ready['watch_only']=watch
             frame_write(stream,ready)
@@ -344,8 +344,12 @@ class Transfer:
                             frame_write(stream,{'status':'history_deferred','transfer_id':p['transfer_id'],'message':str(error)});frame_read(stream)
                             from chain_sync import finish
                             finish(self.core,self.store);self.error=str(error);return
-                        name,missing,details=import_watch(self.core,self.store,key,p,details,native=True)
-                        install(self.core,self.store,name,packet['records'],packet['manifest'])
+                        if packet['version']==2:
+                            from extinct_history_sync import install_packet
+                            name=install_packet(self.core,self.store,key,p,details,packet)
+                        else:
+                            name,missing,details=import_watch(self.core,self.store,key,p,details,native=True)
+                            install(self.core,self.store,name,packet['records'],packet['manifest'])
                     from chain_sync import finish
                     self.complete(key);frame_write(stream,{'status':'loaded','transfer_id':p['transfer_id'],'wallet_identity':digest(sorted(wanted))});frame_read(stream);finish(self.core,self.store);return
                 name,missing,details=import_watch(self.core,self.store,key,p,details)
@@ -528,7 +532,7 @@ class Transfer:
                             with self.store.edit() as state:state['pending'][key]['state']='attempted'
                             if native_history and __import__('extinct_sync').grouped(p['public_wallet']):
                                 from history_wire import export
-                                file,history_header=export(self.core,self.store,p,details,root)
+                                file,history_header=export(self.core,self.store,p,details,root,version=2 if 'core_history_v2' in reply.get('features',[]) else 1)
                                 frame_write(process.stdin,history_header)
                                 with file.open('rb') as f:
                                     while True:
