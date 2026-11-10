@@ -303,6 +303,15 @@ class Recovery:
     def restore_once(self,key,job):
         name=job['wallet']
         if name in persistent_wallets(self.core):return
+        if not job.get('staged') and job.get('local_only'):
+            # A locally reviewed existing wallet may not have been configured
+            # for startup loading. Reload it after the authorised Core restart;
+            # subsequent capability/descriptor checks still bind the exact job.
+            rpc(self.core,'loadwallet',{'filename':name,'load_on_startup':True},timeout=86400)
+            self.check_wallet(name,job)
+            from build8_policy import descriptors
+            if descriptors(rpc(self.core,'listdescriptors',[False],name))!=descriptors(job['details']['public_wallet']):raise ValueError('Local recovery wallet identity changed. No history import was started.')
+            return
         if not job.get('staged'):raise ValueError('The received public wallet is not loaded. Inspect Core before continuing recovery.')
         with self.store.edit() as saved:
             if saved['history_jobs'][key]['state']!='pending':raise ValueError('A previous restoration was attempted. Inspect/load that wallet in Core; restoration will not be repeated automatically.')
@@ -315,7 +324,7 @@ class Recovery:
             if 'next' in row:request['next_index']=row['next']
             requests.append(request)
         result=rpc(self.core,'importdescriptors',{'requests':requests},name,timeout=86400)
-        if not result or not all(item.get('success') for item in result):raise ValueError('Core could not register the original descriptor history timestamps.')
+        if not result or len(result)!=len(requests) or not all(item.get('success') for item in result):raise ValueError('Core could not register the original descriptor history timestamps.')
         # Re-importing descriptors may reset their address-book labels in Core.
         # Restore only the exact labels from the locally approved public preview.
         from wallet_labels import apply_labels
@@ -380,6 +389,11 @@ class Recovery:
                     else:rpc(self.core,'rescanblockchain',[chain.get('pruneheight',-1)+1 if chain.get('pruned') else 0],name,timeout=86400)
                 self.check_wallet(name,job)
                 verify_history(self.core,name,job['details'],self.store);processed.add(name)
+                if job.get('extinct_upgrade'):
+                    if job['timestamp']!=0:raise ValueError('Whole Extinct migration requires complete historical coverage.')
+                    from extinct_upgrade import certify
+                    from wallet_labels import fixed_address
+                    certify(self.core,self.store,name,[fixed_address(r['desc']) for r in job['details']['public_wallet']['descriptors']])
                 from build8_policy import descriptors
                 with self.store.edit() as saved:saved.setdefault('history_coverage',{})[name]={'identity':digest(sorted(descriptors(job['details']['public_wallet']))),'from_time':job['timestamp'],'tip':chain['bestblockhash']}
                 if not job.get('local_only'):self.store.queue('wallet_transfer_result',{'request_hash':key,'status':'complete','message':'Wallet and vault history verified; pruning settings were unchanged throughout recovery.'})

@@ -84,7 +84,7 @@ class PhaseSchema(unittest.TestCase):
  def test_extra_dashboard_history_requires_independent_policy_and_chain_verification(self):
   from retirement_phases import review
   p={'phase':'preserve','wallet':'Archive','public_wallet':{'wallet_name':'Old'},'manifest':{'addresses':[{'address':'unproven','label':'Old'}],'transactions':[]},'manifest_hash':'fixture'}
-  with patch('retirement_phases.validate'),patch('retirement_phases.check_chain',return_value={'blocks':1}),patch('retirement_phases.existing_archive'),patch('retirement_phases.readback',side_effect=ValueError('Archive not complete')),patch('retirement_phases.local_facts',return_value={'addresses':[],'transaction_records':[]}),patch('retirement_phases.verify_public',side_effect=ValueError('unproven policy')) as verify:
+  with patch('retirement_phases.validate'),patch('retirement_phases.check_chain',return_value={'blocks':1}),patch('retirement_phases.existing_archive'),patch('extinct_upgrade.status',return_value={'required':False,'addresses':0,'mode':'verified'}),patch('retirement_phases.readback',side_effect=ValueError('Archive not complete')),patch('retirement_phases.local_facts',return_value={'addresses':[],'transaction_records':[]}),patch('retirement_phases.verify_public',side_effect=ValueError('unproven policy')) as verify:
    with self.assertRaisesRegex(ValueError,'unproven policy'):review(Mock(),Mock(),p)
    verify.assert_called_once()
  def test_attempted_extinction_cannot_be_relabelled_as_an_unstarted_denial(self):

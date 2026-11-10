@@ -163,6 +163,11 @@ def review(core,store,p):
     validate(p);chain=check_chain(core,p)
     if p['phase']=='preserve':
         existing_archive(core,p['wallet'])
+        from extinct_upgrade import status as upgrade_status
+        whole=upgrade_status(core,p['wallet'])
+        if whole['mode']=='download':
+            from wallet_retirement import MissingHistory
+            raise MissingHistory('The whole Extinct wallet contains older entries without verified complete history. Prepare local history recovery, then authorise This Node on Synchronisation to upgrade every existing address. No active wallet was deleted.')
         # Read back an already preserved manifest before asking an old source
         # wallet on a pruned node to establish broader historical coverage.
         try:
@@ -178,7 +183,7 @@ def review(core,store,p):
         local_addresses={(r['address'],r['label']) for r in facts['addresses']} if facts else set()
         local_transactions={digest(r) for r in facts['transaction_records']} if facts else set()
         if not preserved and (facts is None or not {(r['address'],r['label']) for r in p['manifest']['addresses']}<=local_addresses or not {digest(r) for r in p['manifest']['transactions']}<=local_transactions):verify_public(core,p)
-        return {'phase':'preserve','wallet':p['public_wallet'].get('wallet_name','Retiring wallet'),'archive':p['wallet'],'addresses':p['manifest']['addresses'],'transactions':len(p['manifest']['transactions']),'blocks':chain['blocks'],'manifest_hash':p['manifest_hash'],'delete_wallet':False,'local_wallets':[],'retained_signers':[],'history_method':'existing' if preserved else 'native' if sources else 'rescan','native_sources':sources}
+        return {'phase':'preserve','wallet':p['public_wallet'].get('wallet_name','Retiring wallet'),'archive':p['wallet'],'addresses':p['manifest']['addresses'],'transactions':len(p['manifest']['transactions']),'blocks':chain['blocks'],'manifest_hash':p['manifest_hash'],'delete_wallet':False,'local_wallets':[],'retained_signers':[],'history_method':'existing' if preserved else 'native' if sources else 'rescan','native_sources':sources,'archive_upgrade':whole}
     facts=local_facts(core,store,p);available=local_archives(core);facts.update(phase='delete',archive=None,manifest_hash=p['manifest_hash'],preservation_fingerprint=receipt(store,p),preservation_archive=p['preservation']['archive_wallet'],preservation_node=p['preservation']['node_id'],local_extinct_wallets=available,history_elsewhere_confirmation_required=not bool(available));return facts
 
 def imports(core,p,timestamp=0,only_missing=False):
@@ -222,6 +227,8 @@ def approve(owner,key,fingerprint_value=None,history_elsewhere_confirmed=False):
     try:
         if owner.store.read().get('retirement_cancel_pending',{}).get(key):return owner._cancel_result(key)
         if p['phase']=='preserve':
+            from extinct_upgrade import upgrade,preserved
+            upgrade(owner.core,owner.store,p['wallet'])
             try:readback(owner.core,p);verify_public(owner.core,p,transaction_wallet=p['wallet']);complete_history=True
             except ValueError:complete_history=False
             if not complete_history and facts.get('history_method')=='native':
@@ -235,6 +242,7 @@ def approve(owner,key,fingerprint_value=None,history_elsewhere_confirmed=False):
                 install(owner.core,owner.store,p['wallet'],rows,p['manifest'])
             elif not complete_history:imports(owner.core,p)
             readback(owner.core,p)
+            preserved(owner.core,owner.store,p)
             if owner.store.read().get('retirement_cancel_pending',{}).get(key):return owner._cancel_result(key)
             from setup_messages import sign
             message={'version':1,'kind':'wallet_retirement_preservation','request_hash':key,'operation_id':p['operation_id'],'manifest_hash':p['manifest_hash'],'archive_wallet':p['wallet'],'address_count':len(p['manifest']['addresses']),'wallet_deleted':False}
@@ -282,7 +290,9 @@ def prepare_history(core,store,key,p):
     try:
         readback(core,p);verify_public(core,p,transaction_wallet=p['wallet'])
     except ValueError:pass
-    else:return {'message':'This Extinct wallet already contains the verified history. Return to Authorise and review the preservation request; no rescan was needed.','history_ready':True}
+    else:
+        from extinct_upgrade import status as upgrade_status
+        if not upgrade_status(core,p['wallet'])['required']:return {'message':'This Extinct wallet already contains the verified history for all existing entries. Return to Authorise and review preservation; no rescan was needed.','history_ready':True}
     # Do not start a doomed genesis rescan before the guarded recovery job exists.
     from wallet_recovery import staging_timestamp,require
     imports(core,p,timestamp=staging_timestamp(core),only_missing=True)
@@ -294,7 +304,7 @@ def prepare_history(core,store,key,p):
     # newly staged descriptors use a future timestamp to avoid import rescans.
     for row in details['public_wallet']['descriptors']:row['timestamp']=0
     require(store,ident,p['wallet'],details)
-    with store.edit() as state:state['history_jobs'][ident].update(expected_private_keys=False,local_only=True)
+    with store.edit() as state:state['history_jobs'][ident].update(expected_private_keys=False,local_only=True,extinct_upgrade=True)
     # Recover the matching original wallets in the same explicitly authorised
     # node replay, so their later deletion can verify complete local coverage.
     for name in rpc(core,'listwallets'):

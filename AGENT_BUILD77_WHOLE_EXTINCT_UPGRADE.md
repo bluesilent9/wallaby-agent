@@ -1,0 +1,31 @@
+# Build 77 — whole Extinct Wallet upgrade during extinction
+
+Every version 3 preservation request checks the entire existing local Extinct Wallet, not just the active wallet named in that request. The same extinction workflow adds the newly extinct wallet's full Core transaction records and upgrades older address-and-label entries. It cannot issue a successful preservation receipt or proceed to the separate active-wallet deletion approval until both are verified. A partially completed recovery never authorises deletion.
+
+## First upgrade
+
+An older archive without locally recorded whole-history coverage is treated conservatively even if its transaction count is nonzero. Core's current balance, last-processed block and descriptor birthday alone do not establish that every historical address was scanned. All fixed-address entries are included, including entries whose original wallets no longer exist. Existing addresses, labels, exact LOST text, comments and other Core wallet records are retained.
+
+If genesis history is retained locally, approval registers every existing fixed descriptor at timestamp zero and requires successful Core historical scanning/reload. If required blocks have been pruned, review offers public history preparation. This stages the current wallet's missing public addresses without a doomed rescan and prepares one local recovery job containing ALL archive addresses and their labels, plus matching original source-wallet recovery where needed. The user separately reviews and authorises the existing This Node recovery plan. Its guarded restart/reindex registers the archive before replay, retains the existing pruning setting and supports the existing SSH-only block source mode. It does not silently begin a large Internet download from a review page.
+
+The recovery flow now reloads exact locally reviewed wallets that were loaded before restart but were not configured for startup loading. It verifies their private-key capability and descriptor identity before importing history. Remote unstaged jobs do not get this local-only reload permission. Recovery also requires a successful import result for every requested descriptor.
+
+After recovery, preservation remains a pending request for fresh review and approval. That is part of the same extinction operation; it does not create a second extinction request or automatically approve deletion. All original active wallets are retained until the existing separate, zero-funds deletion safeguards pass. No quorum or availability of every multisig signer is introduced.
+
+## Later extinction requests
+
+A successful full scan/replay records its coverage in the Core public archive itself, using an inert versioned wallet metadata record. This is scan provenance, not a separate transaction database or consensus proof. Core stores the comprehensive CWalletTx records, including historical incoming and final spending transactions. The Agent checks the provenance's checksum, address set, baseline transaction identities, active-chain anchor and the archive's current processing state. A missing/corrupt record, a missing transaction, an added uncertified address or a changed chain anchor cannot silently count as complete history.
+
+The next extinction reuses verified old history and adds independently checked native records from the newly retiring active wallet. Coverage is extended only when every existing address is accounted for. A new unverified old entry requires verification again. A wallet temporarily processing a newly arrived block produces a wait-and-review message, not a false claim that legacy history needs another full download. The record survives wallet reload, ordinary backups and a new Agent RAM workspace; a previously verified pruned archive therefore does not need another full download merely because another extinction is requested.
+
+Metadata is written only into a bounded offline backup, restored and checked by Core, then committed using the existing unloaded-wallet atomic exchange. The original public archive is kept until final readback succeeds. Late archive changes abort replacement; failures retain data for reconciliation. Exact labels and LOST text are checked after replacement. The unchanged source wallet is never deleted by preservation. This is pinned to the existing Core 31 SQLite/CWalletTx implementation and retains its size limits.
+
+The existing Wallet Server preserve/delete protocol and signed receipt schema are unchanged. No Wallet Server update is required. The receipt is sent only after the local whole-archive requirement and the current wallet's history are satisfied. Ordinary wallet sync, direct-only bulk, Agent/Mobile restrictions and original signer-role restoration remain unchanged.
+
+## Validation
+
+Real isolated Core tests exercise an old address-only entry whose original private wallet is physically removed, recovery of its incoming and final spending transactions, addition of the current active wallet, exact LOST labels and reuse with a fresh Agent Store after Core wallet reload. An explicit recovery-rescan path covers the whole archive and leaves preservation pending until its own approval. Failure, missing-transaction and added-address cases cannot claim complete coverage.
+
+A real pruned-node test removes required old block files, authorises the production recovery/reindex path, registers all old and current addresses, replays blocks into Core and verifies both histories. Only the test child launcher substitutes for systemd, and isolated RPC block delivery substitutes for Internet peers. Pruning is unchanged. The test prunes again, reloads the archive and confirms the coverage is reused without another recovery. No real laptop service, production blockchain, user wallet, physical disc or real coin was touched.
+
+Release logs also cover local reload guards, native history idempotence, rollback/cleanup guards, label preservation, separate deletion consent, direct block catch-up, the normal protected-worker QR/HTTP/direct-SSH startup and signed-result delivery. The UI test verifies one preservation approval explicitly includes the whole-archive upgrade. Installer/source parity and GitHub file hashes are audited before publication. Physical laptop restart/network testing remains separate.

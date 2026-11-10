@@ -11,6 +11,7 @@ from vendor.embit.transaction import Transaction
 MAX_BYTES=256*1024*1024
 TX_KEY=b'\x02tx'
 DESC_KEY=b'\x10walletdescriptor'
+HISTORY_KEY=b'\x12wallaby_history_v1'
 
 
 def supported(core):
@@ -143,7 +144,7 @@ def merge_backup(core,path,rows,manifest):
     return len(found)
 
 
-def install(core,store,archive,rows,manifest):
+def install(core,store,archive,rows,manifest,coverage=None):
     from peer_wallet import work_dir
     from core_ram_path import for_core
     from wallet_deletion import target,delete
@@ -158,10 +159,15 @@ def install(core,store,archive,rows,manifest):
         backup=Path(d)/'archive.dat';rpc(core,'backupwallet',[for_core(core,backup)],archive)
         # Preserve the entire old archive, including unrelated children and LOST
         # labels. Add only exact public tx records to this non-swapping copy.
-        merge_backup(core,backup,rows,manifest)
+        if rows:merge_backup(core,backup,rows,manifest)
+        if coverage is not None:
+            with database(backup,True) as db:db.execute('insert or replace into main(key,value) values(?,?)',(HISTORY_KEY,json.dumps(coverage,sort_keys=True,separators=(',',':')).encode()))
         rpc(core,'restorewallet',{'wallet_name':stage,'backup_file':for_core(core,backup),'load_on_startup':False},timeout=86400)
         try:
             check(core,stage,raw,rows,manifest)
+            if coverage is not None:
+                from extinct_upgrade import check_marker
+                check_marker(core,stage,coverage)
             before=target(core,archive,allow_extinct=True);replacement=target(core,stage,allow_extinct=True)
             # Capture a second consistent backup to detect any late wallet update
             # before replacement. Never discard newly received archive records.
@@ -169,11 +175,13 @@ def install(core,store,archive,rows,manifest):
             with database(latest) as a,database(backup) as b:
                 oldrows=dict(a.execute('select key,value from main'));merged=dict(b.execute('select key,value from main'))
                 for k,v in oldrows.items():
+                    if k==HISTORY_KEY and coverage is not None:continue
                     if k.startswith(TX_KEY) and (k not in merged or k[3:][::-1].hex() not in {r['txid'] for r in rows} and merged.get(k)!=v):raise ValueError('Archive history changed during upgrade. Original archive was retained.')
                     if not k.startswith((TX_KEY,DESC_KEY)) and merged.get(k)!=v:raise ValueError('Archive labels or metadata changed during upgrade. Original archive was retained.')
             rpc(core,'unloadwallet',{'wallet_name':archive,'load_on_startup':False});rpc(core,'unloadwallet',{'wallet_name':stage,'load_on_startup':False})
             swap(before,replacement);swapped=True
             rpc(core,'loadwallet',{'filename':archive,'load_on_startup':True},timeout=86400);check(core,archive,raw,rows,manifest)
+            if coverage is not None:check_marker(core,archive,coverage)
             # The previous complete public archive remains at stage until the
             # replacement is loaded and independently read back.
             committed=True

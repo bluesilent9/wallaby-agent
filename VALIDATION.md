@@ -1,3 +1,7 @@
+# Build 77 validation
+
+See AGENT_BUILD77_WHOLE_EXTINCT_UPGRADE.md and the accompanying Build 77 logs for whole-archive migration, real pruned-block recovery/reindex, retained LOST labels, later reuse and existing preservation/deletion safeguards.
+
 # Build 76 validation
 
 See AGENT_BUILD76_PEER_STARTUP.md and the accompanying Build 76 logs. A normal two-worker/Core/HTTP startup test reproduces the failure on original Build 75 and passes with the shared-workspace fix, including late optional initialization and direct SSH.
