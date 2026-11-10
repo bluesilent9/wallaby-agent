@@ -2,14 +2,16 @@
 """Build an Ubuntu 26.04 DEB without root or network dependencies."""
 import os,shutil,subprocess
 from pathlib import Path
+from release_check import release_version
 root=Path(__file__).resolve().parent.parent
+version,build_number=release_version(root)
 stage=root/'build/package'
 if stage.exists():shutil.rmtree(stage)
 def put(path,text,mode=0o644):
  p=stage/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text);p.chmod(mode)
 arch=subprocess.check_output(['dpkg','--print-architecture'],text=True).strip()
 put('DEBIAN/control',f'''Package: wallaby-agent
-Version: 2.0.0~dev78
+Version: {version}
 Section: utils
 Priority: optional
 Architecture: {arch}
@@ -353,7 +355,7 @@ if [ -d /sys/kernel/security/apparmor ] && command -v apparmor_parser >/dev/null
 if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q || true; fi
 exit 0
 ''',0o755)
-out=root/'dist'/f'wallaby-agent_2.0.0~dev78_{arch}.deb';out.parent.mkdir(exist_ok=True)
+out=root/'dist'/f'wallaby-agent_{version}_{arch}.deb';out.parent.mkdir(exist_ok=True)
 # Source checkout modes must not become installed group-writable code.
 for path in stage.rglob('*'):
  if path.is_symlink():raise ValueError('Unexpected package symlink.')

@@ -1,3 +1,7 @@
+# Build 79 validation
+
+This release changes version labels and adds a packaging consistency gate. The package, both windows’ shared HTML badge, worker identity, health endpoint, UI process metadata, monitor and transport header are checked for matching versions. Deliberately stale or duplicate badges and stale runtime versions must prevent packaging. Build 78 runtime behaviour is otherwise retained.
+
 # Build 78 validation
 
 Extinct history update tests use isolated Bitcoin Core 31 wallets and an authorised direct receiving socket. They cover identical addresses with missing spent-history records, repeated merges, recipient-only histories and LOST labels, signature/checksum/network/coverage rejection, legacy local evidence, restored/active owner refusal, unused addresses and empty labels. Read-only discovery summaries are bounded and independent of moving confirmation counts. Native rollback/cleanup, legacy wire compatibility, worker startup/QR pairing, progressive chain catch-up and all JavaScript suites are checked. Real optical media and production systemd installation are not exercised by these fixtures.
