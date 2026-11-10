@@ -112,6 +112,7 @@ class PrunedMigration(unittest.TestCase):
   def launch(command,*args,**kw):
    from unittest.mock import Mock
    if command[:3]==['/usr/bin/systemctl','--user','show-environment'] or command[0]=='/usr/bin/systemd-run' and command[-1]=='/usr/bin/true':return Mock(returncode=0)
+   if command[0]=='/usr/bin/systemd-run' and command[-1]=='-version':return real_run(command[command.index('--')+1:],capture_output=True,timeout=30)
    if command[0]=='/usr/bin/systemd-run':
     node.process.wait(timeout=15);arguments=command[command.index('--')+1:];node.process=subprocess.Popen(arguments+['-mocktime='+str(after)],stdout=node.log,stderr=subprocess.STDOUT);threading.Thread(target=deliver,daemon=True).start();return Mock(returncode=0)
    return real_run(command,*args,**kw)

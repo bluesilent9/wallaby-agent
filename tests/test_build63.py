@@ -15,6 +15,7 @@ class Restart(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
   self.store=Store(self.tmp.name);self.manager=Recovery(Mock(),self.store)
   with self.store.edit() as s:s['recovery']={'state':'starting'}
+  (Path(self.tmp.name)/'.lock').write_bytes(b'')
   self.launch={'pid':999999999,'started':'fixture','netdir':self.tmp.name,'argv':['/fixture/bitcoin-qt'],'executable':'/fixture/bitcoin-qt','cwd':self.tmp.name,'env':{'HOME':self.tmp.name}}
  def test_failed_launch_preflight_never_stops_core(self):
   calls=[]
@@ -31,10 +32,10 @@ class Restart(unittest.TestCase):
   order=[]
   def rpc(c,m,*a,**k):order.append(m);return {'chain':'main'}
   def run(cmd,**kw):
-   order.append('probe' if cmd[-1]=='/usr/bin/true' else 'launch');return Mock(returncode=0 if cmd[-1]=='/usr/bin/true' else 1)
+   order.append('probe' if cmd[-1]=='/usr/bin/true' else 'version' if cmd[-1]=='-version' else 'launch');return Mock(returncode=0 if cmd[-1] in ('/usr/bin/true','-version') else 1)
   with patch('wallet_recovery.process_launch',return_value=self.launch),patch('wallet_recovery.rpc',side_effect=rpc),patch('wallet_recovery.lock_released',return_value=True),patch('wallet_recovery.subprocess.run',side_effect=run):
    with self.assertRaisesRegex(ValueError,'No duplicate Core'):self.manager.restart(self.launch,['-reindex=1','-networkactive=0'])
-  self.assertEqual(order,['getblockchaininfo','probe','stop','launch']);self.assertEqual(self.manager.restart_deadline,0)
+  self.assertEqual(order,['getblockchaininfo','probe','version','stop','launch']);self.assertEqual(self.manager.restart_deadline,0)
  def test_restart_uses_journal_outside_private_ram_and_preserves_args(self):
   command=self.manager.launch_command(self.launch,['/fixture/bitcoin-qt','-datadir=/fixture','-prune=550'],'unit',True)
   self.assertIn('--wait',command);self.assertIn('--property=StandardError=journal',command)

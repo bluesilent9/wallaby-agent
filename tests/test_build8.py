@@ -181,6 +181,7 @@ class CoreBatch(unittest.TestCase):
     def launch(command,*args,**kwargs):
         if command[:3]==['/usr/bin/systemctl','--user','show-environment']:return Mock(returncode=0)
         if command[0]=='/usr/bin/systemd-run' and command[-1]=='/usr/bin/true':return Mock(returncode=0)
+        if command[0]=='/usr/bin/systemd-run' and command[-1]=='-version':return original_run(command[command.index('--')+1:],capture_output=True,timeout=30)
         if command[0]=='/usr/bin/systemd-run':
             self.sender.process.wait(timeout=10);core_args=command[command.index('--')+1:];launched.append(core_args)
             self.sender.process=subprocess.Popen(core_args,stdout=self.sender.log,stderr=subprocess.STDOUT);return Mock(returncode=0)

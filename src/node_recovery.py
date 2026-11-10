@@ -21,6 +21,15 @@ class Recovery:
         with self.lock:
             if not self.established or self.expired:return
             if self.deadline is None:self.deadline=self.clock()+SECONDS;self.failure=describe('dashboard',error)
+    def planned_rpc_restart(self):
+        # Only the owning Workspace calls this after verifying a live, locally
+        # approved Core restart. Never clear SSH/Server failures or revive expiry.
+        with self.lock:
+            if self.expired or self.deadline is not None and self.clock()>=self.deadline:return False
+            if self.failure is not None and self.failure.stage=='rpc':
+                self.deadline=None;self.failure=None
+                return True
+            return False
     def tick(self):
         with self.lock:
             if self.deadline is not None and self.clock()>=self.deadline:self.expired=True

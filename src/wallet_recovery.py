@@ -129,8 +129,11 @@ def process_launch(core):
 
 def lock_released(netdir):
     try:
-        with (Path(netdir)/'.lock').open('a') as file:
-            fcntl.lockf(file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        with (Path(netdir)/'.lock').open('rb') as file:
+            # Core holds an exclusive POSIX lock. A shared probe conflicts with
+            # that writer and works on the protected service's read-only mount.
+            # Never create/open this persistent file for writing just to inspect it.
+            fcntl.lockf(file,fcntl.LOCK_SH|fcntl.LOCK_NB)
             fcntl.lockf(file,fcntl.LOCK_UN);return True
     except BlockingIOError:return False
 
@@ -243,6 +246,19 @@ class Recovery:
         except (OSError,subprocess.TimeoutExpired):
             raise ValueError('The separate Core restart service could not be checked. Core was not stopped. Check the desktop user service manager before retrying.') from None
         if probe.returncode:raise ValueError('The separate Core restart service failed its launch check. Core was not stopped. Check the desktop user journal before retrying.')
+        # Preserve the reviewed data/config arguments: a bare version probe can
+        # otherwise consult a different default configuration. Core exits for
+        # -version before acquiring its data-directory lock or opening wallets.
+        probe_args=list(launch['argv'])+['-version']
+        try:
+            version_probe=subprocess.run(self.launch_command(launch,probe_args,unit+'-version-check',wait=True),capture_output=True,timeout=30)
+        except (OSError,subprocess.TimeoutExpired):
+            raise ValueError('The actual Core launcher could not complete its preflight. Core was not stopped. Check its Snap/desktop environment and user journal before retrying.') from None
+        if version_probe.returncode:raise ValueError('The actual Core launcher failed its preflight. Core was not stopped. Check its Snap/desktop environment and user journal before retrying.')
+        try:
+            with (Path(launch['netdir'])/'.lock').open('rb'):pass
+        except OSError:
+            raise ValueError('Core data-directory lock could not be read before restart. Core was not stopped; check local read permissions.') from None
         self.restart_deadline=time.monotonic()+900
         with self.store.edit() as saved:saved['recovery']['restart_unit']=unit
         from activity_log import event
@@ -250,12 +266,17 @@ class Recovery:
         self.update('stopping','Planned Bitcoin Core restart: waiting for a clean shutdown. The protected workspace stays open while Core restarts.')
         rpc(self.core,'stop')
         for _ in range(600):
-            if not Path('/proc',str(launch['pid'])).exists() and lock_released(launch['netdir']):break
+            exited=not Path('/proc',str(launch['pid'])).exists()
             # A child process owned by this interpreter can remain a zombie until reaped.
-            try:
-                state=Path('/proc',str(launch['pid']),'stat').read_text().rsplit(')',1)[1].split()[0]
-                if state=='Z' and lock_released(launch['netdir']):break
-            except OSError:pass
+            if not exited:
+                try:exited=Path('/proc',str(launch['pid']),'stat').read_text().rsplit(')',1)[1].split()[0]=='Z'
+                except FileNotFoundError:exited=True
+            if exited:
+                try:
+                    if lock_released(launch['netdir']):break
+                except OSError as error:
+                    event('history.restart','Read-only shutdown lock check failed · errno='+str(error.errno))
+                    raise ValueError('Core shut down, but its read-only data-directory lock check failed. No restart was launched. Keep the workspace open and inspect local permissions before starting Core manually.') from None
             time.sleep(.5)
         else:raise ValueError('Core has not finished shutting down. It was not killed or restarted.')
         # Separate user service: upgrading/restarting the Agent must never kill Core.
@@ -411,7 +432,7 @@ class Recovery:
             with self.store.edit() as saved:saved['recovery']['finished']=time.time()
         except Exception as error:
             from activity_log import event
-            event('history.recovery','Stopped · exception='+type(error).__name__+' · state='+self.store.read().get('recovery',{}).get('state','unknown'))
+            event('history.recovery','Stopped · exception='+type(error).__name__+(' · errno='+str(error.errno) if isinstance(error,OSError) else '')+' · state='+self.store.read().get('recovery',{}).get('state','unknown'))
             self.update('error',str(error) if isinstance(error,ValueError) else 'History recovery stopped with an uncertain result. Inspect Core debug.log and the desktop user journal. No wallet operation was automatically repeated and no pruning setting was changed.')
     def resume_monitor(self):
         # A UI-service restart cannot repeat shutdown, reindex, import or restore.

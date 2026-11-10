@@ -1,3 +1,7 @@
+# Build 80 validation
+
+Core restart coverage checks read-only POSIX lock probing, actual-launcher preflight with the reviewed arguments, independent launch, retained failures, live planned RPC grace and ordinary Server timeout. Isolated Bitcoin Core 31 tests exercise manual paused continuation, encrypted-wallet restoration after shutdown/reindex and whole Extinct migration after real pruning, preserving LOST labels and reusing verified coverage later. See AGENT_BUILD80_CORE_RESTART.md and the Build 80 test log. No production services/wallets or optical media are changed. Systemd launch is adapted in fixtures; installed Snap/service behaviour remains device validation.
+
 # Build 79 validation
 
 This release changes version labels and adds a packaging consistency gate. The package, both windows’ shared HTML badge, worker identity, health endpoint, UI process metadata, monitor and transport header are checked for matching versions. Deliberately stale or duplicate badges and stale runtime versions must prevent packaging. Build 78 runtime behaviour is otherwise retained.

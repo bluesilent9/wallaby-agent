@@ -219,6 +219,7 @@ class Workspace:
         with self.recovery.lock:
             failure=describe('dashboard',error);before=self.recovery_state()
             if failure.stage=='rpc' and self.planned_core_restart():
+                self.recovery.planned_rpc_restart()
                 self.node_status={'color':'amber','message':'Planned Bitcoin Core restart. Waiting for local RPC; protected workspace retained.'}
                 return
             self.recovery.lost(failure);state=self.recovery_state()
@@ -232,6 +233,8 @@ class Workspace:
         # the ordinary lifecycle confirms no operation/archive/delivery is active.
         while self.node_generation==generation:
             state=self.recovery_state()
+            if state.get('stage')=='rpc' and self.planned_core_restart():
+                self.recovery.planned_rpc_restart()
             if self.recovery.tick():
                 state=self.recovery_state()
                 from activity_log import event
