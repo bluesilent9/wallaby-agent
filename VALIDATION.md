@@ -1,3 +1,7 @@
+# Build 83 validation
+
+Real isolated Core 31 and paired direct-SSH tests cover pending recovery, running recovery, an actual receiver reindex reset followed by a pruned source clone, continued signing with the same original private key, verified Extinct transaction/LOST history, exact original-signer retirement jobs and automatic preservation continuation. Disconnect and history-verification failures retain jobs. Public scan-locator guards reject changed policy/capability, path/link/anchor changes and preserve all other database records byte-for-byte during their update. Core keypool expansion is allowed without permitting descriptor replacement or index rewind. Existing restart, history, retirement, role, relay and UI regression suites are retained. See `AGENT_BUILD83_RECOVERY_CLONE_HANDOVER.md` and the release test log for fixture substitutions and hardware limitations.
+
 # Build 82 validation
 
 Isolated real-Core/direct-SSH tests cover successful full and pruned cold cloning, actual deletion of old source blocks, subsequent complete Extinct history import without another replay, LOST labels, source restart and unchanged receiver state after disconnection, file/space/inventory guards and rollback. Existing native history, lifecycle, Core restart and progressive catch-up suites are retained. Browser checks cover the three-section layout and trusted clone confirmation. See `AGENT_BUILD82_TRUSTED_CHAIN_CLONE.md` and the release test log for scope and fixture substitutions. Production services and wallets were not exercised.

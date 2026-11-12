@@ -8,7 +8,9 @@ from pathlib import Path
 from approval_store import digest
 from wallet_ops import rpc,sats
 
-TERMINAL={'complete','error','interrupted'}
+TERMINAL={'complete','error','interrupted','clone_paused'}
+
+class ClonePaused(Exception):pass
 
 
 def persistent_wallets(core):
@@ -139,7 +141,22 @@ def lock_released(netdir):
 
 
 class Recovery:
-    def __init__(self,core,store):self.core=core;self.store=store;self.thread=None;self.lock=threading.Lock();self.cached=None;self.cache_at=0;self.restart_deadline=0
+    def __init__(self,core,store):self.core=core;self.store=store;self.thread=None;self.lock=threading.Lock();self.cached=None;self.cache_at=0;self.restart_deadline=0;self.clone_pause=threading.Event();self.clone_paused=threading.Event()
+    def request_clone_pause(self):
+        with self.lock:
+            self.clone_pause.set();self.clone_paused.clear()
+            if not self.thread or not self.thread.is_alive():
+                rpc(self.core,'setnetworkactive',[False])
+                with self.store.edit() as s:s.setdefault('recovery',{}).update(state='clone_paused',message='History recovery paused for a locally approved trusted clone. Pending jobs and extinction approval were retained.')
+                self.clone_paused.set();self.cache_at=0
+        try:rpc(self.core,'setnetworkactive',[False],timeout=3)
+        except Exception:pass # A planned restart may still be in progress; checkpoint pauses before peers resume.
+        return {'message':'Pausing history recovery at a safe boundary. Internet download is being paused; pending jobs are retained.'}
+    def clone_checkpoint(self):
+        if not self.clone_pause.is_set():return
+        rpc(self.core,'setnetworkactive',[False])
+        self.update('clone_paused','History recovery paused for trusted cloning. Existing wallets, pending history jobs and extinction approval were retained.')
+        self.clone_paused.set();raise ClonePaused()
     def state(self):
         if self.cached and time.monotonic()-self.cache_at<5:return self.cached
         saved=self.store.read();job=saved.get('recovery',{});requirements=saved.get('history_jobs',{})
@@ -152,9 +169,11 @@ class Recovery:
             red=missing or ibd
             status='Requires Blockchain Download' if red else 'Requires Rescan' if requirements or scanning or lagging else 'Synchronised'
             message='Bitcoin Core is downloading or validating blocks.' if ibd else 'Required wallet history is outside the retained blocks.' if missing else 'Wallet history needs local verification.' if requirements or scanning or lagging else 'Loaded wallet histories are current with this node’s chain.'
+            if job.get('state')=='clone_paused':
+                status='Paused for trusted clone';red=False;message='History recovery is paused. Continue in Blockchain to review the trusted clone and complete Extinct history, or explicitly review a new local recovery plan.'
             if status=='Synchronised' and any(r['proposal'].get('kind')=='wallet_retire' and r['proposal'].get('phase')=='preserve' for r in saved['pending'].values()):
                 status='Extinction review required';message='Core is caught up. Review the pending extinction to check complete archived history; the node tip alone does not prove legacy history coverage.'
-            result={'title':'This Node','status':status,'colour':'red' if red else 'amber' if status in ('Requires Rescan','Extinction review required') else 'green','message':message,'blocks':chain['blocks'],'headers':chain.get('headers',chain['blocks']),'progress':chain.get('verificationprogress'),'wallets':len(loaded),'running':job.get('state') not in TERMINAL and bool(job),'job':{k:v for k,v in job.items() if k in ('state','message','started','finished')},'can_refresh':status not in ('Synchronised','Extinction review required') and not scanning,'available':True}
+            result={'title':'This Node','status':status,'colour':'red' if red else 'amber' if status in ('Requires Rescan','Extinction review required','Paused for trusted clone') else 'green','message':message,'blocks':chain['blocks'],'headers':chain.get('headers',chain['blocks']),'progress':chain.get('verificationprogress'),'wallets':len(loaded),'running':job.get('state') not in TERMINAL and bool(job),'job':{k:v for k,v in job.items() if k in ('state','message','started','finished')},'can_refresh':status not in ('Synchronised','Extinction review required') and not scanning,'available':True}
         except Exception:result={'title':'This Node','status':'Requires Blockchain Download','colour':'red','message':'Core is unavailable or starting. Reconnect local RPC to assess its history; this does not by itself mean blocks must be downloaded again.','available':False,'can_refresh':False,'running':bool(job) and job.get('state') not in TERMINAL,'job':{k:v for k,v in job.items() if k in ('state','message','started','finished')}}
         self.cached=result;self.cache_at=time.monotonic();return result
     def plan(self):
@@ -179,6 +198,8 @@ class Recovery:
             plan['restore_network_after']=previous['plan'].get('restore_network_after',previous['plan'].get('network_was_active',True))
             if previous.get('replay_ready') and not rpc(self.core,'getnetworkinfo')['networkactive']:plan['resume_network']=True
         if mode=='download':
+            from recovery_checkpoint import capture
+            plan['clone_checkpoint']=capture(self.core,self.store)
             launch=process_launch(self.core)
             manager=subprocess.run(['/usr/bin/systemctl','--user','show-environment'],capture_output=True,timeout=10)
             if manager.returncode:raise ValueError('The user service manager is unavailable. Core was not stopped. Restart it manually with -reindex -networkactive=0, keeping your existing prune setting, then reopen the Agent to prepare wallets before enabling network activity.')
@@ -212,6 +233,7 @@ class Recovery:
             if pruning_identity(rpc(self.core,'getblockchaininfo'))!=plan['pruning']:raise ValueError('Core pruning settings changed. Review a fresh recovery plan.')
             if plan['mode']=='download' and process_launch(self.core)!=plan['launch']:raise ValueError('Core process changed. Review a fresh recovery plan.')
             with self.store.edit() as s:s['recovery']={'state':'starting','started':time.time(),'plan':plan,'message':'Locally authorised history recovery is starting.'};s.pop('recovery_plan',None)
+            self.clone_pause.clear();self.clone_paused.clear()
             self.thread=threading.Thread(target=self.run,args=(plan,),daemon=True);self.thread.start();return {'ok':True}
     def update(self,state,message):
         with self.store.edit() as s:s['recovery'].update(state=state,message=message)
@@ -381,23 +403,29 @@ class Recovery:
             with self.store.edit() as saved:
                 saved['history_jobs'][key].update(registered_for_replay=True,monitor_wallets=monitors)
         with self.store.edit() as saved:saved['recovery']['replay_ready']=True
+        self.clone_checkpoint()
         rpc(self.core,'setnetworkactive',[not plan.get('ssh_only',False)])
         self.update('downloading','Wallets and vaults are registered. Downloading and recording history while keeping the existing pruning settings.')
     def run(self,plan):
         try:
+            self.clone_checkpoint()
             if plan['mode']=='download':self.restart(plan['launch'],['-reindex=1','-networkactive=0'])
             if plan.get('replay'):self.prepare_replay(plan)
             else:
                 if plan.get('resume_network') and not plan.get('ssh_only'):rpc(self.core,'setnetworkactive',[True])
                 self.update('downloading' if plan['mode']=='monitor' else 'rescanning','Waiting for the local blockchain and wallet histories. Pruning settings are unchanged.')
             while True:
+                self.clone_checkpoint()
                 chain=self.wait_rpc()
+                self.clone_checkpoint()
                 if plan.get('ssh_only') and self.store.read().get('chain_sync',{}).get('mode')=='ssh_only' and rpc(self.core,'getnetworkinfo')['networkactive']:rpc(self.core,'setnetworkactive',[False])
                 if pruning_identity(chain)!=plan['pruning']:raise ValueError('Core pruning settings changed during recovery. Recovery stopped for local review.')
                 if not chain.get('initialblockdownload') and chain.get('headers',chain['blocks'])==chain['blocks'] and chain['blocks']>=plan['target_height']:break
-                time.sleep(5)
+                self.clone_pause.wait(5)
+            self.clone_checkpoint()
             processed=set()
             for key,job in self.store.read().get('history_jobs',{}).items():
+                self.clone_checkpoint()
                 name=job['wallet'];stage=job.get('staged')
                 if job.get('registered_for_replay'):
                     # Core scanned these wallets as blocks arrived, before pruning.
@@ -436,6 +464,7 @@ class Recovery:
             finish(self.core,self.store)
             self.update('complete','History recovery completed. Wallet and vault history is stored in Core. The original pruning settings were kept throughout.')
             with self.store.edit() as saved:saved['recovery']['finished']=time.time()
+        except ClonePaused:return
         except Exception as error:
             from activity_log import event
             event('history.recovery','Stopped · exception='+type(error).__name__+(' · errno='+str(error.errno) if isinstance(error,OSError) else '')+' · state='+self.store.read().get('recovery',{}).get('state','unknown'))

@@ -265,7 +265,7 @@ class PublicFailureWireTests(unittest.TestCase):
     call.assert_called_once();result=post.call_args.args[1];self.assertEqual(result['error']['code'],'local_rpc_response_limit');self.assertEqual(result['error']['data'],{'stage':'rpc','category':'response_limit','method':'getrawmempool'});self.assertNotIn('MUST NOT LEAK',json.dumps(result));event.assert_called_once_with('rpc.getrawmempool','Local public RPC failed · response_limit')
    finally:client.pool.shutdown()
 
-class Wallet ServerReceiptFixture(unittest.TestCase):
+class DashboardReceiptFixture(unittest.TestCase):
  def test_actual_receipt_method_completes_delivery_while_local_choice_is_pending(self):
   import contextlib,importlib.util
   fixture=Path(__file__).parent/'fixtures/dashboard_builder_cancel_v1.py';spec=importlib.util.spec_from_file_location('cancel_receipt_fixture',fixture);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);module.storage_lock=lambda _:contextlib.nullcontext();module.stamp=lambda:'UTC fixture'

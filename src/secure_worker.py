@@ -85,7 +85,7 @@ class Workspace:
             agent_exchange.LOCAL_ARCHIVES=self.archive_ops
             agent_exchange.LOCAL_BROADCASTS=self.broadcasts
         if getattr(getattr(self,'peers',None),'blocks',None):
-            self.peers.blocks.core=self.ops.core;self.peers.blocks.clones.core=self.ops.core
+            self.peers.blocks.core=self.ops.core;self.peers.blocks.clones.core=self.ops.core;self.peers.blocks.clones.recovery=self.transfer.recovery
         self.start_peer_support()
         self.setup.environment=self.environment
         if getattr(self,'archives',None):self.archives.environment=self.environment
@@ -107,6 +107,8 @@ class Workspace:
                 from block_download import Blocks
                 candidate.blocks=Blocks(candidate,self.store,self.ops.core)
                 candidate.blocks.clones.operation_lock=self.lock
+                candidate.blocks.clones.recovery=self.transfer.recovery
+                candidate.blocks.clones.handoff_guard=lambda:bool(self.busy(ignore_history=True) or self.archives.loaded or self.archives.staged or self.ops.prepared)
                 candidate.blocks.clones.guard=lambda:bool(self.busy() or self.archives.loaded or self.archives.staged or self.ops.prepared)
                 with self.lock:
                     if self.closing:
@@ -141,7 +143,7 @@ class Workspace:
     def rename_reconcile_guard(self,key):
         enforce()
         if self.busy(ignore_rename=key) or self.archives.reading or self.ops.prepared:raise ValueError('Finish other active wallet work before reconciling this rename.')
-    def busy(self,ignore_rename=None,public_reads=False):
+    def busy(self,ignore_rename=None,public_reads=False,ignore_history=False):
         s=self.store.read();archives=getattr(self,'archive_ops',None)
         archive_busy=bool(archives and (any(v['phase'] not in ('queued','complete') for v in archives.jobs.values()) if public_reads else archives.busy()))
         sessions=getattr(self.setup,'sessions',{}) if self.setup else {}
@@ -154,10 +156,10 @@ class Workspace:
         setup_reserved=bool(active and (active not in sessions or sessions[active]['phase'] not in ('contributed','awaiting_disc','complete')))
         return bool((not public_reads and (s.get('block_download',{}).get('running') or getattr(getattr(getattr(getattr(self,'peers',None),'blocks',None),'clones',None),'running',False) or getattr(getattr(getattr(self,'peers',None),'blocks',None),'serving',{}))) or archive_busy or setup_busy or writing or (not public_reads and getattr(self,'public_reviews',None) and self.public_reviews.active) or (not public_reads and getattr(self,'broadcasts',None) and self.broadcasts.active) or public_reads and setup_reserved or
             (not public_reads and any(v['proposal']['kind'] in ('destroy_disc','archive_cancel','builder_cancel') for v in s['pending'].values())) or
-            self.archives and self.archives.reading or s.get('history_jobs') or
+            self.archives and self.archives.reading or (s.get('history_jobs') and not ignore_history) or
             any(k!=ignore_rename and row['proposal']['kind']=='wallet_rename' and row['state']!='pending' for k,row in s['pending'].items()) or
             getattr(self.transfer,'sending',False) or s.get('sync_batch') or s.get('active_transfer') or
-            s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'))
+            (not ignore_history and s.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning')))
     def public_rpc(self,ident,name,params,wallet,timeout):
         """One read-only gate for terminal bridge and Wallet Server execution threads."""
         from agent_rpc import request
@@ -402,7 +404,7 @@ class Workspace:
             if len(args)!=2 or not isinstance(args[0],str) or not isinstance(args[1],dict):raise ValueError('Invalid local peer control.')
             enforce();self.configure(environment)
             clones=getattr(getattr(getattr(self,'peers',None),'blocks',None),'clones',None)
-            if clones and clones.running and args[0] not in ('status','block-status'):raise ValueError('Finish trusted cloning before changing direct connections or synchronisation controls.')
+            if clones and (clones.running or clones.preparing) and args[0] not in ('status','block-status'):raise ValueError('Finish trusted cloning before changing direct connections or synchronisation controls.')
             return self.peer_action(*args)
         with self.lock:
             enforce();self.configure(environment)
@@ -412,7 +414,7 @@ class Workspace:
             if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
             saved=self.store.read()
             clones=getattr(getattr(getattr(self,'peers',None),'blocks',None),'clones',None)
-            if clones and clones.running and method not in ('status','core.public','core.health','ui.arm','ui.open','ui.close','node.start','exchange','disc.drives'):raise ValueError('Trusted blockchain cloning is active. Wait for Core restart and wallet checks before changing wallets, recovery or Internet peers.')
+            if clones and (clones.running or clones.preparing) and method not in ('status','core.public','core.health','ui.arm','ui.open','ui.close','node.start','exchange','disc.drives'):raise ValueError('Trusted blockchain cloning is active. Wait for Core restart and wallet checks before changing wallets, recovery or Internet peers.')
             if getattr(getattr(self,'public_reviews',None),'active',None) and method not in ('status','authorise.review','authorise.deny','lifecycle.deny','lifecycle.cancel','core.public','core.health','ui.arm','ui.open','node.start','exchange','disc.drives','disc.status','disc.probe'):
                 raise ValueError('A read-only policy review is checking local funding. Wait before changing wallets or disc contents; status and public inventory remain available.')
             changing=method in ('refresh.destroyed','rename.approve','rename.reconcile','wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm','cancel.reconcile')

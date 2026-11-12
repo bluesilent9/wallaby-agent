@@ -14,7 +14,7 @@ from runtime import apply_config, worker
 from transport import ssh_command
 
 
-class Wallet ServerAccessTests(unittest.TestCase):
+class DashboardAccessTests(unittest.TestCase):
     def test_existing_v2_settings_keep_ddns_and_node_choices_dashboard_off(self):
         for ddns in (False, True):
             for node in (False, True):

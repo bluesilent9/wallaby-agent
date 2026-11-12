@@ -144,11 +144,27 @@ def receive_snapshot(root,stream,hello):
     except BaseException:
         shutil.rmtree(stage);raise
 
+def retained_descriptors(before,after):
+    """Core may top up a keypool on reopen; it must never narrow or rewind it."""
+    from build8_policy import descriptors
+    if before.get('wallet_name')!=after.get('wallet_name') or descriptors(before)!=descriptors(after):return False
+    old={r['desc']:r for r in before['descriptors']};new={r['desc']:r for r in after['descriptors']}
+    for desc,row in old.items():
+        current=new[desc]
+        if {k:v for k,v in row.items() if k not in ('range','next','next_index')}!={k:v for k,v in current.items() if k not in ('range','next','next_index')}:return False
+        if 'range' in row:
+            r=current.get('range')
+            if not r or r[0]>row['range'][0] or r[1]<row['range'][1]:return False
+        elif 'range' in current:return False
+        if current.get('next',current.get('next_index',0))<row.get('next',row.get('next_index',0)):return False
+    return True
+
+
 def receive_clone(root,core,stream,review):
     guard_layout(root,core,receiver=True);before={**rpc(core,'getblockchaininfo'),'core_version':rpc(core,'getnetworkinfo')['version']};node=ColdNode(core,root);node.chain=before['chain']
     frame_write(stream,{'status':'clone_receiver_ready'});hello=frame_read(stream)
     from chain_clone import compatible
-    compatible(before,hello)
+    compatible(before,hello,review.get('recovery_floor'))
     if hello['hash']!=review['hash']:raise CloneError('Snapshot differs from the reviewed source tip.')
     stage=receive_snapshot(root,stream,hello)
     try:
@@ -156,20 +172,28 @@ def receive_clone(root,core,stream,review):
         # at this point cannot silently commit a partial or unacknowledged clone.
         if frame_read(stream)!={'operation':'clone_commit','hash':hello['hash']}:raise CloneError('Clone commit was not confirmed.')
         now={**rpc(core,'getblockchaininfo'),'core_version':rpc(core,'getnetworkinfo')['version']}
-        compatible(now,hello)
+        compatible(now,hello,review.get('recovery_floor'))
         if rpc(core,'getnetworkinfo')['networkactive']:raise CloneError('Receiver Internet peers resumed during clone staging.')
         wallets={n:{'descriptors':rpc(core,'listdescriptors',[False],n),'txcount':rpc(core,'getwalletinfo',[],n)['txcount']} for n in rpc(core,'listwallets')}
-        node.stop();install(root,stage)
+        from clone_wallet_checkpoint import modify
+        node.stop();undo=[]
+        try:
+            undo=modify(root,review.get('wallet_checkpoints',[]));install(root,stage)
+        except BaseException:
+            if undo:modify(root,list(reversed(undo)),undo=True)
+            raise
         try:
             actual=node.start()
             if actual['bestblockhash']!=hello['hash'] or actual['blocks']!=hello['height'] or bool(actual.get('pruned'))!=bool(before.get('pruned')):raise CloneError('Cloned Core did not reopen the exact reviewed chain and pruning mode.')
             for name,old in wallets.items():
                 if name not in rpc(core,'listwallets'):rpc(core,'loadwallet',{'filename':name,'load_on_startup':True},timeout=600)
-                if rpc(core,'listdescriptors',[False],name)!=old['descriptors'] or rpc(core,'getwalletinfo',[],name)['txcount']<old['txcount']:raise CloneError('A receiver wallet did not retain its descriptors and transaction records.')
+                actual_descriptors=rpc(core,'listdescriptors',[False],name)
+                if not retained_descriptors(old['descriptors'],actual_descriptors):raise CloneError('A receiver wallet changed its policy or rewound its address range after Core restart.')
+                if rpc(core,'getwalletinfo',[],name)['txcount']<old['txcount']:raise CloneError('A receiver wallet did not retain its transaction records.')
         except BaseException:
             # If Core is live, stop it cleanly before restoring the old directories.
             try:
-                node=ColdNode(core,root);node.chain=before['chain'];node.stop();rollback(root,stage);node.start()
+                node=ColdNode(core,root);node.chain=before['chain'];node.stop();modify(root,list(reversed(undo)),undo=True);rollback(root,stage);node.start()
             except Exception:raise CloneError('Clone startup could not be verified. Original blockchain backup is retained in the clone staging directory. Inspect Core locally before further changes.') from None
             raise
         write_journal(stage,{'phase':'complete','tip':hello['hash']});shutil.rmtree(stage);syncdir(root)
@@ -189,7 +213,9 @@ class Handler(socketserver.BaseRequestHandler):
             group=Path('/proc',str(pid),'cgroup').read_text().splitlines();expected='/wallaby-agent-secure@'+str(os.getuid())+'.service'
             if uid!=os.getuid() or not any(line.startswith('0::/system.slice/') and line.endswith(expected) for line in group):return
             r=frame_read(stream)
-            if set(r)!={'mode','netdir','hash','restore_network'} or type(r['restore_network']) is not bool or r['mode'] not in ('export','receive') or not isinstance(r['hash'],str) or not re.fullmatch('[0-9a-f]{64}',r['hash']):raise CloneError('Invalid local cold-clone request.')
+            if set(r)!={'mode','netdir','hash','restore_network','recovery_floor','wallet_checkpoints'} or type(r['restore_network']) is not bool or r['mode'] not in ('export','receive') or not isinstance(r['hash'],str) or not re.fullmatch('[0-9a-f]{64}',r['hash']):raise CloneError('Invalid local cold-clone request.')
+            if r['recovery_floor'] is not None and (type(r['recovery_floor']) is not int or not 0<=r['recovery_floor']<=2**31):raise CloneError('Invalid locally reviewed recovery checkpoint.')
+            if not isinstance(r['wallet_checkpoints'],list) or r['mode']=='export' and r['wallet_checkpoints']:raise CloneError('Wallet scan checkpoints are local receiving recovery metadata only.')
             root=safe_root(r['netdir']);core=checked_core(root)
             (export if r['mode']=='export' else receive_clone)(root,core,stream,r)
         except Exception as error:

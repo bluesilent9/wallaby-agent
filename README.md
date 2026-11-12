@@ -2,9 +2,11 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** Private keys and passphrases are never sent to the Wallet Server. Policy installation and refresh temporarily handle private descriptors inside the protected local worker; signing unlocks the selected Core wallet. Those protections do not remove the risk of a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 82
+# Wallaby Agent V2 — Development Build 83
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
+
+Build 83 supports receiving the Extinct wallet first, starting its required history recovery, then switching pending or running recovery to a trusted direct-SSH blockchain clone. It retains the pending jobs and verifies the accompanying public Extinct history against Core before completing them. Original signing wallets stay local and old-wallet deletion still needs separate approval. Install on both Agents. [Workflow, safeguards and validation](AGENT_BUILD83_RECOVERY_CLONE_HANDOVER.md).
 
 Build 82 adds locally approved trusted cold blockchain cloning over paired direct SSH, first-time complete Extinct archive imports without replaying pruned history, and a Synchronisation page organised into Wallets, Blockchain and Local history. Receiver wallets, keys, labels and richer history stay local; full/pruned compatibility and current-chain ownership checks remain enforced. Install on both Agents. Uses existing Wallet Server signalling; no Server update is required. [Australia workflow, safeguards and tests](AGENT_BUILD82_TRUSTED_CHAIN_CLONE.md).
 
