@@ -59,7 +59,7 @@ class WholeArchive(ExtinctionRecovery):
    if method=='getblockchaininfo':result=dict(result,pruned=True,pruneheight=100)
    return result
   with patch('extinct_upgrade.rpc',side_effect=pruned):
-   facts=Retirement(self.core,self.store).review(self.key)['retirement'];self.assertTrue(facts['history_required']);self.assertIn('every existing address',facts['message'])
+   facts=Retirement(self.core,self.store).review(self.key)['retirement'];self.assertTrue(facts['history_required']);self.assertIn('whole-history verification record',facts['message'])
    result=prepare_history(self.core,self.store,self.key,self.p);self.assertTrue(result['history_prepared'])
   job=self.store.read()['history_jobs'][digest({'local_retirement_history':self.key})];self.assertTrue(job['extinct_upgrade']);self.assertTrue(all(r['timestamp']==0 for r in job['details']['public_wallet']['descriptors']))
   self.assertEqual(len(job['details']['public_wallet']['descriptors']),1+len(self.p['manifest']['addresses']))
@@ -99,7 +99,7 @@ class PrunedMigration(unittest.TestCase):
   height=rpc(core,'getblockcount');blocks=[rpc(core,'getblock',[rpc(core,'getblockhash',[h]),0]) for h in range(1,height+1)]
   boundary=rpc(core,'pruneblockchain',[height-288]);self.assertGreater(boundary,105)
   with self.assertRaises(ValueError):rpc(core,'getblock',[rpc(core,'getblockhash',[1]),0])
-  manager=Retirement(core,store);self.assertTrue(manager.review(key)['retirement']['history_required']);prepare_history(core,store,key,p)
+  manager=Retirement(core,store);self.assertTrue(manager.review(key)['retirement']['history_required']);manager.prepare_history(key)
   recovery=Recovery(core,store);original=pruning_identity(rpc(core,'getblockchaininfo'));real_run=subprocess.run;replayed=[];deadline=time.monotonic()+180
   def deliver():
    try:
@@ -122,7 +122,7 @@ class PrunedMigration(unittest.TestCase):
   for tx in oldtx:self.assertGreater(rpc(core,'gettransaction',[tx,True],'Wallaby Extinct')['confirmations'],0)
   self.assertEqual(rpc(core,'getaddressinfo',[gone],'Wallaby Extinct')['labels'],[label]);self.assertFalse(status(core,'Wallaby Extinct')['required']);self.assertIn('Old',rpc(core,'listwallets'))
   with patch('wallet_recovery.Recovery.register_watch_history',side_effect=AssertionError('Verified archive must not reindex again')):
-   manager.review(key);manager.approve(key)
+   self.assertNotIn(key,store.read()['pending']);self.assertTrue(store.read()['completed'][key]['result']['history_verified']);self.assertFalse(store.read()['completed'][key]['result']['wallet_deleted'])
   rpc(core,'pruneblockchain',[height-288]);rpc(core,'unloadwallet',['Wallaby Extinct']);rpc(core,'loadwallet',['Wallaby Extinct']);self.assertFalse(status(core,'Wallaby Extinct')['required']);readback(core,p)
 
 class RecoveryReload(unittest.TestCase):

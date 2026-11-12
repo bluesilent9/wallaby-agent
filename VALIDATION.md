@@ -1,3 +1,7 @@
+# Build 81 validation
+
+See AGENT_BUILD81_EXTINCTION_CONTINUATION.md and the Build 81 logs for automatic preservation after recovery, whole pruned legacy upgrade, LOST labels, all-record deletion comparisons, separate consent and missing-signer safeguards. Existing data is not certified merely from a current node tip or transaction count. Tests use isolated Core 31 nodes, not production wallets.
+
 # Build 80 validation
 
 Core restart coverage checks read-only POSIX lock probing, actual-launcher preflight with the reviewed arguments, independent launch, retained failures, live planned RPC grace and ordinary Server timeout. Isolated Bitcoin Core 31 tests exercise manual paused continuation, encrypted-wallet restoration after shutdown/reindex and whole Extinct migration after real pruning, preserving LOST labels and reusing verified coverage later. See AGENT_BUILD80_CORE_RESTART.md and the Build 80 test log. No production services/wallets or optical media are changed. Systemd launch is adapted in fixtures; installed Snap/service behaviour remains device validation.

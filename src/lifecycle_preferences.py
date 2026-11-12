@@ -31,7 +31,7 @@ def deny(store,key):
         if p['kind']=='wallet_retire' and p.get('version')==3:payload.update(phase=p['phase'],manifest_hash=p['manifest_hash'])
         result={'kind':'wallet_retirement_result' if purpose=='extinction' else 'wallet_transfer_result','payload':payload};saved['outbox'][digest(result)]=result
         for k,item in list(saved['pending'].items()):
-            if item['state']=='pending' and intent(saved,item['proposal'])==value:saved['pending'].pop(k);saved.get('sync_choices',{}).pop(k,None)
+            if item['state']=='pending' and intent(saved,item['proposal'])==value:saved['pending'].pop(k);saved.get('sync_choices',{}).pop(k,None);saved.get('retirement_continuations',{}).pop(k,None)
     return {'message':purpose.title()+' requests for this exact public wallet policy are denied on this Agent across restarts. Remove the entry from the deny list to allow them again.'}
 
 
@@ -46,5 +46,5 @@ def cancel(store,key):
     with store.edit() as saved:
         row=saved['pending'].get(key)
         if not row or row['state']!='pending' or not intent(saved,row['proposal']) or saved.get('active_transfer') or saved.get('sync_batch'):raise ValueError('Only an unattempted inactive lifecycle request can be cancelled.')
-        saved['pending'].pop(key);saved.get('sync_choices',{}).pop(key,None)
+        saved['pending'].pop(key);saved.get('sync_choices',{}).pop(key,None);saved.get('retirement_continuations',{}).pop(key,None)
     return {'message':'Request dismissed locally without a deny entry. It may return while Wallet Server still requests it. Existing wallet data was retained.'}

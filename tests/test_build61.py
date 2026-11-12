@@ -17,7 +17,7 @@ class LocalArchiveDetection(unittest.TestCase):
   with patch('retirement_phases.rpc',side_effect=call),patch('retirement_phases.address_only',side_effect=lambda raw:not raw['descriptors']):self.assertEqual(local_archives(object()),['Extinct'])
  def test_deletion_review_reports_archive_absence_from_local_core(self):
   p={'phase':'delete','manifest_hash':'manifest','preservation':{'archive_wallet':'Remote Extinct','node_id':'remote'}}
-  with patch('retirement_phases.validate'),patch('retirement_phases.check_chain'),patch('retirement_phases.local_facts',side_effect=lambda *a:{}),patch('retirement_phases.receipt',return_value='SHA256:verified'):
+  with patch('retirement_phases.validate'),patch('retirement_phases.check_chain'),patch('retirement_phases.local_facts',side_effect=lambda *a:{}),patch('retirement_phases.receipt',return_value='SHA256:verified'),patch('retirement_evidence.compare',side_effect=lambda core,p,facts,names:{'verified':bool(names)}):
    for names,required in (([],True),(['Local Extinct'],False)):
     with patch('retirement_phases.local_archives',return_value=names):
      f=review(object(),object(),p);self.assertEqual(f['history_elsewhere_confirmation_required'],required);self.assertEqual(f['local_extinct_wallets'],names)
@@ -30,11 +30,11 @@ class LocalConsent(unittest.TestCase):
  def attempt(self,confirmed=False,pin='SHA256:verified'):
   with patch('retirement_phases.validate',return_value=self.p),patch('retirement_phases.review',return_value=copy.deepcopy(self.f)):
    return approve(self.owner,self.key,pin,confirmed)
- def test_absent_archive_requires_explicit_true_before_attempt(self):
-  for value in (False,None,1,'yes'):
+ def test_absent_archive_warning_needs_no_additional_checkbox(self):
+  for value in (None,1,'yes'):
    with self.assertRaises(ValueError):self.attempt(value)
    self.assertEqual(self.store.read()['pending'][self.key]['state'],'pending')
-  self.assertEqual(self.attempt(True),{'cancelled':True})
+  self.assertEqual(self.attempt(False),{'cancelled':True})
  def test_checkbox_does_not_replace_independent_agent_fingerprint(self):
   with self.assertRaisesRegex(ValueError,'fingerprint'):self.attempt(True,'SHA256:untrusted')
   self.assertEqual(self.store.read()['pending'][self.key]['state'],'pending')

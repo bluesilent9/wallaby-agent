@@ -128,16 +128,30 @@ class Retirement:
             if p.get('version')==3:
                 from retirement_phases import review
                 facts=review(self.core,self.store,p)
+                if facts.get('existing_preservation_verified'):
+                    from retirement_phases import report_existing
+                    facts=report_existing(self,key,p,facts)
             else:facts=inventory(self.core,self.store,p)
         except MissingHistory as error:
             ident=digest({'local_retirement_history':key});job=self.store.read().get('history_jobs',{}).get(ident)
-            return {'kind':'wallet_retire','id':key,'retirement':{'wallet':p['wallet'],'history_required':True,'history_preparation_imports':p.get('phase')=='preserve','history_prepared':job is not None,'message':'History recovery is prepared. Open Synchronisation and review This Node before returning to this request.' if job else str(error)}}
+            present={}
+            if p.get('phase')=='preserve':
+                info=rpc(self.core,'getwalletinfo',[],p['wallet'])
+                present={'existing_transactions':info.get('txcount',0)}
+            return {'kind':'wallet_retire','id':key,'retirement':{'wallet':p['wallet'],'history_required':True,'history_preparation_imports':p.get('phase')=='preserve','history_prepared':job is not None,'continuation_authorised':self.store.read().get('retirement_continuations',{}).get(key,{}).get('state')=='authorised','message':'History recovery is prepared. Open Synchronisation and review This Node before returning to this request.' if job else str(error),**present}}
         self.reviews[key]=(facts,time.time());return {'kind':'wallet_retire','id':key,'retirement':facts}
     def prepare_history(self,key):
         p=self.store.read()['pending'][key]['proposal']
         if p.get('version')==3 and p['phase']=='preserve':
             from retirement_phases import prepare_history
-            return prepare_history(self.core,self.store,key,p)
+            result=prepare_history(self.core,self.store,key,p)
+            from retirement_continuation import authorise,finish
+            authorise(self.store,key,p)
+            if result.get('history_ready'):
+                finish(self.core,self.store)
+                return {'message':'History verified and preservation completed. Waiting for the separate deletion request; original wallets remain intact.','preservation_complete':True}
+            result['message']='Extinction preservation is authorised. Authorise This Node recovery on Synchronisation; after it finishes, preservation will complete automatically. Deletion still requires a separate local approval.'
+            return result
         if p.get('version')==3:
             from retirement_phases import internal
             original=p;p=internal(p,p['wallet'],p['delete_wallets'])
@@ -174,10 +188,12 @@ class Retirement:
         result=self.result_fields(key,{'request_hash':key,'status':'cancelled','message':'Retirement authorisation withdrawn before wallet deletion. Existing wallet data was retained.'})
         self.queue_result(key,result)
         with self.store.edit() as state:
-            state['pending'].pop(key,None);state.setdefault('cancelled_requests',{})[key]='retirement';state['completed'][key]={'kind':'wallet_retire','at':time.time(),'result':result};state.get('retirement_cancel_pending',{}).pop(key,None)
+            state['pending'].pop(key,None);state.get('retirement_continuations',{}).pop(key,None);state.setdefault('cancelled_requests',{})[key]='retirement';state['completed'][key]={'kind':'wallet_retire','at':time.time(),'result':result};state.get('retirement_cancel_pending',{}).pop(key,None)
         self.reviews.pop(key,None)
         return {'message':result['message']}
     def approve(self,key,fingerprint=None,history_elsewhere_confirmed=False):
+        done=self.store.read()['completed'].get(key,{}).get('result',{})
+        if done.get('phase')=='preserve' and done.get('status')=='complete' and done.get('history_verified') is True:return {'message':'Existing history was already independently verified. Waiting for separate deletion approval; original wallets remain intact.'}
         self.active.add(key)
         try:
             if self.store.read()['pending'][key]['proposal'].get('version')==3:

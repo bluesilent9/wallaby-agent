@@ -152,7 +152,9 @@ class Recovery:
             red=missing or ibd
             status='Requires Blockchain Download' if red else 'Requires Rescan' if requirements or scanning or lagging else 'Synchronised'
             message='Bitcoin Core is downloading or validating blocks.' if ibd else 'Required wallet history is outside the retained blocks.' if missing else 'Wallet history needs local verification.' if requirements or scanning or lagging else 'Loaded wallet histories are current with this node’s chain.'
-            result={'title':'This Node','status':status,'colour':'red' if red else 'amber' if status=='Requires Rescan' else 'green','message':message,'blocks':chain['blocks'],'headers':chain.get('headers',chain['blocks']),'progress':chain.get('verificationprogress'),'wallets':len(loaded),'running':job.get('state') not in TERMINAL and bool(job),'job':{k:v for k,v in job.items() if k in ('state','message','started','finished')},'can_refresh':status!='Synchronised' and not scanning,'available':True}
+            if status=='Synchronised' and any(r['proposal'].get('kind')=='wallet_retire' and r['proposal'].get('phase')=='preserve' for r in saved['pending'].values()):
+                status='Extinction review required';message='Core is caught up. Review the pending extinction to check complete archived history; the node tip alone does not prove legacy history coverage.'
+            result={'title':'This Node','status':status,'colour':'red' if red else 'amber' if status in ('Requires Rescan','Extinction review required') else 'green','message':message,'blocks':chain['blocks'],'headers':chain.get('headers',chain['blocks']),'progress':chain.get('verificationprogress'),'wallets':len(loaded),'running':job.get('state') not in TERMINAL and bool(job),'job':{k:v for k,v in job.items() if k in ('state','message','started','finished')},'can_refresh':status not in ('Synchronised','Extinction review required') and not scanning,'available':True}
         except Exception:result={'title':'This Node','status':'Requires Blockchain Download','colour':'red','message':'Core is unavailable or starting. Reconnect local RPC to assess its history; this does not by itself mean blocks must be downloaded again.','available':False,'can_refresh':False,'running':bool(job) and job.get('state') not in TERMINAL,'job':{k:v for k,v in job.items() if k in ('state','message','started','finished')}}
         self.cached=result;self.cache_at=time.monotonic();return result
     def plan(self):
@@ -428,6 +430,10 @@ class Recovery:
                 info=rpc(self.core,'getwalletinfo',[],name)
                 if info.get('scanning') or info.get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('A wallet has not finished processing the recovered chain.')
             if plan.get('restore_network_after') is False and (not plan.get('ssh_only') or self.store.read().get('chain_sync',{}).get('mode')=='ssh_only'):rpc(self.core,'setnetworkactive',[False])
+            # Only a local approval recorded for this exact pending proposal may
+            # finish preservation. Coverage alone never grants deletion consent.
+            from retirement_continuation import finish
+            finish(self.core,self.store)
             self.update('complete','History recovery completed. Wallet and vault history is stored in Core. The original pruning settings were kept throughout.')
             with self.store.edit() as saved:saved['recovery']['finished']=time.time()
         except Exception as error:

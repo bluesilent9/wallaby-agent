@@ -42,7 +42,6 @@ class RealPhasedRetirement(unittest.TestCase):
    coldtargets=[{'wallet':'Watch','public_wallet':rpc(remote,'listdescriptors',[False],'Watch'),'private_keys_enabled':False}]
    deletion=proposal(raw,p['manifest'],'delete','Watch',coldtargets,proof(p,key,first));other.receive(deletion);r=Retirement(remote,other);k=digest(deletion);facts=r.review(k)['retirement'];pin=facts['preservation_fingerprint']
    self.assertTrue(facts['history_elsewhere_confirmation_required']);self.assertEqual(facts['local_extinct_wallets'],[])
-   with self.assertRaisesRegex(ValueError,'No Extinct wallet'):r.approve(k,pin)
    self.assertEqual(other.read()['pending'][k]['state'],'pending')
    with self.assertRaisesRegex(ValueError,'fingerprint'):r.approve(k)
    # A new unconfirmed deposit is sufficient to stop a reviewed deletion.

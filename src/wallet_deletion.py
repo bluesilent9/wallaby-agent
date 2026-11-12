@@ -1,8 +1,10 @@
 #!/usr/bin/python3
 """Narrow, unprivileged filesystem exception: unlink approved unloaded wallets.
 
-No wallet bytes are read, copied or written. Only the protected worker may call
-this service. The worker checks Core history, policy, balances and archive first.
+Deletion never reads or copies wallet contents. The separate archive-swap action
+reads unloaded public-only databases to validate their capabilities before an
+atomic exchange. Only the protected worker may call this service. The worker
+checks Core history, policy, balances and archive first.
 """
 import fcntl,json,os,socket,socketserver,stat,struct,sys
 from pathlib import Path

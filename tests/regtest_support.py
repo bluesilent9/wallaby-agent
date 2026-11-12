@@ -5,13 +5,21 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 from node_client import Core
 from wallet_ops import rpc
 
+class FixtureCore(Core):
+    def call(self,ident,method,params,wallet=None,timeout=30):
+        # Mining a maturity batch is fixture setup, not an Agent operation.
+        # Slow/contended test disks can take more than the normal RPC budget.
+        # Do not change production RPC timeouts or any non-mining call.
+        if method=='generatetoaddress':timeout=max(timeout,180)
+        return super().call(ident,method,params,wallet,timeout)
+
 class Regtest:
     def __init__(self,extra_args=()):
         self.root=tempfile.TemporaryDirectory(prefix='wallaby-regtest-');p=Path(self.root.name)
         with socket.socket(socket.AF_INET6,socket.SOCK_STREAM) as s:s.bind(('::1',0));port=s.getsockname()[1]
         binary=os.environ.get('WALLABY_TEST_BITCOIND','/tmp/wallaby-core31-test/bitcoin-31.0/bin/bitcoind')
-        self.log=(p/'process.log').open('w');self.process=subprocess.Popen([binary,'-regtest','-server','-listen=0','-connect=0','-dnsseed=0','-discover=0','-txindex=1','-fallbackfee=0.00002','-datadir='+str(p),'-rpcbind=[::1]','-rpcallowip=::1','-onlynet=ipv6','-rpcport='+str(port)]+list(extra_args),stdout=self.log,stderr=subprocess.STDOUT)
-        self.core=Core({'rpc_port':port,'cookie':str(p/'regtest/.cookie')})
+        self.log=(p/'process.log').open('w');self.process=subprocess.Popen([binary,'-regtest','-unsafesqlitesync=1','-server','-listen=0','-connect=0','-dnsseed=0','-discover=0','-txindex=1','-fallbackfee=0.00002','-datadir='+str(p),'-rpcbind=[::1]','-rpcallowip=::1','-onlynet=ipv6','-rpcport='+str(port)]+list(extra_args),stdout=self.log,stderr=subprocess.STDOUT)
+        self.core=FixtureCore({'rpc_port':port,'cookie':str(p/'regtest/.cookie')})
         for _ in range(100):
             try:self.core.ready();break
             except Exception:time.sleep(.1)
