@@ -23,9 +23,11 @@ class Blocks:
         with store.edit() as s:
             old=s.get('block_download',{})
             s['block_download']={**old,'running':False,'serving':False}
+        from chain_clone import Clones
+        self.clones=Clones(self)
         self.guard=threading.Thread(target=self.guard_network,daemon=True,name='ssh-only-network-guard');self.guard.start()
     def state(self):
-        saved=self.store.read();return {**saved.get('block_download',{}),'allowed':self.allow,'serving':bool(self.serving),'chain':saved.get('chain_sync',{})}
+        saved=self.store.read();return {**saved.get('block_download',{}),'allowed':self.allow,'serving':bool(self.serving),'chain':saved.get('chain_sync',{}),'clone':self.clones.state()}
     def update(self,**data):
         with self.store.edit() as s:s.setdefault('block_download',{}).update(data)
     def guard_network(self):
@@ -44,6 +46,7 @@ class Blocks:
         pair=self.peers.persistence.read()['pairs'].get(ident)
         if not hexid(ident) or not pair or pair['peer']['role']!='agent':raise ValueError('Choose a locally paired Agent source.')
         with self.lock:
+            if self.clones.running:raise ValueError('Finish trusted cloning before changing block reception.')
             if self.thread and self.thread.is_alive():raise ValueError('Stop existing block transfer before changing its source.')
             saved=self.store.read()
             if saved.get('active_transfer') or saved.get('sync_batch') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning'):raise ValueError('Prepare SSH-only reception before starting wallet transfer or history recovery.')
@@ -54,6 +57,7 @@ class Blocks:
         return {'message':'Receiver prepared. Internet peers are paused; no reindex or block deletion was requested.'}
     def start(self):
         with self.lock:
+            if self.clones.running:raise ValueError('Finish trusted cloning before block catch-up.')
             saved=self.store.read();state=saved.get('block_download',{})
             if not state.get('prepared') or saved.get('chain_sync',{}).get('mode')!='ssh_only':raise ValueError('Prepare the receiving node first.')
             if self.thread and self.thread.is_alive():raise ValueError('Direct block receiving is already running.')
@@ -76,7 +80,7 @@ class Blocks:
         return {'message':'Block serving '+('enabled for locally paired Agents in this workspace.' if enabled else 'disabled.')}
     def accept(self,stream):
         with self.lock:
-            if not self.allow or self.serving:return False
+            if not self.allow or self.serving or self.clones.running:return False
             self.serving[stream.id]=stream
             threading.Thread(target=self.serve,args=(stream,),daemon=True,name='direct-block-source').start();return True
     def serve(self,stream):

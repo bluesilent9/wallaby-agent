@@ -86,8 +86,9 @@ class HistoryUpdate(unittest.TestCase):
   self.assertEqual(rpc(node.core,'getaddressinfo',[extra],'Wallaby Extinct')['labels'],[label]);self.assertEqual([r['name'] for r in rpc(node.core,'listwalletdir')['wallets']],['Wallaby Extinct'])
  def test_unknown_extinction_or_active_owner_cannot_be_bypassed_by_server_offer(self):
   node,store,key,_=self.destination(allow=False);packet,_,_=self.packet()
-  with self.assertRaisesRegex(ValueError,'completed extinction'):preflight(node.core,store,self.transfer,packet)
+  with self.assertRaises(ValueError):preflight(node.core,store,self.transfer,{**packet,'coverage':{}})
   self.assertNotIn('Wallaby Extinct',rpc(node.core,'listwallets'))
+  self.assertTrue(preflight(node.core,store,self.transfer,packet)) # Explicit direct coverage supports first-time history; a bare Server offer does not.
   ident=prepare(self.store,{**self.p,'public_wallet':self.transfer['public_wallet']},['Old']);complete(self.store,ident)
   with self.assertRaisesRegex(ValueError,'exists again'):preflight(self.core,self.store,self.transfer,packet)
  def test_conflicting_lost_labels_stop_before_import_or_history_replacement(self):
@@ -144,4 +145,4 @@ class HistoryUpdate(unittest.TestCase):
   # A restored decision overrides historical membership even when it still exists.
   ident=prepare(store,{**self.p,'public_wallet':self.transfer['public_wallet']},['Old'])
   with store.edit() as state:state['local_retirements'][ident]['state']='restored'
-  with self.assertRaisesRegex(ValueError,'completed extinction'):preflight(node.core,store,self.transfer,packet)
+  with self.assertRaisesRegex(ValueError,'restoration|unfinished retirement'):preflight(node.core,store,self.transfer,packet)

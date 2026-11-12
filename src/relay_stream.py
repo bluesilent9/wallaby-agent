@@ -57,21 +57,22 @@ class Bridge:
             if len(self.streams)>=4:raise ValueError('Another encrypted wallet stream is active.')
             self.streams[stream.id]=stream
         stream.message('stream_open',{'transfer_id':p['transfer_id']});stream.wait(stream.opened);return stream
-    def open_blocks(self,channel,cancel=None):
+    def open_blocks(self,channel,cancel=None,*,clone=False):
         self.peers.direct.require(channel)
         if channel.peer['role']!='agent':raise ValueError('Block transfer requires paired Agent permission.')
-        token=secrets.token_hex(32);stream=Stream(self,channel,digest({'chain_download_v2':token}),secrets.token_hex(32))
+        token=secrets.token_hex(32);stream=Stream(self,channel,digest({('chain_clone_v1' if clone else 'chain_download_v2'):token}),secrets.token_hex(32))
         with self.lock:
             if len(self.streams)>=4:raise ValueError('Encrypted stream limit reached.')
             self.streams[stream.id]=stream
         try:
-            stream.message('stream_open',{'block_request':token})
+            stream.message('stream_open',{('clone_request' if clone else 'block_request'):token})
             deadline=time.monotonic()+20
             while not stream.opened.wait(.1):
                 if stream.dead or cancel and cancel.is_set() or time.monotonic()>=deadline:raise ValueError('Direct block source did not accept this request.')
             if stream.dead:raise ValueError('Source has not enabled block serving.')
             return stream
         except Exception:self.abort(stream);raise
+    def open_clone(self,channel):return self.open_blocks(channel,clone=True)
     def abort(self,stream):
         if not stream.dead:
             try:stream.message('stream_close',{})
@@ -103,13 +104,13 @@ class Bridge:
         if not stream and retired and retired[0] is channel and retired[1]==record['operation_hash'] and time.monotonic()-retired[2]<60 and kind in ('stream_ack','stream_data','stream_ready','stream_close'):return True
         if kind=='stream_open' and retired:raise ValueError('A closed stream identity cannot be reused.')
         if kind=='stream_open':
-            if set(body)=={'stream_id','block_request'}:
-                token=body['block_request']
-                if stream or not hexid(token) or record['operation_hash']!=digest({'chain_download_v2':token}):raise ValueError('Invalid direct block request.')
+            if set(body) in ({'stream_id','block_request'},{'stream_id','clone_request'}):
+                clone='clone_request' in body;token=body['clone_request' if clone else 'block_request']
+                if stream or not hexid(token) or record['operation_hash']!=digest({('chain_clone_v1' if clone else 'chain_download_v2'):token}):raise ValueError('Invalid direct block request.')
                 if len(self.streams)>=4:raise ValueError('Encrypted stream limit reached.')
                 stream=Stream(self,channel,record['operation_hash'],ident);self.streams[ident]=stream
                 blocks=getattr(self.peers,'blocks',None)
-                if not blocks or not blocks.accept(stream):self.abort(stream)
+                if not blocks or not (blocks.clones.accept(stream) if clone else blocks.accept(stream)):self.abort(stream)
                 else:stream.message('stream_ready',{})
                 return True
             if set(body)!={'stream_id','transfer_id'} or stream:raise ValueError('Duplicate or invalid encrypted stream request.')

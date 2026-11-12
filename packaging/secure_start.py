@@ -22,7 +22,7 @@ def wallet_paths(uid,home,unit_root=Path('/run/systemd/system'),service='renames
     Keep ProtectHome=read-only. An explicit nested wallet path overrides that
     mount instead of trying to make the parent /home directory writable.
     """
-    if service not in ('renames','retirement'):raise SystemExit('Unsupported wallet helper.')
+    if service not in ('renames','retirement','chain'):raise SystemExit('Unsupported wallet helper.')
     home=Path(home)
     if not home.is_absolute() or any(ord(c)<32 or ord(c)==127 for c in str(home)):raise SystemExit('Invalid account home directory.')
     runtime_parent(unit_root)
@@ -30,10 +30,10 @@ def wallet_paths(uid,home,unit_root=Path('/run/systemd/system'),service='renames
     file=folder/'30-wallet-paths.conf'
     if file.is_symlink() or file.exists() and (file.stat().st_uid!=0 or file.stat().st_nlink!=1):raise SystemExit('Unsafe rename service configuration.')
     lines=['[Service]']
-    if service=='renames':lines.append('ReadWritePaths=') # Retirement also serves locally selected encrypted exports.
+    if service in ('renames','chain'):lines.append('ReadWritePaths=') # Retirement also serves locally selected encrypted exports.
     for base in (home/'.bitcoin',home/'snap/bitcoin-core/common/.bitcoin'):
         for network in ('','testnet3','testnet4','signet','regtest'):
-            value='-'+str(base/network/'wallets')
+            value='-'+str(base/network if service=='chain' else base/network/'wallets')
             value=value.replace('%','%%').replace('\\','\\\\').replace('"','\\"')
             lines.append('ReadWritePaths="'+value+'"')
     fd=os.open(file,os.O_WRONLY|os.O_CREAT|os.O_TRUNC|os.O_NOFOLLOW,0o644)
@@ -79,6 +79,7 @@ def main():
     unit.write_text(text);unit.chmod(0o644)
     rename_paths(uid,account.pw_dir)
     retirement_paths(uid,account.pw_dir)
+    wallet_paths(uid,account.pw_dir,service='chain')
     subprocess.run(['/usr/bin/systemctl','daemon-reload'],check=True)
     subprocess.run(['/usr/bin/systemctl','start','wallaby-agent-snap-ram@'+str(uid)+'.service'],check=True)
     subprocess.run(['/usr/bin/systemctl','start','wallaby-agent-secure@'+str(uid)+'.service'],check=True)

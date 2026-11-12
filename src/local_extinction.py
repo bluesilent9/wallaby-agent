@@ -19,11 +19,14 @@ def complete(store,ident):
     with store.edit() as saved:saved['local_retirements'][ident]['state']='complete'
 
 
-def eligible(core,store,raw):
+def eligible(core,store,raw,verified_history=None):
     from wallet_labels import fixed_address
     addresses={fixed_address(r['desc']) for r in raw['descriptors']}
     if None in addresses:raise ValueError('Automatic Extinct history synchronisation accepts fixed historical addresses only.')
     wanted={digest({'address':a}) for a in addresses};records=store.read().get('local_retirements',{})
+    blocked={a for row in records.values() if row['state']!='complete' for a in row['address_ids']}
+    if wanted & blocked:raise ValueError('Extinct history deferred: local restoration or unfinished retirement must be resolved before importing these addresses.')
+    from extinct_sync import ALIASES
     approved={a for row in records.values() if row['state']=='complete' for a in row['address_ids']}
     if not wanted<=approved:
         # A whole-history-upgraded legacy archive is itself local evidence for
@@ -31,13 +34,19 @@ def eligible(core,store,raw):
         # Server summaries/addresses never supply that evidence. A restoration
         # or unfinished local extinction overrides the old archive membership.
         loaded=rpc(core,'listwallets');directories={r['name'] for r in rpc(core,'listwalletdir')['wallets']}
-        if directories-set(loaded)-{'Wallaby Extinct','Extinct'}:raise ValueError('Load every local wallet before checking legacy Extinct ownership; no history was imported.')
+        if directories-set(loaded)-set(ALIASES):raise ValueError('Load every local wallet before checking legacy Extinct ownership; no history was imported.')
         blocked={a for row in records.values() if row['state']!='complete' for a in row['address_ids']}
         from extinct_upgrade import snapshot,valid
-        for wallet in ('Wallaby Extinct','Extinct'):
+        for wallet in ALIASES:
             if wallet not in loaded:continue
             state=snapshot(core,wallet)
             if valid(core,state):approved.update(digest({'address':a}) for a in state['addresses'] if digest({'address':a}) not in blocked)
+    if verified_history is not None:
+        # Only the authenticated direct packet's locally anchored complete coverage
+        # can support first-time import. A Server offer or summary is insufficient.
+        from extinct_history_sync import validate_coverage
+        validate_coverage(core,verified_history,addresses,set(verified_history.get('txids',[])))
+        approved.update(wanted)
     if not wanted<=approved:raise ValueError('Extinct history deferred: these exact addresses have not completed extinction locally. Approve the local extinction request first; no history was imported.')
     names={n for row in records.values() if row['state']=='complete' and set(row['address_ids'])&wanted for n in row['wallet_names']}
     directories={r['name'] for r in rpc(core,'listwalletdir')['wallets']}

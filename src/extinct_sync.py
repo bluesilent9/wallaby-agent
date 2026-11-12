@@ -5,9 +5,17 @@ from wallet_labels import address_only,fixed_address,read_labels
 from wallet_ops import rpc
 
 ARCHIVE='Wallaby Extinct'
+ALIASES=(ARCHIVE,'Extinct','extinct_watch')
+
+def archive_name(core):
+    names={r['name'] for r in rpc(core,'listwalletdir')['wallets']}
+    matches=names&set(ALIASES)
+    if len(matches)>1:raise ValueError('Several Extinct archive containers exist. Reconcile their names locally before merging; no second archive was created.')
+    return next(iter(matches)) if matches else ARCHIVE
+
 
 def grouped(raw):
-    return raw.get('wallet_name') in (ARCHIVE,'Extinct') and address_only(raw)
+    return raw.get('wallet_name') in ALIASES and address_only(raw)
 
 def local_details(core,p,store):
     """Old imports may be spread across several watch-only Core containers."""
@@ -87,7 +95,7 @@ def clear_obsolete_denials(store):
     for row in matches:enable(store,row['policy_id'])
     return {'message':str(len(matches))+' obsolete child-wallet denial(s) removed. Other wallet denials are unchanged; the grouped Extinct request still requires local authorisation.'}
 
-def import_watch(core,store,key,p,details,native=False):
+def import_watch(core,store,key,p,details,native=False,coverage=None):
     """Keep one local archive; save exact merged recovery evidence before mutation."""
     from wallet_recovery import history_missing,earliest,require,staging_timestamp
     from wallet_labels import apply_labels
@@ -95,9 +103,9 @@ def import_watch(core,store,key,p,details,native=False):
     if native and not group:raise ValueError('Native historical merging is restricted to Extinct archives.')
     if group:
         from local_extinction import eligible
-        eligible(core,store,p['public_wallet'])
+        eligible(core,store,p['public_wallet'],verified_history=coverage)
     from wallet_rename import watch_name
-    name=ARCHIVE if group else watch_name(details['public_wallet']['wallet_name'] or 'Default wallet')
+    name=archive_name(core) if group else watch_name(details['public_wallet']['wallet_name'] or 'Default wallet')
     loaded=rpc(core,'listwallets');exists=any(w['name']==name for w in rpc(core,'listwalletdir')['wallets'])
     merged=copy.deepcopy(details)
     if exists:

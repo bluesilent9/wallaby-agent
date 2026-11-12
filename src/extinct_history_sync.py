@@ -12,7 +12,8 @@ from extinct_upgrade import snapshot,valid
 
 
 def summary(core,wallet):
-    if wallet not in ('Wallaby Extinct','Extinct'):raise ValueError('Select the exact local Extinct archive for history comparison.')
+    from extinct_sync import ALIASES
+    if wallet not in ALIASES:raise ValueError('Select the exact local Extinct archive for history comparison.')
     state=snapshot(core,wallet,with_transactions=True);chain=rpc(core,'getblockchaininfo')
     if state['info'].get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('Wait for the Extinct archive to process the current node tip before comparing histories.')
     # One consistent offline public backup, rather than one RPC per transaction.
@@ -51,14 +52,14 @@ def validate_coverage(core,value,wanted,txids):
 def preflight(core,store,p,packet):
     """Refuse unknown local extinction or uncovered legacy history before imports."""
     from local_extinction import eligible
-    from extinct_sync import ARCHIVE
-    eligible(core,store,p['public_wallet'])
+    from extinct_sync import archive_name
+    eligible(core,store,p['public_wallet'],verified_history=packet['coverage'])
     covered=set(packet['coverage']['addresses'])
+    target=archive_name(core)
     directories={w['name'] for w in rpc(core,'listwalletdir')['wallets']}
-    if 'Extinct' in directories and ARCHIVE not in directories:raise ValueError('Upgrade the existing legacy Extinct container locally before merging direct history into Wallaby Extinct. No second archive was created.')
-    if ARCHIVE in directories:
-        if ARCHIVE not in rpc(core,'listwallets'):raise ValueError('Load the existing Extinct archive before updating its history.')
-        old=snapshot(core,ARCHIVE)
+    if target in directories:
+        if target not in rpc(core,'listwallets'):raise ValueError('Load the existing Extinct archive before updating its history.')
+        old=snapshot(core,target)
         if valid(core,old):covered.update(old['addresses'])
         if not set(old['addresses'])<=covered:raise ValueError('The receiving archive has additional legacy entries without verified coverage. Upgrade those entries locally first; no history was replaced.')
     return covered
@@ -69,7 +70,7 @@ def install_packet(core,store,key,p,details,packet):
     from core_history import install
     from extinct_upgrade import certify
     covered=preflight(core,store,p,packet)
-    name,_,merged=import_watch(core,store,key,p,details,native=True)
+    name,_,merged=import_watch(core,store,key,p,details,native=True,coverage=packet['coverage'])
     install(core,store,name,packet['records'],packet['manifest'],allow_unfunded=True)
     # Native install preserves the entire receiving database. Certify only the
     # independently covered union after Core has read back every incoming row.

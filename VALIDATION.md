@@ -1,3 +1,7 @@
+# Build 82 validation
+
+Isolated real-Core/direct-SSH tests cover successful full and pruned cold cloning, actual deletion of old source blocks, subsequent complete Extinct history import without another replay, LOST labels, source restart and unchanged receiver state after disconnection, file/space/inventory guards and rollback. Existing native history, lifecycle, Core restart and progressive catch-up suites are retained. Browser checks cover the three-section layout and trusted clone confirmation. See `AGENT_BUILD82_TRUSTED_CHAIN_CLONE.md` and the release test log for scope and fixture substitutions. Production services and wallets were not exercised.
+
 # Build 81 validation
 
 See AGENT_BUILD81_EXTINCTION_CONTINUATION.md and the Build 81 logs for automatic preservation after recovery, whole pruned legacy upgrade, LOST labels, all-record deletion comparisons, separate consent and missing-signer safeguards. Existing data is not certified merely from a current node tip or transaction count. Tests use isolated Core 31 nodes, not production wallets.

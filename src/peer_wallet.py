@@ -339,7 +339,7 @@ class Transfer:
                         packet=receive_history(self.core,self.store,p,details,header,stream,read_exact,folder)
                         try:
                             from local_extinction import eligible
-                            eligible(self.core,self.store,p['public_wallet'])
+                            eligible(self.core,self.store,p['public_wallet'],verified_history=packet.get('coverage') if packet['version']==2 else None)
                         except ValueError as error:
                             frame_write(stream,{'status':'history_deferred','transfer_id':p['transfer_id'],'message':str(error)});frame_read(stream)
                             from chain_sync import finish

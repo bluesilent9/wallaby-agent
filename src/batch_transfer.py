@@ -14,7 +14,7 @@ class BatchTransfer(Transfer):
             release(self.store);self.error='Agent restarted during synchronisation. Inspect attempted wallets; no transfer was repeated.'
     def state(self):
         result=super().state();from sync_offers import rows as offers
-        result['offers']=offers(self.store);result['offers_received']=bool(self.store.read().get('sync_offers_received'));result['offer_server_support']=self.store.read().get('sync_offer_server_support');result['sync_denials']=list(self.store.read().get('sync_exclusions',{}).values());result.update(__import__('sync_table').state(self.store,result['rows']));result['recovery']=self.recovery.state();result['busy']=bool(self.store.read().get('sync_batch'));return result
+        result['offers']=offers(self.store);result['offers_received']=bool(self.store.read().get('sync_offers_received'));result['offer_server_support']=self.store.read().get('sync_offer_server_support');result['sync_denials']=list(self.store.read().get('sync_exclusions',{}).values());result.update(__import__('sync_table').state(self.store,result['rows']));result['recovery']=self.recovery.state();clones=getattr(getattr(getattr(self.store,'peers',None),'blocks',None),'clones',None);result['clone_running']=bool(clones and clones.running);result['busy']=bool(self.store.read().get('sync_batch') or result['clone_running']);return result
     def complete(self,key):
         super().complete(key)
         if self.store.read().get('sync_batch'):self.success_until=0

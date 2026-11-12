@@ -50,6 +50,7 @@ class Workspace:
         # replace it. Never admit arbitrary process/environment variables.
         self.environment.update({key:value for key,value in environment.items() if value})
         c=Config().values;c['cookie']=c['cookie'] or discover_cookie()
+        if not c['cookie'] and self.ops and self.planned_core_restart():c['cookie']=self.ops.core.config['cookie']
         if self.ops is None or any(self.ops.core.config.get(k)!=c[k] for k in ('cookie','rpc_port')):
             if self.ops and (self.store.read().get('chain_sync',{}).get('mode')=='ssh_only' or self.busy() or self.archives and (self.archives.loaded or self.archives.staged)):raise ValueError('Finish protected wallet work before changing the Core connection.')
             if self.node_stop:self.node_stop.set()
@@ -83,7 +84,8 @@ class Workspace:
             agent_exchange.LOCAL_RETIREMENT=self.retirement
             agent_exchange.LOCAL_ARCHIVES=self.archive_ops
             agent_exchange.LOCAL_BROADCASTS=self.broadcasts
-        if getattr(getattr(self,'peers',None),'blocks',None):self.peers.blocks.core=self.ops.core
+        if getattr(getattr(self,'peers',None),'blocks',None):
+            self.peers.blocks.core=self.ops.core;self.peers.blocks.clones.core=self.ops.core
         self.start_peer_support()
         self.setup.environment=self.environment
         if getattr(self,'archives',None):self.archives.environment=self.environment
@@ -104,6 +106,8 @@ class Workspace:
                 candidate.wallet_bridge=Bridge(candidate,self.store);direct=Direct(candidate)
                 from block_download import Blocks
                 candidate.blocks=Blocks(candidate,self.store,self.ops.core)
+                candidate.blocks.clones.operation_lock=self.lock
+                candidate.blocks.clones.guard=lambda:bool(self.busy() or self.archives.loaded or self.archives.staged or self.ops.prepared)
                 with self.lock:
                     if self.closing:
                         candidate.close();self.store.peers=None;return
@@ -148,7 +152,7 @@ class Workspace:
         writing=False
         active=s.get('setup_active')
         setup_reserved=bool(active and (active not in sessions or sessions[active]['phase'] not in ('contributed','awaiting_disc','complete')))
-        return bool((not public_reads and (s.get('block_download',{}).get('running') or getattr(getattr(getattr(self,'peers',None),'blocks',None),'serving',{}))) or archive_busy or setup_busy or writing or (not public_reads and getattr(self,'public_reviews',None) and self.public_reviews.active) or (not public_reads and getattr(self,'broadcasts',None) and self.broadcasts.active) or public_reads and setup_reserved or
+        return bool((not public_reads and (s.get('block_download',{}).get('running') or getattr(getattr(getattr(getattr(self,'peers',None),'blocks',None),'clones',None),'running',False) or getattr(getattr(getattr(self,'peers',None),'blocks',None),'serving',{}))) or archive_busy or setup_busy or writing or (not public_reads and getattr(self,'public_reviews',None) and self.public_reviews.active) or (not public_reads and getattr(self,'broadcasts',None) and self.broadcasts.active) or public_reads and setup_reserved or
             (not public_reads and any(v['proposal']['kind'] in ('destroy_disc','archive_cancel','builder_cancel') for v in s['pending'].values())) or
             self.archives and self.archives.reading or s.get('history_jobs') or
             any(k!=ignore_rename and row['proposal']['kind']=='wallet_rename' and row['state']!='pending' for k,row in s['pending'].items()) or
@@ -212,7 +216,8 @@ class Workspace:
         return self.recovery.snapshot() if hasattr(self,'recovery') else {}
     def planned_core_restart(self):
         recovery=getattr(getattr(self,'transfer',None),'recovery',None)
-        return bool(recovery and recovery.restart_window())
+        clones=getattr(getattr(getattr(self,'peers',None),'blocks',None),'clones',None)
+        return bool(recovery and recovery.restart_window() or clones and clones.active())
     def connection_lost(self,error):
         from diagnostics import describe
         from activity_log import event
@@ -396,6 +401,8 @@ class Workspace:
         if method=='peers.action':
             if len(args)!=2 or not isinstance(args[0],str) or not isinstance(args[1],dict):raise ValueError('Invalid local peer control.')
             enforce();self.configure(environment)
+            clones=getattr(getattr(getattr(self,'peers',None),'blocks',None),'clones',None)
+            if clones and clones.running and args[0] not in ('status','block-status'):raise ValueError('Finish trusted cloning before changing direct connections or synchronisation controls.')
             return self.peer_action(*args)
         with self.lock:
             enforce();self.configure(environment)
@@ -404,6 +411,8 @@ class Workspace:
                 raise ValueError('Node connection recovery is in progress. Protected operations are paused; no operation was started.')
             if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
             saved=self.store.read()
+            clones=getattr(getattr(getattr(self,'peers',None),'blocks',None),'clones',None)
+            if clones and clones.running and method not in ('status','core.public','core.health','ui.arm','ui.open','ui.close','node.start','exchange','disc.drives'):raise ValueError('Trusted blockchain cloning is active. Wait for Core restart and wallet checks before changing wallets, recovery or Internet peers.')
             if getattr(getattr(self,'public_reviews',None),'active',None) and method not in ('status','authorise.review','authorise.deny','lifecycle.deny','lifecycle.cancel','core.public','core.health','ui.arm','ui.open','node.start','exchange','disc.drives','disc.status','disc.probe'):
                 raise ValueError('A read-only policy review is checking local funding. Wait before changing wallets or disc contents; status and public inventory remain available.')
             changing=method in ('refresh.destroyed','rename.approve','rename.reconcile','wallet.sign','archive.cancel_bind','archive.cancel_check','archive.cancel_stage','archive.cancel_confirm','archive.retire_stage','archive.retire_destroyed','retirement.approve','authorise.approve','setup.participate','authorise.history','setup.cancel','cancel.confirm','cancel.reconcile')

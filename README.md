@@ -2,9 +2,11 @@
 > **TRANSACTION SIGNING EXPOSES YOUR KEYS TO THE SIGNING ENVIRONMENT.**
 > If you use Wallaby Agent for transaction signing, the Agent handles your wallet passphrase locally and temporarily unlocks Bitcoin Core to request signatures. This gives the locally installed Agent signing authority and puts your wallet keys and funds at risk if the Agent, its dependencies or the computer are compromised. **Independently audit the source code and its dependencies before compiling or using the Agent for transaction signing.** Private keys and passphrases are never sent to the Wallet Server. Policy installation and refresh temporarily handle private descriptors inside the protected local worker; signing unlocks the selected Core wallet. Those protections do not remove the risk of a compromised signing computer.
 
-# Wallaby Agent V2 — Development Build 81
+# Wallaby Agent V2 — Development Build 82
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · **Development**, not a Stable release.
+
+Build 82 adds locally approved trusted cold blockchain cloning over paired direct SSH, first-time complete Extinct archive imports without replaying pruned history, and a Synchronisation page organised into Wallets, Blockchain and Local history. Receiver wallets, keys, labels and richer history stay local; full/pruned compatibility and current-chain ownership checks remain enforced. Install on both Agents. Uses existing Wallet Server signalling; no Server update is required. [Australia workflow, safeguards and tests](AGENT_BUILD82_TRUSTED_CHAIN_CLONE.md).
 
 Build 81 detects already-preserved original-wallet history directly from Core without importing or rescanning again. When data is missing, it carries exact local extinction preservation approval through history recovery, then emits the signed preservation result without a second preservation click. Separate deletion review compares all history and displays address/transaction samples; original wallets remain until deletion approval. Missing scan provenance is distinguished from missing records. [Workflow and limits](AGENT_BUILD81_EXTINCTION_CONTINUATION.md).
 
@@ -12,7 +14,7 @@ Build 80 fixes Core recovery stopping before restart because a lock probe opened
 
 Build 79 corrects the build badge shared by both windows. Packaging now verifies the badge, package, worker, health endpoint, monitor and HTTP version agree before creating an installer. Build 78’s history synchronisation changes are retained.
 
-Build 78 adds direct Extinct history updates when Agents already have the same addresses but different transaction history or labels. Wallet Server Build 7 discovers differences from small public fingerprints and offers the existing locally approved direct sync. Actual history, coverage and labels are verified and merged over authenticated SSH only. Receiving-side history and LOST information are retained; new addresses still require local extinction approval. [Protocol and limits](AGENT_BUILD78_EXTINCT_SYNC_PROTOCOL.md).
+Build 78 adds direct Extinct history updates when Agents already have the same addresses but different transaction history or labels. Wallet Server Build 7 discovers differences from small public fingerprints and offers the existing locally approved direct sync. Actual history, coverage and labels are verified and merged over authenticated SSH only. Receiving-side history and LOST information are retained; Build 82 permits previously unknown historical addresses through an explicitly approved complete direct history transfer; addresses owned by active local wallets still require their own retirement. [Protocol and limits](AGENT_BUILD78_EXTINCT_SYNC_PROTOCOL.md).
 
 Build 77 checks and upgrades the whole Extinct Wallet as part of each preservation operation, retaining all labels and LOST information. Complete old history is recovered once when needed, stored in Core and recognised by later extinction requests. The current wallet remains until separate deletion approval. No Wallet Server update is required. [Workflow, recovery and tests](AGENT_BUILD77_WHOLE_EXTINCT_UPGRADE.md).
 

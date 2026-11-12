@@ -14,5 +14,6 @@ def configure(source=None,runtime=Path('/run/wallaby-agent-secure')):
         try:account=pwd.getpwuid(uid)
         except KeyError:continue
         prepare(uid,account.pw_dir)
+        helpers['wallet_paths'](uid,account.pw_dir,service='chain')
         if helpers.get('retirement_paths'):helpers['retirement_paths'](uid,account.pw_dir)
 if __name__=='__main__':configure()

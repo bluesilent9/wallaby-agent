@@ -1,22 +1,39 @@
 'use strict';
-let blockSnapshot='';
+let blockSnapshot='',blockSourceChoice='';
+function chainBytes(n){return (Number(n||0)/1073741824).toLocaleString(undefined,{maximumFractionDigits:1})+' GiB';}
+function cloneReview(c){
+ const p=c.review;if(!p)return;
+ const dialog=el('dialog',{'aria-label':'Review trusted blockchain clone'},el('h2',{},'Replace blockchain data from your trusted laptop'),el('p',{},'Source laptop: '+(p.source_name||'Paired source laptop')),el('p',{},'Source: block '+blockHeight(p.source_facts.height)+' · '+(p.source_facts.pruned?'Pruned node':'Full node')+(p.source_facts.syncing?' · Still downloading':'')),el('p',{},'This receiver: block '+blockHeight(p.receiver_height)),el('p',{},'Only blockchain files are replaced. Your wallets, private keys, settings and existing Extinct history stay on this laptop. Core stops briefly and restarts independently. Both laptops need enough time to finish; the receiver also needs space for a complete temporary copy.'),el('p',{class:'warning'},'This trusts the source laptop’s validated state. It is not an independent validation from genesis. Missing Extinct history must be received separately through wallet synchronisation. Internet peers on this receiver stay paused.'));
+ const confirm=el('input',{type:'checkbox'}),start=button('Authorise trusted clone','',async()=>{dialog.close();dialog.remove();await api('peers/block-clone-start',{id:p.id,confirmed:true});blockSnapshot='';await loadBlockDownload();});start.disabled=true;confirm.addEventListener('change',()=>{start.disabled=!confirm.checked;});
+ dialog.append(el('label',{class:'clone-confirm'},confirm,'I trust this paired source laptop and approve replacing only this node’s blockchain data.'),el('div',{class:'actions'},button('Cancel','secondary',async()=>{dialog.close();dialog.remove();await api('peers/block-clone-cancel',{});}),start));
+ dialog.addEventListener('cancel',()=>{dialog.remove();run(()=>api('peers/block-clone-cancel',{}));});document.body.append(dialog);dialog.showModal();
+}
 async function loadBlockDownload(){
  if(page!=='synchronisation'||!workspace?.protected?.viewer)return;
  const root=$('#block-download-controls');if(!root||document.activeElement?.closest('#block-download-controls select'))return;
  try{
   const s=await api('peers/block-status',{}),stamp=JSON.stringify(s);if(stamp===blockSnapshot&&root.children.length)return;blockSnapshot=stamp;
-  root.replaceChildren(el('h3',{},'Blockchain over direct SSH'),el('p',{},'Receive public blocks from a paired Agent without using this Core node’s Internet peers. Existing valid blocks stay in place. A source can be behind or still downloading; Core validates every received block.'));
-  root.append(el('label',{class:'block-sharing'},checkBox('Allow paired Agents to download this node’s blocks',s.allowed,false,enabled=>api('peers/block-serve',{enabled})), 'Allow paired Agents to download this node’s blocks'),el('p',{class:'hint'},'Serving uses the paired direct SSH connection in either client/server direction. No wallets or private keys are sent by these block controls. Enable this on your source Agent.'));
-  const select=el('select',{'aria-label':'Blockchain source Agent'});select.append(el('option',{value:''},'Choose a paired Agent source'));
-  for(const p of s.pairs||[])select.append(el('option',{value:p.id},p.name));select.value=s.source||'';select.disabled=s.running;root.append(el('label',{},'Blockchain source Agent',select));
-  const prepare=button('Prepare receiver — pause Internet peers','secondary',async()=>{await api('peers/block-prepare',{id:select.value});blockSnapshot='';await loadBlockDownload();});prepare.disabled=s.running;root.append(prepare);
-  root.append(el('p',{class:'hint'},'Prepare first. Then authorise any required history recovery on This Node. Reindexing happens only through that separate local recovery approval. Click Start when ready; it can wait for the source to catch up.'));
-  if(s.message)root.append(el('p',{role:'status'},s.message));if(s.chain?.message)root.append(el('p',{role:'status'},s.chain.message));
-  if(s.chain?.current_height!==undefined)root.append(el('p',{},'Receiver validated blocks: '+blockHeight(s.chain.current_height)+(s.chain.source_height!==undefined?' · Source available blocks: '+blockHeight(s.chain.source_height):'')+(s.chain.source_syncing?' · Source is still downloading':'')));
-  const start=button('Start receiving blocks','',async()=>{await api('peers/block-start',{});blockSnapshot='';await loadBlockDownload();});start.disabled=!s.prepared||s.running;const actions=el('div',{class:'actions'},start);root.append(actions);
-  const stop=button('Stop receiving blocks','secondary',async()=>{await api('peers/block-stop',{});blockSnapshot='';await loadBlockDownload();});stop.disabled=!s.running;actions.append(stop);
-  if(s.chain?.mode==='ssh_only'){const resume=button('Resume Core Internet connections','secondary',async()=>{await api('synchronisation/resume-network',{});blockSnapshot='';await loadBlockDownload();});resume.disabled=s.running;actions.append(resume);}
- }catch(error){root.replaceChildren(el('h3',{},'Blockchain over direct SSH'),el('p',{},error.message));}
+  const clone=s.clone||{},busy=!!(s.running||clone.running);
+  root.replaceChildren(el('h3',{},'Blockchain from another laptop'),el('p',{class:'hint'},'Use your paired direct SSH connection over the local network. Wallet Server carries connection signals; these transfers carry no bulk data through it.'));
+  const select=el('select',{'aria-label':'Blockchain source Agent'});select.append(el('option',{value:''},'Choose a paired source laptop'));
+  for(const p of s.pairs||[])select.append(el('option',{value:p.id},p.name));select.value=blockSourceChoice||s.source||'';select.addEventListener('change',()=>{blockSourceChoice=select.value;});select.disabled=busy;root.append(el('label',{},'Source laptop',select));
+  const catchup=el('article',{class:'sync-operation'},el('h4',{},'Catch up using available blocks'),el('p',{},'Keep this laptop’s existing blockchain. Core validates incoming blocks. A source that is behind can be selected now; receiving waits for it to catch up. A pruned source must still retain the missing range.'));
+  const prepare=button('1. Prepare — pause Internet peers','secondary',async()=>{await api('peers/block-prepare',{id:select.value});blockSnapshot='';await loadBlockDownload();});prepare.disabled=busy;
+  const start=button('2. Start receiving blocks','',async()=>{await api('peers/block-start',{});blockSnapshot='';await loadBlockDownload();});start.disabled=!s.prepared||busy;
+  const stop=button('Stop receiving','secondary',async()=>{await api('peers/block-stop',{});blockSnapshot='';await loadBlockDownload();});stop.disabled=!s.running;
+  catchup.append(el('div',{class:'actions'},prepare,start,stop),el('p',{class:'hint'},'If This Node needs a full history replay, prepare here first, approve that recovery under Local history, then start receiving. Catch-up cannot retrieve blocks the source has already pruned.'));root.append(catchup);
+  const cloning=el('article',{class:'sync-operation'},el('h4',{},'Clone a trusted laptop’s blockchain'),el('p',{},'Use a consistent copy of its blockchain state, including when both nodes are pruned. This avoids downloading the blockchain again. The source must contain this receiver’s current tip and enough retained blocks for its wallet history. A source behind this laptop cannot replace its newer chain.'));
+  const review=button('Review trusted clone','secondary',async()=>{const c=await api('peers/block-clone-review',{id:select.value});cloneReview(c);});review.disabled=busy;
+  cloning.append(review,el('p',{class:'hint'},'Finish extinction on the source first. Clone the blockchain, then receive the completed Extinct wallet through the Wallets section. Existing receiver-only history and LOST labels are merged and checked separately.'));
+  if(clone.message)cloning.append(el('p',{role:'status'},clone.message));
+  if(clone.running&&clone.total_bytes){const progress=el('progress',{max:clone.total_bytes,value:clone.received_bytes,'aria-label':'Blockchain clone progress'});cloning.append(progress,el('p',{},chainBytes(clone.received_bytes)+' / '+chainBytes(clone.total_bytes)+' · '+clone.stage));}root.append(cloning);
+  const serving=el('details',{class:'sync-operation'},el('summary',{},'Use this laptop as a source'));
+  serving.append(el('label',{class:'block-sharing'},checkBox('Serve validated blocks',s.allowed,busy,enabled=>api('peers/block-serve',{enabled})),'Allow paired Agents to receive available blocks'),el('label',{class:'block-sharing'},checkBox('Allow one trusted blockchain clone',clone.allowed,busy,enabled=>api('peers/block-clone-share',{enabled})),'Allow one trusted clone — Core will stop and restart'),el('p',{class:'hint'},'Enable the required option on the source laptop. Cloning permission expires after one use or when this protected workspace closes. Agent and SSH client/server direction do not restrict which laptop can supply blocks.'));root.append(serving);
+  const status=el('section',{class:'sync-status',role:'status'});
+  if(s.message)status.append(el('p',{},s.message));if(s.chain?.message)status.append(el('p',{},s.chain.message));
+  if(s.chain?.current_height!==undefined)status.append(el('p',{},'This laptop: '+blockHeight(s.chain.current_height)+(s.chain.source_height!==undefined?' · Source: '+blockHeight(s.chain.source_height):'')+(s.chain.source_syncing?' · Source still downloading':'')));
+  if(s.chain?.mode==='ssh_only'){const resume=button('Resume this node’s Internet peers','secondary',async()=>{await api('synchronisation/resume-network',{});blockSnapshot='';await loadBlockDownload();});resume.disabled=busy;status.append(el('p',{class:'warning'},'Internet peers paused. Stopping a transfer leaves them paused until you choose to resume.'),resume);}root.append(status);
+ }catch(error){root.replaceChildren(el('h3',{},'Blockchain from another laptop'),el('p',{role:'alert'},error.message));}
 }
 setInterval(loadBlockDownload,2000);
 window.loadBlockDownload=loadBlockDownload;
