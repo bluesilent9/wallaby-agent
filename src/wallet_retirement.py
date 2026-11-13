@@ -60,7 +60,9 @@ def inventory(core,store,p,collect_only=False,confirmed_manifest=None):
     if p['delete_wallet']:
         wanted=descriptors(p['public_wallet'])
         for candidate in rpc(core,'listwallets'):
-            if candidate!=ARCHIVE and descriptors(rpc(core,'listdescriptors',[False],candidate))==wanted:local_wallets.append(candidate)
+            if candidate!=ARCHIVE:
+                raw_candidate=rpc(core,'listdescriptors',[False],candidate)
+                if raw_candidate.get('descriptors') and descriptors(raw_candidate)==wanted:local_wallets.append(candidate)
         # A shared monitor's dedicated private accounts are part of this local
         # retirement. Keys reused by a different policy must remain intact.
         for signer in signers_for_policy(core,p['public_wallet']):
@@ -104,7 +106,7 @@ def inventory(core,store,p,collect_only=False,confirmed_manifest=None):
             if len(rows)<1000:break
             if start>100000:raise ValueError('Wallet exceeds the safe automatic history review size.')
     loaded=rpc(core,'listwallets')
-    if ARCHIVE not in loaded and any(row['name']==ARCHIVE for row in rpc(core,'listwalletdir')['wallets']):raise ValueError('Load the existing historical archive locally before review so its exact LOST labels can be preserved.')
+    if confirmed_manifest is None and ARCHIVE not in loaded and any(row['name']==ARCHIVE for row in rpc(core,'listwalletdir')['wallets']):raise ValueError('Load the existing historical archive locally before review so its exact LOST labels can be preserved.')
     if ARCHIVE in loaded:
         if rpc(core,'getwalletinfo',[],ARCHIVE)['private_keys_enabled']:raise ValueError('Historical archive must have private keys disabled.')
         for address,item in addresses.items():

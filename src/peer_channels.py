@@ -8,7 +8,7 @@ from setup_messages import sign,verify
 
 class Channel:
     def __init__(self,owner,peer,psk,invitation,initiator,channel_id=None,known=False):
-        self.owner=owner;self.peer=participant(peer);self.psk=psk;self.invitation=invitation;self.initiator=initiator;self.id=channel_id or secrets.token_hex(32);self.known=known;self.local_grant=known or initiator;self.remote_grant=False;self.ready=False;self.created=time.monotonic();self.seen=self.created;self.tx=0;self.rx=0;self.outgoing={};self.lock=owner.lock
+        self.features=set();self.owner=owner;self.peer=participant(peer);self.psk=psk;self.invitation=invitation;self.initiator=initiator;self.id=channel_id or secrets.token_hex(32);self.known=known;self.local_grant=known or initiator;self.remote_grant=False;self.ready=False;self.created=time.monotonic();self.seen=self.created;self.tx=0;self.rx=0;self.outgoing={};self.lock=owner.lock
         self.prologue={'protocol':PROTOCOL,'version':1,'cipher_suite':CIPHER,'channel_id':self.id,'invitation_id':invitation,'initiator':owner.identity if initiator else peer,'responder':peer if initiator else owner.identity}
         self.proof={'protocol':PROTOCOL,'version':1,'kind':'handshake','prologue_hash':digest(self.prologue),'initiator':self.prologue['initiator'],'responder':self.prologue['responder']}
         self.noise=NoiseConnection.from_name(CIPHER.encode());self.noise.set_as_initiator() if initiator else self.noise.set_as_responder();self.noise.set_keypair_from_private_bytes(Keypair.STATIC,binary(owner.private));self.noise.set_psks(psk=binary(psk));self.noise.set_prologue(canonical(self.prologue))
@@ -60,7 +60,7 @@ class Channel:
             if self.local_grant:
                 if not self.ready:
                     self.owner.persist(self);self.ready=True
-                    self.send('ping',digest(self.prologue),{'nonce':secrets.token_hex(16),'device_name':self.owner.device_name})
+                    self.send('ping',digest(self.prologue),{'nonce':secrets.token_hex(16),'device_name':self.owner.device_name,'features':['extinct_compare_v1']})
             return
         if not self.ready or not self.local_grant:raise ValueError('Peer has not been granted application authority locally.')
         if kind=='ping':self.owner.peer_name(self,record['body']);self.send('pong',record['operation_hash'],record['body']);return
@@ -135,6 +135,7 @@ class Peers:
     def peer_name(self,c,body):
         # Authenticated display metadata only; roles and pinned keys cannot change.
         if not isinstance(body,dict) or 'device_name' not in body:return
+        c.features={'extinct_compare_v1'} if isinstance(body.get('features'),list) and 'extinct_compare_v1' in body['features'] else set()
         name=self.valid_name(body['device_name']);saved=self.persistence.read();row=saved['pairs'].get(c.peer['endpoint_id'])
         if row and row['peer']==c.peer and row['name']!=name:
             row['name']=name;saved['revision']+=1;self.persistence.commit(saved['revision']-1,saved)

@@ -200,9 +200,6 @@ def review(core,store,p):
     receipt(store,p)
     from retirement_evidence import compare
     evidence=compare(core,p,facts,available)
-    if not evidence['verified']:
-        from direct_identity import require
-        require(store,p['preservation']['receipt']['public_key'])
     facts.update(phase='delete',archive=None,manifest_hash=p['manifest_hash'],preservation_archive=p['preservation']['archive_wallet'],preservation_node=p['preservation']['node_id'],local_extinct_wallets=available,history_elsewhere_confirmation_required=not evidence['verified'],history_comparison=evidence)
     return facts
 

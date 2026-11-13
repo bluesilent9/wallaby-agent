@@ -109,6 +109,8 @@ class Workspace:
                 candidate.blocks=Blocks(candidate,self.store,self.ops.core)
                 from wallet_pull import Pull
                 candidate.wallet_pull=Pull(candidate,self.transfer,self.lock,lambda:bool(self.closing or self.busy() or self.archives.reading or self.ops.prepared))
+                from retirement_remote import Comparisons
+                candidate.retirement_compare=Comparisons(candidate,self.ops.core,self.lock,lambda:bool(self.closing or self.busy() or self.archives.reading or self.ops.prepared))
                 candidate.blocks.clones.operation_lock=self.lock
                 candidate.blocks.clones.recovery=self.transfer.recovery
                 candidate.blocks.clones.handoff_guard=lambda:bool(self.busy(ignore_history=True) or self.archives.loaded or self.archives.staged or self.ops.prepared)
@@ -460,12 +462,15 @@ class Workspace:
                     return self.cancellations.review(args[0])
                 if kind.startswith('wallet_setup'):return self.setup.review(args[0])
                 return self.ops.prepare_request(args[0])
-            if method in ('local_wallets.list','local_wallets.review','local_wallets.delete'):
+            if method in ('local_wallets.list','local_wallets.review','local_wallets.delete','local_wallets.history'):
                 if self.node_status['color']!='green':raise ValueError('Reconnect the node interface before managing local wallets.')
                 action=method.split('.')[1]
                 return getattr(self.local_wallets,'listing' if action=='list' else action)(*args)
             if method=='rename.reconcile':return self.renames.reconcile(*args)
             if method=='rename.approve':return self.renames.approve(*args)
+            if method=='retirement.evidence':
+                from retirement_remote import request
+                return request(self.retirement,*args)
             if method in ('authorise.history','retirement.approve'):
                 from retirement_phases import require_current
                 require_current(self.store.read()['pending'][args[0]]['proposal'])

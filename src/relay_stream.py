@@ -15,7 +15,7 @@ class Stream:
         self.bridge=bridge;self.channel=channel;self.operation=operation;self.id=ident;self.rx=0;self.tx=0;self.incoming=queue.Queue(maxsize=4);self.buffer=bytearray();self.acks={};self.dead=False;self.lock=threading.Lock();self.opened=threading.Event()
     def message(self,kind,body):self.channel.send(kind,self.operation,{'stream_id':self.id,**body})
     def wait(self,event):
-        deadline=time.monotonic()+2400
+        deadline=time.monotonic()+getattr(self,'timeout',2400)
         while not event.wait(.1):
             if self.dead or self.bridge.peers.stop.is_set() or time.monotonic()>deadline:raise ValueError('Encrypted transfer interrupted. No automatic retry; inspect both Agents before continuing.')
     def write(self,data):
@@ -37,7 +37,7 @@ class Stream:
         return len(raw)
     def read(self,size=-1):
         if not 0<=size<=1024*1024:raise ValueError('Bounded encrypted reads are required.')
-        deadline=time.monotonic()+2400
+        deadline=time.monotonic()+getattr(self,'timeout',2400)
         while len(self.buffer)<size:
             if self.dead:raise ValueError('Encrypted peer stream closed before completion.')
             try:part,position=self.incoming.get(timeout=.2)
@@ -70,6 +70,20 @@ class Bridge:
             while not stream.opened.wait(.1):
                 if stream.dead or cancel and cancel.is_set() or time.monotonic()>=deadline:raise ValueError('Direct block source did not accept this request.')
             if stream.dead:raise ValueError('The paired source is unavailable or busy.')
+            return stream
+        except Exception:self.abort(stream);raise
+    def open_comparison(self,channel):
+        self.peers.direct.require(channel)
+        if channel.peer['role']!='agent':raise ValueError('Only paired Agents can compare public history.')
+        token=secrets.token_hex(32);stream=Stream(self,channel,digest({'extinct_compare_v1':token}),secrets.token_hex(32));stream.timeout=30
+        with self.lock:
+            if len(self.streams)>=4:raise ValueError('Direct connection is busy.')
+            self.streams[stream.id]=stream
+        try:
+            stream.message('stream_open',{'comparison_request':token})
+            deadline=time.monotonic()+5
+            while not stream.opened.wait(.1):
+                if stream.dead or time.monotonic()>deadline:raise ValueError('Remote comparison is unavailable.')
             return stream
         except Exception:self.abort(stream);raise
     def open_clone(self,channel):return self.open_blocks(channel,clone=True)
@@ -108,6 +122,15 @@ class Bridge:
         if not stream and retired and retired[0] is channel and retired[1]==record['operation_hash'] and time.monotonic()-retired[2]<60 and kind in ('stream_ack','stream_data','stream_ready','stream_close'):return True
         if kind=='stream_open' and retired:raise ValueError('A closed stream identity cannot be reused.')
         if kind=='stream_open':
+            if set(body)=={'stream_id','comparison_request'}:
+                token=body['comparison_request']
+                if stream or not hexid(token) or record['operation_hash']!=digest({'extinct_compare_v1':token}):raise ValueError('Invalid optional comparison request.')
+                if len(self.streams)>=4:raise ValueError('Direct connection is busy.')
+                stream=Stream(self,channel,record['operation_hash'],ident);self.streams[ident]=stream
+                service=getattr(self.peers,'retirement_compare',None)
+                if not service or not service.accept(stream):self.abort(stream)
+                else:stream.message('stream_ready',{})
+                return True
             if set(body) in ({'stream_id','block_request'},{'stream_id','clone_request'}):
                 clone='clone_request' in body;token=body['clone_request' if clone else 'block_request']
                 if stream or not hexid(token) or record['operation_hash']!=digest({('chain_clone_v1' if clone else 'chain_download_v2'):token}):raise ValueError('Invalid direct block request.')

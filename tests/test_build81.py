@@ -71,7 +71,7 @@ class DeletionEvidence(unittest.TestCase):
   owner,p,key=self.prepare();rpc(self.core,'unloadwallet',['Wallaby Extinct']);rpc(self.core,'createwallet',{'wallet_name':'Unrelated','disable_private_keys':True,'blank':True})
   from retirement_evidence import compare
   e=compare(self.core,p,{'local_wallets':['Old']},['Unrelated']);self.assertFalse(e['verified'])
-  with self.assertRaises(ValueError):owner.review(key)
+  facts=owner.review(key)['retirement'];self.assertFalse(facts['history_comparison']['verified']);self.assertTrue(facts['history_elsewhere_confirmation_required'])
   self.assertIn('Old',rpc(self.core,'listwallets'))
 
 class Revocation(unittest.TestCase):

@@ -44,6 +44,9 @@ class LocalWallets:
                 rows.append({k:facts[k] for k in ('wallet','sats','private_keys_enabled','traits')}|{'deletable':not reason,'reason':reason,**({'managed':facts['managed']} if facts.get('managed') else {})})
             except ValueError:rows.append({'wallet':name,'sats':None,'private_keys_enabled':None,'deletable':False,'reason':'Core could not confirm this wallet. Refresh after its current operation finishes.'})
         return {'wallets':rows}
+    def history(self,name):
+        from wallet_history import transactions
+        return transactions(self.core,name)
     def review(self,name):
         self.guard();facts=self.facts(name)
         if facts['storage']!='node' or facts['scanning'] or facts['format']!='sqlite':raise ValueError('Finish scanning before deleting a standard SQLite wallet.')

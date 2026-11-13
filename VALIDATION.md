@@ -1,3 +1,7 @@
+# Build 88 validation
+
+Isolated Core tests cover local ledgers, complete optional paired-SSH comparisons and warning-only deletion without peers. Browser interactions verify hover controls, automatic refresh, grouping, signed amounts, actual clipboard copying and address/TXID switching. Startup/session, recovery and direct transfer regressions are rerun. See `AGENT_BUILD88_WALLET_HISTORY.md` for test boundaries and fixture substitutions.
+
 # Build 87 validation
 
 Actual isolated Core deletion succeeds without a fingerprint after complete local preservation checks. Invalid signatures, changed transaction data and missing history remain blocked. Two production Agent processes with a real Wallet Server listener and direct SSH confirm exact policy agreement and reject disagreement/disconnection. Tests also cover substituted/revoked peer identities, paired Mobile restrictions, no manual trust bypass, local disc reads, public API field removal, multisig extinction with missing signers, receiver-only transfers, startup isolation, diagnostic privacy and recovery. Ten UI suites check that typed fingerprint controls are absent while local approvals and evidence remain. See `AGENT_BUILD87_AUTOMATIC_IDENTITIES.md` for fixture substitutions and limits.

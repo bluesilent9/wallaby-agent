@@ -87,7 +87,7 @@ def main():
     view=QWebEngineView();page=Page(profile,view);view.setPage(page)
     install_camera_permissions(page,origin,lambda:QMessageBox.question(view,'Read a QR code','Allow the local QR reader to use your camera? Camera images stay in this protected workspace. The microphone is not used.',QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)==QMessageBox.StandardButton.Yes)
     page.renderProcessTerminated.connect(lambda status,code:recover_renderer(view,page,window,status,code))
-    page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard,False);page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows,False)
+    page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard,True);page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanPaste,False);page.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows,False)
     profile.downloadRequested.connect(lambda download:download.cancel());window=Window();window.setWindowTitle('Wallaby Agent · Protected Bitcoin Workspace');window.resize(1240,850);window.setCentralWidget(view);view.load(QUrl(origin+'/?page='+settings['page']));window.show();window.raise_();window.activateWindow();app.exec()
 
 if __name__=='__main__':main()
