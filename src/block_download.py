@@ -18,7 +18,7 @@ def checked_read(stream):
 
 class Blocks:
     def __init__(self,peers,store,core):
-        self.peers=peers;self.store=store;self.core=core;self.lock=threading.RLock();self.stop=threading.Event();self.thread=None;self.stream=None;self.serving={};self.allow=False
+        self.peers=peers;self.store=store;self.core=core;self.lock=threading.RLock();self.stop=threading.Event();self.thread=None;self.stream=None;self.serving={};self.allow=True
         # Local permissions and receiving intent expire with the protected worker.
         with store.edit() as s:
             old=s.get('block_download',{})
@@ -71,23 +71,16 @@ class Blocks:
             self.update(message='Stopping block reception. Internet peers remain paused; validated blocks are retained.')
             if not self.thread or not self.thread.is_alive():self.update(running=False)
         return {'message':'Block reception is stopping. Use Resume Core Internet connections only if you want Internet downloads.'}
-    def sharing(self,enabled):
-        if type(enabled) is not bool:raise ValueError('Invalid block sharing choice.')
-        with self.lock:
-            self.allow=enabled
-            if not enabled:
-                for stream in list(self.serving.values()):self.peers.wallet_bridge.abort(stream)
-        return {'message':'Block serving '+('enabled for locally paired Agents in this workspace.' if enabled else 'disabled.')}
     def accept(self,stream):
         with self.lock:
-            if not self.allow or self.serving or self.clones.running:return False
+            if self.serving or self.clones.running or self.clones.preparing:return False
             self.serving[stream.id]=stream
             threading.Thread(target=self.serve,args=(stream,),daemon=True,name='direct-block-source').start();return True
     def serve(self,stream):
         from peer_wallet import frame_read,frame_write
         from chain_sync import send
         try:
-            while self.allow and not stream.dead and not self.peers.stop.is_set():
+            while not stream.dead and not self.peers.stop.is_set():
                 send(self.core,stream,frame_read,frame_write,progressive=True)
                 if frame_read(stream)!={'operation':'chain_next'}:raise ValueError('Invalid next block request.')
         except Exception as error:
@@ -120,7 +113,7 @@ class Blocks:
                         self.update(error='source_pruned',message='The source has pruned blocks this receiver needs. Receiving stopped. Choose a source retaining that range, or prepare both nodes before replay. Internet peers remain paused.');self.stop.set()
                     elif not self.stop.is_set():self.update(message='Source Core is unavailable or restarting. Waiting to reconnect; Internet peers remain paused.')
                 except Exception:
-                    if not self.stop.is_set():self.update(message='Waiting for direct SSH/source blocks or local Core preparation. Check source block-serving permission and retained block range. Internet peers remain paused; no valid receiver blocks were deleted.')
+                    if not self.stop.is_set():self.update(message='Waiting for direct SSH/source blocks or local Core preparation. Check the direct connection, source availability and retained block range. Internet peers remain paused; no valid receiver blocks were deleted.')
                 finally:
                     if self.stream:self.peers.wallet_bridge.abort(self.stream);self.stream=None
                 self.stop.wait(5)

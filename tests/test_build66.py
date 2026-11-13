@@ -10,7 +10,9 @@ class Pairing(unittest.TestCase):
  def peer(self,name,role='agent'):
   folder=self.root/(name+'-trust');folder.mkdir(mode=0o700);return Peers(Store(self.root/name),FileStore(folder),role)
  def move(self,src,dst):
-  with src.lock:rows=list(src.outgoing.values());src.outgoing.clear()
+  with src.lock:
+   rows=[r for r in src.outgoing.values() if r['to']==dst.identity['endpoint_id']]
+   for r in rows:src.outgoing.pop(r['id'],None)
   for frame in rows:dst.accept(frame,[src.identity])
   return rows
  def pair(self):
@@ -90,7 +92,11 @@ class RelayCore(OriginalRoles):
   sending={**copy.deepcopy(p),'direction':'send'};apply_snapshot(self.sender,1,[sending]);apply_snapshot(self.store,1,[p]);sk=digest(sending);rk=digest(p);choose(self.sender,sk,True,watch);choose(self.store,rk,True,watch);payload=prepare(self.core,self.sender,sk,sending);receive(self.store,payload)
   from sync_offers import apply as offers
   offers(self.sender,{'kind':'wallet_sync_offers','version':1,'revision':1,'offers':[{'id':'f'*64,'transfer_id':sending['transfer_id'],'direction':'send','peer':{k:sending['peer'][k] for k in ('node_id','hostname')},'public_wallet':sending['public_wallet'],'status':'ready'}]},'fixture-session')
-  send=BatchTransfer(self.core,self.sender);receiver=BatchTransfer(self.receiver.core,self.store);self.addCleanup(send.close);self.addCleanup(receiver.close);receiver.authorise_batch({});send.send_batch({});receiver.thread.join(5)
+  send=BatchTransfer(self.core,self.sender);receiver=BatchTransfer(self.receiver.core,self.store);self.addCleanup(send.close);self.addCleanup(receiver.close);
+  from wallet_pull import Pull
+  self.a.wallet_pull=Pull(self.a,send);self.b.wallet_pull=Pull(self.b,receiver)
+  receiver.authorise_batch({});receiver.thread.join(20)
+  for thread in self.a.wallet_pull.threads:thread.join(10)
   self.assertFalse(self.pump_error,self.pump_error);self.assertIn(sk,self.sender.read()['completed']);self.assertIn(rk,self.store.read()['completed']);name='Wallaby Sync '+p['transfer_id'][:24];self.assertEqual(rpc(self.receiver.core,'getwalletinfo',[],name)['private_keys_enabled'],not watch)
   if restoration:self.assertEqual(self.store.read()['local_retirements'][ident]['state'],'restored')
  def test_single_signature_sync_without_peer_ip_password_or_listener(self):self.relay()

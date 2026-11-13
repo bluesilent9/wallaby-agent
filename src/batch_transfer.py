@@ -75,7 +75,9 @@ class BatchTransfer(Transfer):
         finally:
             self.close();release(self.store)
     def send_batch(self,credentials):
-        keys=selected(self.store,'send');self.validate_batch(keys,'send');saved=self.store.read()
+        saved=self.store.read();keys=[k for k in selected(self.store,'send') if saved['pending'][k]['proposal'].get('transfer_version')!=3]
+        if not keys:raise ValueError('Trusted direct transfers start when the receiving Agent approves Receive. No sender approval is required.')
+        self.validate_batch(keys,'send');saved=self.store.read()
         peers={saved['pending'][key]['proposal']['peer']['node_id'] for key in keys if saved['pending'][key]['proposal'].get('transfer_version')!=3}
         if not isinstance(credentials,dict) or set(credentials)!=peers:raise ValueError('Enter receiving credentials and independently verified SSH fingerprint for each receiving computer.')
         for data in credentials.values():

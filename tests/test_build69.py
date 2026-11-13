@@ -42,7 +42,7 @@ class DirectBlocks(DirectPeers):
  def catch(self,source,receiver,source_core,receiver_core):
   rpc(source_core,'createwallet',{'wallet_name':'Block source'});address=rpc(source_core,'getnewaddress',[],'Block source');rpc(source_core,'generatetoaddress',[15,address])
   receiver.blocks.prepare(source.identity['endpoint_id']);self.assertFalse(rpc(receiver_core,'getnetworkinfo')['networkactive'])
-  source.blocks.sharing(True);receiver.blocks.start();self.until(lambda:rpc(receiver_core,'getblockcount')==15)
+  receiver.blocks.start();self.until(lambda:rpc(receiver_core,'getblockcount')==15)
   self.assertFalse(rpc(receiver_core,'getnetworkinfo')['networkactive'])
   rpc(source_core,'generatetoaddress',[3,address]);self.until(lambda:rpc(receiver_core,'getblockcount')==18)
   self.assertEqual(rpc(source_core,'getbestblockhash'),rpc(receiver_core,'getbestblockhash'));receiver.blocks.end();self.until(lambda:not receiver.blocks.state().get('running'))
@@ -55,7 +55,7 @@ class DirectBlocks(DirectPeers):
   self.setup_blocks();state=self.a.direct.active[self.b.identity['endpoint_id']];client=state.sessions[state.selected].client
   source,receiver=(self.a,self.b) if client else (self.b,self.a);sc,rc=self.cores if client else (self.cores[1],self.cores[0])
   self.catch(source,receiver,sc.core,rc.core)
- def test_source_refusal_and_disconnect_never_resume_internet_or_reset_chain(self):
+ def test_source_automatic_and_disconnect_never_resume_internet_or_reset_chain(self):
   self.setup_blocks();self.b.blocks.prepare(self.a.identity['endpoint_id']);self.b.blocks.start();time.sleep(2)
   self.assertFalse(rpc(self.cores[1].core,'getnetworkinfo')['networkactive']);self.assertEqual(rpc(self.cores[1].core,'getblockcount'),0)
   self.b.blocks.end();self.until(lambda:not self.b.blocks.state().get('running'))
@@ -72,7 +72,7 @@ class DirectBlocks(DirectPeers):
   self.until(lambda:rpc(self.cores[1].core,'getblockcount')==21);self.b.blocks.end();self.until(lambda:not self.b.blocks.state()['running'])
  def test_pruned_source_gap_is_reported_and_stops_without_internet_fallback(self):
   self.setup_blocks();rpc(self.cores[0].core,'createwallet',{'wallet_name':'Miner'});address=rpc(self.cores[0].core,'getnewaddress',[],'Miner');rpc(self.cores[0].core,'generatetoaddress',[15,address])
-  self.a.blocks.sharing(True);self.b.blocks.prepare(self.a.identity['endpoint_id'])
+  self.b.blocks.prepare(self.a.identity['endpoint_id'])
   from chain_sync import rpc as actual
   def limited(core,method,*a,**kw):
    value=actual(core,method,*a,**kw)
@@ -149,7 +149,7 @@ class DaisyChain(DirectPeers):
   for core in cores:self.addCleanup(core.close)
   for p,c in zip(peers,cores):p.wallet_bridge=Bridge(p,p.store);p.blocks=Blocks(p,p.store,c.core);self.addCleanup(p.blocks.end)
   rpc(cores[0].core,'createwallet',{'wallet_name':'Miner'});address=rpc(cores[0].core,'getnewaddress',[],'Miner');rpc(cores[0].core,'generatetoaddress',[15,address])
-  self.a.blocks.sharing(True);self.b.blocks.prepare(self.a.identity['endpoint_id']);self.b.blocks.start();self.b.blocks.sharing(True);self.c.blocks.prepare(self.b.identity['endpoint_id']);self.c.blocks.start()
+  self.b.blocks.prepare(self.a.identity['endpoint_id']);self.b.blocks.start();self.c.blocks.prepare(self.b.identity['endpoint_id']);self.c.blocks.start()
   self.until(lambda:rpc(cores[2].core,'getblockcount')==15)
   rpc(cores[0].core,'generatetoaddress',[4,address]);self.until(lambda:rpc(cores[2].core,'getblockcount')==19)
   self.assertTrue(self.b.blocks.state()['running']);self.assertTrue(self.b.blocks.state()['allowed'])

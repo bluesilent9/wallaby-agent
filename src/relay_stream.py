@@ -69,7 +69,7 @@ class Bridge:
             deadline=time.monotonic()+20
             while not stream.opened.wait(.1):
                 if stream.dead or cancel and cancel.is_set() or time.monotonic()>=deadline:raise ValueError('Direct block source did not accept this request.')
-            if stream.dead:raise ValueError('Source has not enabled block serving.')
+            if stream.dead:raise ValueError('The paired source is unavailable or busy.')
             return stream
         except Exception:self.abort(stream);raise
     def open_clone(self,channel):return self.open_blocks(channel,clone=True)
@@ -97,6 +97,10 @@ class Bridge:
         if not kind.startswith('stream_'):return False
         self.peers.direct.require(channel)
         if channel.peer['role']!='agent':raise ValueError('Private wallet transfers require Agent permission.')
+        if kind in ('stream_wallet_pull','stream_wallet_pull_result'):
+            handler=getattr(self.peers,'wallet_pull',None)
+            if handler is None:raise ValueError('Update the source Agent for receiver-initiated wallet sync.')
+            return handler(channel,record)
         body=record['body']
         if not isinstance(body,dict) or not hexid(body.get('stream_id')):raise ValueError('Invalid encrypted stream identity.')
         ident=body['stream_id'];stream=self.streams.get(ident)

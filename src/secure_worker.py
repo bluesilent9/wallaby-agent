@@ -85,6 +85,7 @@ class Workspace:
             agent_exchange.LOCAL_ARCHIVES=self.archive_ops
             agent_exchange.LOCAL_BROADCASTS=self.broadcasts
         if getattr(getattr(self,'peers',None),'blocks',None):
+            if getattr(self.peers,'wallet_pull',None):self.peers.wallet_pull.transfer=self.transfer
             self.peers.blocks.core=self.ops.core;self.peers.blocks.clones.core=self.ops.core;self.peers.blocks.clones.recovery=self.transfer.recovery
         self.start_peer_support()
         self.setup.environment=self.environment
@@ -106,6 +107,8 @@ class Workspace:
                 candidate.wallet_bridge=Bridge(candidate,self.store);direct=Direct(candidate)
                 from block_download import Blocks
                 candidate.blocks=Blocks(candidate,self.store,self.ops.core)
+                from wallet_pull import Pull
+                candidate.wallet_pull=Pull(candidate,self.transfer,self.lock,lambda:bool(self.closing or self.busy() or self.archives.reading or self.ops.prepared))
                 candidate.blocks.clones.operation_lock=self.lock
                 candidate.blocks.clones.recovery=self.transfer.recovery
                 candidate.blocks.clones.handoff_guard=lambda:bool(self.busy(ignore_history=True) or self.archives.loaded or self.archives.staged or self.ops.prepared)

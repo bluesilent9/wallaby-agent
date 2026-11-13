@@ -49,7 +49,7 @@ def copy_snapshot(src,dst,hello,progress=lambda n,total:None):
 
 class Clones:
     def __init__(self,blocks):
-        self.operation_lock=threading.RLock();self.guard=lambda:False;self.handoff_guard=lambda:False;self.recovery=None;self.handoff=None;self.plan_floor=None;self.preparing=False;self.blocks=blocks;self.peers=blocks.peers;self.store=blocks.store;self.core=blocks.core;self.lock=threading.RLock();self.allowed=False;self.thread=None;self.offer_stream=None;self.plan=None;self.deadline=0;self.running=False;self.message='No trusted clone is active.';self.received=0;self.total=0;self.stage='idle';self.source_stream=None
+        self.operation_lock=threading.RLock();self.guard=lambda:False;self.handoff_guard=lambda:False;self.recovery=None;self.handoff=None;self.plan_floor=None;self.preparing=False;self.blocks=blocks;self.peers=blocks.peers;self.store=blocks.store;self.core=blocks.core;self.lock=threading.RLock();self.allowed=True;self.thread=None;self.offer_stream=None;self.plan=None;self.deadline=0;self.running=False;self.message='No trusted clone is active.';self.received=0;self.total=0;self.stage='idle';self.source_stream=None
     def active(self):return bool(self.running and self.deadline>time.monotonic() and (self.thread and self.thread.is_alive() or self.source_stream))
     def state(self):
         with self.lock:return {'handoff_preparing':self.preparing,'handoff_ready':bool(self.handoff and self.store.read().get('recovery',{}).get('state')=='clone_paused'),'handoff_available':bool(self.store.read().get('history_jobs')),'allowed':self.allowed,'running':self.running,'stage':self.stage,'message':self.message,'received_bytes':self.received,'total_bytes':self.total,'review':{k:v for k,v in (self.plan or {}).items() if k not in ('stream',)} if self.plan and self.plan['expires']>time.time() else None}
@@ -81,12 +81,6 @@ class Clones:
                 finally:self.preparing=False
             self.thread=threading.Thread(target=pause,daemon=True,name='pause-recovery-for-clone');self.thread.start()
         return {'message':self.message}
-    def arm(self,enabled):
-        if type(enabled) is not bool:raise CloneError('Invalid local clone permission.')
-        with self.lock:
-            if enabled:self.idle()
-            self.allowed=enabled
-        return {'message':'One trusted clone is allowed in this workspace; Core will briefly stop and restart when the paired receiver confirms.' if enabled else 'Trusted clone sharing disabled.'}
     def helper_read(self,stream):
         frame=frame_read(stream)
         if frame.get('status')=='clone_helper_error':
@@ -102,7 +96,7 @@ class Clones:
             stream=self.peers.wallet_bridge.open_clone(channel)
             try:
                 source=frame_read(stream)
-                if set(source) not in ({'operation','facts'},{'operation','facts','features'}) or source['operation']!='clone_offer':raise CloneError('Paired source did not offer trusted cloning. Enable it locally on the source Agent.')
+                if set(source) not in ({'operation','facts'},{'operation','facts','features'}) or source['operation']!='clone_offer':raise CloneError('Paired source did not offer trusted cloning. Update both Agents and check that the source is idle.')
                 local=chain_info(self.core)
                 from recovery_checkpoint import floor
                 checkpoint=floor(self.core,self.store) if self.handoff else None
@@ -141,7 +135,7 @@ class Clones:
         self.deadline=time.monotonic()+3600;self.received=n;self.total=total
     def accept(self,stream):
         with self.lock:
-            if not self.allowed or self.source_stream:return False
+            if self.source_stream:return False
             try:self.idle()
             except ValueError:return False
             self.source_stream=stream;self.thread=threading.Thread(target=self.serve,args=(stream,),daemon=True,name='trusted-chain-source');self.thread.start();return True
@@ -157,9 +151,9 @@ class Clones:
             from clone_history import export
             packets=[export(self.core,self.store,r) for r in histories]
             frame_write(stream,{'hash':rpc(self.core,'getblockhash',[anchor['height']]),**({'history_offers':[offer for raw,offer in packets]} if histories else {}),**({'recovery_hash':rpc(self.core,'getblockhash',[checkpoint['height']])} if checkpoint else {})});begun=frame_read(stream)
-            if begun!={'operation':'clone_begin','hash':source['hash']} or not self.allowed:raise CloneError('Clone was not locally confirmed.')
+            if begun!={'operation':'clone_begin','hash':source['hash']}:raise CloneError('The receiver did not confirm this exact clone.')
             with self.operation_lock,self.lock:
-                self.idle(own_source=stream);self.allowed=False;self.running=True;self.stage='serving';self.deadline=time.monotonic()+3600
+                self.idle(own_source=stream);self.allowed=True;self.running=True;self.stage='serving';self.deadline=time.monotonic()+3600
             old=rpc(self.core,'getnetworkinfo')['networkactive'];self.source_network_before=old;rpc(self.core,'setnetworkactive',[False]);rpc(self.core,'syncwithvalidationinterfacequeue',[],timeout=120)
             if facts(self.core)['hash']!=source['hash']:raise CloneError('Source chain advanced after review; review a fresh clone.')
             sock,helper=self.local_socket('export',source['hash']);hello=self.helper_read(helper);copy_snapshot(helper,stream,hello,self.progress)

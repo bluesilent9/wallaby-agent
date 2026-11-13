@@ -186,7 +186,7 @@ class RecoveryHandover(DirectPeers):
    if corrupt:raise ValueError('Injected history verification failure')
    return actual_apply(*a,**kw)
   with patch('chain_clone_service.ColdNode',ColdFixture),patch('clone_history.apply',side_effect=apply_or_fail):
-   self.a.blocks.clones.arm(True);plan=self.b.blocks.clones.review(self.a.identity['endpoint_id']);self.b.blocks.clones.start(plan['review']['id'],True)
+   plan=self.b.blocks.clones.review(self.a.identity['endpoint_id']);self.b.blocks.clones.start(plan['review']['id'],True)
    deadline=time.monotonic()+180
    while self.b.blocks.clones.running and time.monotonic()<deadline:time.sleep(.1)
    for t in threads:t.join(20)

@@ -144,7 +144,7 @@ class DirectClone(DirectPeers):
     if n>65536:raise ConnectionError('Injected direct-stream interruption')
    self.b.blocks.clones.progress=interrupt
   with patch('chain_clone_service.ColdNode',ColdFixture):
-   self.a.blocks.clones.arm(True);plan=self.b.blocks.clones.review(self.a.identity['endpoint_id']);self.b.blocks.clones.start(plan['review']['id'],True)
+   plan=self.b.blocks.clones.review(self.a.identity['endpoint_id']);self.b.blocks.clones.start(plan['review']['id'],True)
    deadline=time.monotonic()+180
    while self.b.blocks.clones.running and time.monotonic()<deadline:time.sleep(.1)
    for t in threads:t.join(20)

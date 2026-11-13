@@ -23,12 +23,10 @@ def action(workspace,name,data):
         blocks=peers.blocks
         if name=='block-status' and not data:return {**blocks.state(),'pairs':[{k:p[k] for k in ('id','name','role')} for p in peers.status()['pairs'] if p['role']=='agent']}
         if name=='block-clone-handoff' and not data:return blocks.clones.prepare_handoff()
-        if name=='block-clone-share' and set(data)=={'enabled'}:return blocks.clones.arm(data['enabled'])
         if name=='block-clone-review' and set(data)=={'id'}:return blocks.clones.review(data['id'])
         if name=='block-clone-start' and set(data)=={'id','confirmed'}:return blocks.clones.start(data['id'],data['confirmed'])
         if name=='block-clone-cancel' and not data:blocks.clones.cancel_review();return {'message':'Clone review cancelled.'}
         if name=='block-prepare' and set(data)=={'id'}:return blocks.prepare(data['id'])
-        if name=='block-serve' and set(data)=={'enabled'}:return blocks.sharing(data['enabled'])
         if name=='block-start' and not data:return blocks.start()
         if name=='block-stop' and not data:return blocks.end()
         raise ValueError('Invalid local block action.')

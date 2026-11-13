@@ -276,8 +276,13 @@ class Transfer:
     def receive(self,key,p):
         conn=None;path=None;listener=self.listener
         try:
+            if p.get('transfer_version')==3:
+                pull=getattr(getattr(self.store,'peers',None),'wallet_pull',None)
+                if pull is None:raise ValueError('Update both Agents for receiver-initiated wallet sync.')
+                pull.request(key,p)
             listener=self.listener
             while self.listener is listener and time.monotonic()<self.deadline:
+                if self.error:raise ValueError(self.error)
                 try:conn,_=listener.accept();break
                 except socket.timeout:continue
             if conn is None:return
