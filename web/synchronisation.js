@@ -11,6 +11,17 @@ window.updateTransfer=function(t){
  renderSync(t);
 };
 function transferCommand(title,command){return el('section',{},el('strong',{},title),el('pre',{class:'policy-code'},command),button('Copy command','secondary',async()=>{await navigator.clipboard.writeText(command);notify({message:'Command copied.'});}));}
+async function selectSyncRoute(choice){
+ await api('synchronisation/route',choice);
+ // Preserve a locally acknowledged choice while the next read-only status poll is busy.
+ const t=workspace.transfer||{},wallet=(t.wallets||[]).find(w=>(w.receive||[]).some(r=>r.id===choice.id));
+ const options=wallet?.receive||[];
+ for(const r of [...(t.rows||[]),...options]){
+  if(r.id===choice.id){r.selected=choice.selected;r.watch_only=choice.watch_only||r.watch_only_locked;}
+  else if(options.some(o=>o.id===r.id))r.selected=false;
+ }
+ transferSignature='';
+}
 function checkBox(label,checked,disabled,onChange){const input=el('input',{type:'checkbox','aria-label':label});input.checked=checked;input.disabled=disabled;input.addEventListener('change',()=>{input.blur();run(()=>onChange(input.checked));});return input;}
 const syncOfferMessages={peer_changed:'Wallet Server must renew this stale connection request. Your direct pairing is retained.',secure_pairing_required:'Waiting for Wallet Server to observe the paired connection.',peer_offline:'The advertised source is offline.',permissions_pending:'Waiting for the current receive permission to reach Wallet Server.',discovery_pending:'Waiting for Wallet Server to prepare the transfer request.',review_paused:'Wallet Server has paused this transfer review.',history_recovery:'Finish the existing wallet history recovery before another transfer.',local_outcome:'A previous transfer outcome needs review in Wallet Server.',earlier_operation:'An earlier transfer must be reconciled first.',preview_changed:'Wallet Server must prepare a new review of the changed wallet.',preview_expired:'Wallet Server must renew the expired wallet review.',invalid_pair:'Wallet Server must repair the incomplete paired request.',disabled:'Receiving is disabled for this wallet.',ready:'Waiting for the executable transfer request from Wallet Server.'};
 const syncPeerChoices=new Map();
@@ -31,15 +42,15 @@ function renderSync(t){
    for(const r of options)select.append(el('option',{value:r.id},direction==='send'?r.receiver:r.sender));
    select.title=options.length?'Choose the source Agent':notices.length?notices.map(o=>o.peer.hostname).join(', ')+(w.denied?'':' — waiting for transfer request'):(w.denied?'Source availability not reported':'No Agent Detected');select.disabled=!!t.busy||w.denied||!options.length;select.classList.toggle('no-agent',!options.length&&!notices.length);select.classList.toggle('waiting-route',!options.length&&!!notices.length);
    if(current){select.value=current.id;chosen[direction]=current;syncPeerChoices.set(key,current.id);}
-   select.addEventListener('change',()=>{const target=options.find(r=>r.id===select.value);if(!target)return;select.blur();syncPeerChoices.set(key,target.id);run(async()=>{await api('synchronisation/route',{id:target.id,selected:!!current?.selected,watch_only:target.watch_only});transferSignature='';});});menus[direction]=select;
+   select.addEventListener('change',()=>{const target=options.find(r=>r.id===select.value);if(!target)return;select.blur();syncPeerChoices.set(key,target.id);run(async()=>{await selectSyncRoute({id:target.id,selected:!!current?.selected,watch_only:target.watch_only});transferSignature='';});});menus[direction]=select;
   }
   const active=chosen.receive||chosen.send,checks=el('td'),watchCell=el('td');
   for(const direction of ['send','receive']){
    const r=chosen[direction];if(!r)continue;chosenIds.add(r.id);
    if(direction==='send')continue;
-   const select=checkBox((direction==='send'?'Send ':'Receive ')+w.wallet_name,!!r.selected,!!t.busy,selected=>api('synchronisation/route',{id:r.id,selected,watch_only:r.watch_only}));
+   const select=checkBox((direction==='send'?'Send ':'Receive ')+w.wallet_name,!!r.selected,!!t.busy,selected=>selectSyncRoute({id:r.id,selected,watch_only:r.watch_only}));
    checks.append(select);
-   const watch=checkBox('Watch only '+direction+' '+w.wallet_name,!!r.watch_only,!!t.busy||r.watch_only_locked,watch_only=>api('synchronisation/route',{id:r.id,selected:!!r.selected,watch_only}));watchCell.append(watch);
+   const watch=checkBox('Watch only '+direction+' '+w.wallet_name,!!r.watch_only,!!t.busy||r.watch_only_locked,watch_only=>selectSyncRoute({id:r.id,selected:!!r.selected,watch_only}));watchCell.append(watch);
 
   }
   if(!active){const watch=checkBox('Watch only '+w.wallet_name,!!w.local_wallets?.length&&!w.local_private,true,()=>{});watchCell.append(watch);}
@@ -49,7 +60,7 @@ function renderSync(t){
   if(w.local_wallets?.length)actions.append(el('small',{},'On this Agent'));
   if(w.pending&&!active&&!w.denied){const offers=(w.offers||[]).filter(o=>o.direction==='receive');if(offers.length)for(const o of offers)actions.append(el('small',{class:'sync-offer-status'},(o.peer?.hostname?o.peer.hostname+': ':'')+(syncOfferMessages[o.status]||'Waiting for an authorised transfer request.')));else actions.append(el('small',{class:'warning'},'No Agent Detected'),el('small',{},'Connect a suitable Agent in Peer Connections.'));}
   for(const r of [...(w.send||[]),...(w.receive||[])].filter(r=>r.state!=='pending')){actions.append(el('p',{},r.state==='recovery_required'?'Received — history recovery required':r.state));const inspect=button('Inspect previous transfer','secondary',async()=>{await api('synchronisation/review',{id:r.id});transferSignature='';});inspect.disabled=!!t.busy;actions.append(inspect);}
-  const nameCell=el('td',{},el('strong',{},w.wallet_name),...(w.local_wallets||[]).filter(name=>name!==w.wallet_name).map(name=>el('small',{},name)));
+  const nameCell=el('td',{},el('div',{class:'sync-wallet-name'},window.syncWalletIcons?.({...w.traits,smsf:/smsf/i.test(w.wallet_name),multisig:!!w.traits?.multisig||!!w.multisig,disc:active?.source_storage?active.source_storage==='disc':!!w.traits?.disc}),el('strong',{},w.wallet_name)),...(w.local_wallets||[]).filter(name=>name!==w.wallet_name).map(name=>el('small',{},name)));
 
   const signer=el('td');if(w.multisig){for(const s of w.signers||[])signer.append(el('strong',{},s.label),s.account!==s.label?el('small',{},s.account):null);if(chosen.receive)signer.append(el('small',{},chosen.receive.signer_label?'Source account: '+chosen.receive.signer_label:'Source signer details require signed review'));if(!(w.signers||[]).length&&!chosen.receive)signer.append(el('small',{},'No local signing account'));}else signer.append(el('small',{},w.local_wallets?.length?(w.local_private?'Single-signature':'Watch-only'):active?.watch_only_locked?'Watch-only source':'Checked during review'));
   tr.append(nameCell,signer,el('td',{},w.receive?.length||w.offers?.length||w.denied?menus.receive:el('span',{},'—')),watchCell,checks,actions);body.append(tr);

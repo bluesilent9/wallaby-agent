@@ -13,7 +13,8 @@ def validate(p):
     if len(raw.encode())>2*1024*1024 or PRIVATE.search(raw):raise ValueError('Public offers exceed the safe size or contain private material.')
     ids=set()
     for offer in p['offers']:
-        if not isinstance(offer,dict) or set(offer)!={'id','transfer_id','direction','peer','public_wallet','status'} or not hexid(offer['id']) or not hexid(offer['transfer_id']) or offer['id'] in ids or offer['direction'] not in ('send','receive') or offer['status'] not in STATUSES:raise ValueError('Invalid public wallet offer.')
+        if not isinstance(offer,dict) or not {'id','transfer_id','direction','peer','public_wallet','status'}<=set(offer)<={'id','transfer_id','direction','peer','public_wallet','status','source_storage'} or not hexid(offer['id']) or not hexid(offer['transfer_id']) or offer['id'] in ids or offer['direction'] not in ('send','receive') or offer['status'] not in STATUSES:raise ValueError('Invalid public wallet offer.')
+        if 'source_storage' in offer and offer['source_storage'] not in ('node','disc'):raise ValueError('Invalid advertised source storage.')
         peer=offer['peer']
         if not isinstance(peer,dict) or set(peer)!={'node_id','hostname'}:raise ValueError('Invalid advertised source node.')
         text(peer['node_id']);text(peer['hostname']);descriptors(offer['public_wallet']);ids.add(offer['id'])

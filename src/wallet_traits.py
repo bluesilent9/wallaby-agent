@@ -30,3 +30,20 @@ def local_traits(core,names,address=None,raw=None,cache=None):
             for key,value in policy_traits(desc).items():flags[key]=flags[key] or value
     flags['watch']=known and not private
     return flags
+
+
+def source_storage(core,p):
+    from peer_wallet import source_wallet
+    from wallet_ops import rpc
+    if __import__('extinct_sync').grouped(p['public_wallet']):return 'node'
+    name=source_wallet(core,p,public_preview=True)
+    return 'disc' if rpc(core,'getwalletinfo',[],name).get('wallaby_storage')=='disc' else 'node'
+
+def sync_traits(raw):
+    from extinct_sync import grouped
+    flags={'vault':False,'multisig':False,'extinct':grouped(raw),'smsf':'smsf' in raw.get('wallet_name','').casefold(),'disc':False}
+    for row in raw.get('descriptors',[]):
+        for key,value in policy_traits(row['desc']).items():flags[key]|=value
+        try:flags['multisig']|=len(Descriptor.from_string(row['desc'].split('#')[0]).keys)>1
+        except (ValueError,TypeError,AttributeError):pass
+    return flags

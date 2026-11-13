@@ -26,6 +26,9 @@ def validate_preview(payload,fresh=True):
     if not isinstance(payload,dict) or set(payload)!={'preview','public_key','signature'}:raise ValueError('Invalid signed wallet preview.')
     p=payload['preview'];required={'version','transfer_id','challenge','sender_ipv6','receiver_ipv6','public_wallet','chain','funded_outputs','node_tip','generated_at'}
     if isinstance(p,dict) and p.get('version')==3:required=required|{'transport'}
+    if isinstance(p,dict) and 'source_storage' in p:
+        if p.get('version')!=3 or p['source_storage'] not in ('node','disc'):raise ValueError('Invalid signed wallet source storage.')
+        required=required|{'source_storage'}
     if isinstance(p,dict) and 'restoration' in p:required=required|{'restoration'}
     if not isinstance(p,dict) or (set(p)!=required if p.get('version')==1 else set(p)!=required|{'vaults','address_labels'}) or p['version'] not in (1,2,3):raise ValueError('Invalid public preview schema.')
     for k in ('transfer_id','challenge'):
@@ -105,7 +108,10 @@ def prepare(core,store,key,p):
     facts=wallet_details(core,p,store);tip=rpc(core,'getblockchaininfo')
     if tip.get('initialblockdownload') or tip.get('headers',tip['blocks'])!=tip['blocks']:raise ValueError('Wait for the sending node to finish synchronising before preparing a wallet preview.')
     preview={'version':p.get('transfer_version',1),'transfer_id':p['transfer_id'],'challenge':p['preview_challenge'],'sender_ipv6':own,'receiver_ipv6':None if p.get('transfer_version')==3 else ipv6(p['peer']['ipv6']),**facts,'node_tip':{'height':tip['blocks'],'hash':tip['bestblockhash']},'generated_at':int(time.time())}
-    if p.get('transfer_version')==3:preview['transport']=p['transport']
+    if p.get('transfer_version')==3:
+        preview['transport']=p['transport']
+        from wallet_traits import source_storage
+        if source_storage(core,p)=='disc':preview['source_storage']='disc'
     if 'restoration' in p:preview['restoration']=p['restoration']
     payload=sign(store,preview);verify(store,payload)
     with store.edit() as s:

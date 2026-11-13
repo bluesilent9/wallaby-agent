@@ -14,12 +14,12 @@ def observe(store,method,wallet,value):
             s['sync_local_wallets']={name:rows.get(name,{'wallet_name':name}) for name in value if isinstance(name,str)}
         elif wallet in rows and isinstance(value,dict):
             if method=='getwalletinfo':
-                rows[wallet]['private_keys_enabled']=value.get('private_keys_enabled')
+                rows[wallet]['private_keys_enabled']=value.get('private_keys_enabled');rows[wallet]['disc']=value.get('wallaby_storage')=='disc'
                 if isinstance(value.get('wallaby_managed'),dict):rows[wallet]['managed']=value['wallaby_managed']
             elif value.get('descriptors'):
                 try:ident=policy_id({'public_wallet':{'wallet_name':wallet,'descriptors':value['descriptors']}})
                 except ValueError:return
-                rows[wallet]['policy_id']=ident;rows[wallet]['multisig']=multisig({'descriptors':value['descriptors']})
+                rows[wallet]['traits']=__import__('wallet_traits').sync_traits({**value,'wallet_name':wallet});rows[wallet]['policy_id']=ident;rows[wallet]['multisig']=multisig({'descriptors':value['descriptors']})
 
 def multisig(raw):
     from vendor.embit.descriptor import Descriptor
@@ -56,9 +56,11 @@ def state(store,requests):
     saved=store.read();groups={};denials=saved.get('sync_exclusions',{})
     def group(ident,name):
         return groups.setdefault(ident,{'policy_id':ident,'wallet_name':name,'local_wallets':[],
-            'send':[],'receive':[],'offers':[],'signers':[],'denied':ident in denials,'deny_id':None})
+            'send':[],'receive':[],'offers':[],'signers':[],'traits':{'vault':False,'multisig':False,'smsf':'smsf' in name.casefold(),'extinct':False,'disc':False},'denied':ident in denials,'deny_id':None})
     for name,local in saved.get('sync_local_wallets',{}).items():
         row=group(local.get('policy_id','local:'+name),name);row['local_wallets'].append(name)
+        for key,value in local.get('traits',{}).items():row['traits'][key]|=value
+        row['traits']['disc']|=local.get('disc',False)
         managed=local.get('managed',{});row['logical_name']=managed.get('logical_name') or row.get('logical_name');row['wallet_name']=row['logical_name'] or min(row['local_wallets'],key=str.casefold)
         row['multisig']=row.get('multisig',False) or local.get('multisig',False)
         if local.get('private_keys_enabled') is True:row['signers'].append({'account':name,'label':managed.get('role_name') or name})
@@ -67,6 +69,8 @@ def state(store,requests):
         if offer['direction']=='send' and offer['status'] in ('disabled','permissions_pending'):continue
         ident=policy_id(offer);row=group(ident,offer['public_wallet']['wallet_name'])
         row['multisig']=row.get('multisig',False) or multisig(offer['public_wallet'])
+        for key,value in __import__('wallet_traits').sync_traits(offer['public_wallet']).items():row['traits'][key]|=value
+        row['traits']['disc']|=offer.get('source_storage')=='disc'
         row['offers'].append({'direction':offer['direction'],'status':offer['status'],'peer':copy.deepcopy(offer['peer'])})
         if offer['direction']=='receive':row['deny_id']=offer['id']
     for r in requests:
@@ -76,10 +80,13 @@ def state(store,requests):
         if r['direction']=='receive':row['deny_id']=r['id']
         row['multisig']=row.get('multisig',False) or multisig(p['public_wallet'])
         preview=saved.get('transfer_previews',{}).get(r['id'],{}).get('preview',{})
-        option=copy.deepcopy(r);option['signer_label']=preview.get('public_wallet',{}).get('wallet_name');option['direct_ready']=enabled and direct_ready(store,p)
+        for key,value in __import__('wallet_traits').sync_traits(p['public_wallet']).items():row['traits'][key]|=value
+        row['traits']['disc']|=preview.get('source_storage')=='disc'
+        option=copy.deepcopy(r);option['source_storage']=preview.get('source_storage','node');option['signer_label']=preview.get('public_wallet',{}).get('wallet_name');option['direct_ready']=enabled and direct_ready(store,p)
         row[r['direction']].append(option)
     for ident,d in denials.items():group(ident,d['wallet_name'])
     for row in groups.values():
+        row['traits']['smsf']='smsf' in row['wallet_name'].casefold()
         row['signers'].sort(key=lambda r:(r['label'].casefold(),r['account'].casefold()))
         for direction in ('send','receive'):
             row[direction].sort(key=lambda r:((r['receiver'] if direction=='send' else r['sender']).casefold(),r['id']))

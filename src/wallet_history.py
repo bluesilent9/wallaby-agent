@@ -74,5 +74,6 @@ def transactions(core,wallet):
         result.append({'name':name,'latest':max((r['timestamp'] for r in rows),default=0),'rows':sorted(rows,key=lambda r:(r['timestamp'],r['txid']),reverse=True)})
     result.sort(key=lambda g:(-g['latest'],g['name'].casefold()))
     response={'wallet':wallet,'extinct':extinct,'groups':result,'notice':'Core’s currently recorded transaction history, including pending and immature transactions. Amounts include wallet fee deductions. This view does not start a rescan or certify complete archival coverage.'}
+    response['vault_status']=__import__('vault_history').status(core,wallet,raw)
     if len(__import__('json').dumps(response))>16*1024*1024:raise ValueError('This wallet exceeds the local history table size limit. No partial balances were displayed.')
     return response

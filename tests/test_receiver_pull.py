@@ -61,6 +61,12 @@ class ReceiverPull(DirectCore):
    self.assertEqual(rpc(self.receiver.core,'getwalletinfo',[],name)['txcount'],rpc(self.core,'getwalletinfo',[],'Wallaby Extinct')['txcount']);self.assertGreater(rpc(self.receiver.core,'getwalletinfo',[],name)['txcount'],0);self.assertEqual(rpc(self.receiver.core,'getaddressinfo',[self.old_address],name)['labels'],[self.lost])
   if restoration:self.assertEqual(self.store.read()['local_retirements'][ident]['state'],'restored')
 
+ def test_signed_disc_origin_survives_grouped_receive_and_cannot_be_relabelled(self):
+  from wallet_preview import verify
+  with patch('wallet_traits.source_storage',return_value='disc'):self.relay(watch=True)
+  payload=next(iter(self.sender.read()['transfer_previews'].values()));self.assertEqual(payload['preview']['source_storage'],'disc');verify(self.sender,payload)
+  changed=copy.deepcopy(payload);changed['preview']['source_storage']='node'
+  with self.assertRaises(ValueError):verify(self.sender,changed)
  def test_extinct_import_still_refuses_an_active_local_owner(self):self.extinct_source=True;self.active_archive_owner=True;self.relay(watch=True)
  def test_extinct_history_and_lost_labels_transfer_through_authorise_group(self):self.extinct_source=True;self.relay(watch=True)
  def test_receiver_batch_serialises_two_wallets_with_independent_watch_choices(self):self.batch_two=True;self.relay(watch=True)

@@ -8,8 +8,19 @@ window.openLocalWalletHistory=async function(wallet,card){
  closeWalletHistory();const dialog=el('dialog',{class:'wallet-history-dialog','aria-label':wallet+' transaction history'}),content=el('div',{class:'wallet-history-content'}),feedback=el('p',{role:'status'},'Loading local Core history…'),close=el('button',{type:'button',class:'wallet-history-close','aria-label':'Close wallet history'},'×'),state={dialog,content,feedback,card,mode:'address',data:null};walletHistoryView=state;card?.classList.add('wallet-history-selected');close.addEventListener('click',closeWalletHistory);dialog.append(el('header',{class:'wallet-history-heading'},el('h2',{},wallet),close),content,feedback);document.body.append(dialog);dialog.addEventListener('cancel',e=>{e.preventDefault();closeWalletHistory();});dialog.addEventListener('click',e=>{if(e.target===dialog)closeWalletHistory();});dialog.showModal();
  try{const data=await api('authorise/wallet-history',{wallet});if(walletHistoryView!==state)return;state.data=data;renderLocalWalletHistory(state);}catch(error){if(walletHistoryView===state)feedback.textContent=error.message;}
 };
+function vaultHistoryText(v){
+ if(!v)return '';
+ const messages={unfunded:'Vault not funded',unlocked:'The vault is unlocked',mixed:'Error: Mixed vault funds detected',error:'Error: Something is wrong with the vault'};
+ if(v.state!=='locked')return messages[v.state]||messages.error;
+ let left=Math.max(0,Math.floor(v.seconds));if(!Number.isFinite(left))return messages.error;
+ if(left<3600)return 'Vault will be unlocked in '+Math.floor(left/60)+':'+String(left%60).padStart(2,'0');
+ const units=[[31557600,'year'],[2629800,'month'],[604800,'week'],[86400,'day'],[3600,'hour'],[60,'minute'],[1,'second']],parts=[];
+ for(const [seconds,label] of units){const n=Math.floor(left/seconds);left%=seconds;if(n)parts.push(n.toLocaleString('en-AU')+' '+label+(n===1?'':'s'));if(parts.length===2)break;}
+ return 'Vault will be unlocked in '+parts.join(', ');
+}
+window.vaultHistoryText=vaultHistoryText;
 function renderLocalWalletHistory(state){
- const data=state.data;state.content.replaceChildren();state.feedback.textContent=data.notice+' Click the table to switch between addresses and transaction IDs.';
+ const data=state.data;state.content.replaceChildren();if(data.vault_status)state.content.append(el('p',{class:'vault-history-status',title:data.vault_status.notice||'Checked against this node’s current block height and the policies of its unspent outputs.'},vaultHistoryText(data.vault_status)));state.feedback.textContent=data.notice+' Click the table to switch between addresses and transaction IDs.';
  for(const group of data.groups){
   const body=el('tbody'),table=el('table',{class:'wallet-history-table','aria-label':group.name+' transactions',tabindex:'0'}),heading=el('thead',{},el('tr',{},...['Date UTC','Time UTC',state.mode==='address'?'Address':'TXID','Amount','Balance'].map(label=>el('th',{scope:'col'},label))));
   for(const row of group.rows){const stamp=row.timestamp?new Date(row.timestamp*1000).toISOString():null,amount=BigInt(row.amount_sats),tr=el('tr',{class:'wallet-history-row '+(amount>0n?'receive':amount<0n?'send':'neutral')}),address=el('td',{class:'wallet-history-address'});

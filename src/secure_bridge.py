@@ -139,6 +139,10 @@ def stop():
         peer={};state=call('service_status',peer=peer)
         if state.get('status_pending'):raise WorkspaceFailure('workspace_status_pending','Protected status is still being refreshed. Safe cleanup can retry after this local action finishes.')
         if state['busy']:raise WorkspaceFailure('workspace_busy','Finish the wallet setup, physical discs, transfer or history recovery before closing the protected workspace.')
+        from sidebar_counts import save
+        if isinstance(state.get('sidebar_counts'),dict):
+            try:save(state['sidebar_counts'])
+            except OSError:__import__('activity_log').event('sidebar.counts','Last protected counts could not be saved; safe RAM cleanup continues.')
         flag=runtime_dir()/'worker-upgrading';flag.write_text('closing\n')
         try:
             prepare_stop(peer)
