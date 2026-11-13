@@ -5,6 +5,13 @@ from pathlib import Path
 from configuration import SERVICES,hostname
 from diagnostics import ConnectionFailure,ssh_failure
 
+def forward_category(line):
+    text=line.lower()
+    if 'open failed' not in text:return None
+    for needle,category in (('administratively prohibited','forward_denied'),('connection refused','target_refused'),('network is unreachable','target_unreachable'),('no route to host','target_unreachable'),('name or service not known','target_resolution'),('connect failed','target_connect_failed')):
+        if needle in text:return category
+    return 'channel_open_failed'
+
 SSH_FIELDS=('hostname','ssh_user','ssh_port','identity_file')
 def fingerprint(config):
     return hashlib.sha256(json.dumps({k:config[k] for k in SSH_FIELDS},sort_keys=True).encode()).hexdigest()
@@ -42,7 +49,16 @@ class MasterConnection:
         except FileNotFoundError:raise ConnectionFailure('ssh_local','client_missing','OpenSSH client was not found. Install openssh-client before connecting.') from None
         self.error_thread=threading.Thread(target=self._read_errors,daemon=True);self.error_thread.start()
     def _read_errors(self):
-        for line in iter(lambda:self.process.stderr.readline(2048),b''):self.errors.append(line.decode('utf-8',errors='replace'))
+        for line in iter(lambda:self.process.stderr.readline(2048),b''):
+            decoded=line.decode('utf-8',errors='replace');self.errors.append(decoded)
+            # Per-channel failures do not stop the shared master, so they must be
+            # exported while it is alive. Never persist the raw SSH error line.
+            category=forward_category(decoded)
+            if category:
+                try:
+                    from activity_log import event
+                    event('ssh.forward','Shared server channel failed · category='+category+' · remote_target=IPv6_loopback · service=not_attributed')
+                except (OSError,ValueError):pass
     def failure(self):
         if self.process and self.process.poll() is not None and self.error_thread:self.error_thread.join(timeout=.2)
         error=ssh_failure(list(self.errors),0,self.process.poll() if self.process else None)

@@ -1,12 +1,12 @@
-# Wallaby Agent — Development Build 93
+# Wallaby Agent — Development Build 94
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · Development release.
 
 The Agent connects your local Core wallets to Wallaby Wallet while keeping wallet keys and local authorisation on this computer. Peer pairing uses authenticated scan-connect QR codes; wallet and blockchain data use direct paired SSH, with the Server providing signalling only.
 
-Build 93 fixes Receive checkbox flicker during read-only busy status polls, replaces sidebar unread dots with right-aligned attention counts, preserves the last protected counts after closure, and keeps configuration locked continuously through normal cleanup. Sync rows display ordered wallet/source icons. Vault history tables show the state of current unspent outputs, using locally read policies and block heights.
+Build 94 makes the Wallet Synchronisation table compact, gives source menus more width, names single-signature wallets and displays available multisig signer names. SSH channel failures and HTTP transport failures now leave bounded diagnostic categories in the Agent log, including failures while the shared SSH master remains alive.
 
-[Build 93 changes and validation](AGENT_BUILD93_ATTENTION_AND_SYNC.md).
+[Build 94 changes and validation](AGENT_BUILD94_COMPACT_SYNC.md).
 
 The source tree now contains maintained code, current feature tests, protocol/data documentation and Build 88's reference notes. Historical releases are available in Git history rather than accumulated in the current distribution. New packaging builds only the current version and reuses an installer only after verifying its source-input and artifact hashes.
 

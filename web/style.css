@@ -46,7 +46,7 @@ button.is-busy:disabled{cursor:wait}
 #block-download-controls .actions{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:1rem}
 
 /* One alphabetic wallet table; offline peers never look selectable. */
-.sync-table-scroll{overflow-x:auto}.sync-queue select{min-width:195px;max-width:250px}.sync-queue .no-agent,.no-agent:disabled{color:#b12828;opacity:1}.sync-queue td{vertical-align:top}.sync-queue td label{display:block;white-space:nowrap}.sync-queue td button{margin:4px 0;display:block}#sync-count:not(:empty){margin-left:6px;font-weight:700}
+.sync-table-scroll{overflow-x:auto}.sync-queue .no-agent,.no-agent:disabled{color:#b12828;opacity:1}.sync-queue td{vertical-align:top}.sync-queue td label{display:block;white-space:nowrap}.sync-queue td button{margin:4px 0;display:block}#sync-count:not(:empty){margin-left:6px;font-weight:700}
 
 .service-icon img{width:32px;height:32px;object-fit:contain}
 
@@ -203,3 +203,6 @@ dialog video{display:block;width:min(720px,75vw);max-height:60vh;background:#102
 .sync-queue tr.sync-denied{background:#fbe9e7;color:#7a2c28}.sync-queue tr.sync-enabled{background:#eaf5ec;color:#244b30}.sync-queue tr.sync-denied.selected-row{background:#fbe9e7}.sync-queue tr.sync-enabled.selected-row{background:#dcefe0}
 
 .nav-item{display:flex;align-items:center;justify-content:space-between;gap:8px}.nav-item .sidebar-count{margin-left:auto;min-width:1.5em;text-align:right;font-variant-numeric:tabular-nums}.sync-queue input[type=checkbox]:not(:disabled),.sync-queue select:not(:disabled),.sync-queue button:not(:disabled){cursor:pointer}.sync-queue :disabled{cursor:default}.sync-wallet-name{display:flex;align-items:center;gap:9px}.sync-wallet-name .wallet-card-icons{display:flex;align-items:center;flex:none;gap:4px;margin:0}.sync-wallet-name .wallet-card-icon{display:inline-flex;flex:none}.vault-history-status{font-size:18px;font-weight:600;padding:12px 0}
+
+/* Only the actions column gives up space; other columns retain natural sizing. */
+.sync-queue{width:100%;min-width:1080px;table-layout:auto;display:table}.sync-queue .sync-column-actions{width:1%}.sync-queue td:last-child,.sync-queue th:last-child{text-align:right;white-space:nowrap}.sync-queue td:last-child button{white-space:nowrap;margin-left:auto}.sync-queue td:nth-child(3) select{width:100%;min-width:195px;max-width:none}.sync-queue .sync-signer span{display:block}.sync-queue td{padding-top:12px;padding-bottom:12px}

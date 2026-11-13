@@ -1,5 +1,5 @@
 """Wallet Server Agent v1 protocol: separate heartbeat, poll and RPC execution loops."""
-PROCESS_BUILD='2.0.0~dev93'
+PROCESS_BUILD='2.0.0~dev94'
 import base64, concurrent.futures, http.client, json, os, re, socket, threading, time, uuid
 from decimal import Decimal
 from pathlib import Path
@@ -32,7 +32,7 @@ def exchange_http_reason(data):
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev93'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev94'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -50,6 +50,13 @@ def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit
             raise HTTPFailure(response.status,reason)
         try:return decode(data)
         except (ValueError,UnicodeError):raise PublicDataFailure('response_json','The service returned invalid JSON data.') from None
+    except (http.client.HTTPException,ConnectionResetError,BrokenPipeError) as error:
+        from activity_log import event
+        category='closed_before_status' if isinstance(error,http.client.RemoteDisconnected) else 'invalid_status_line' if isinstance(error,http.client.BadStatusLine) else 'incomplete_body' if isinstance(error,http.client.IncompleteRead) else 'connection_reset' if isinstance(error,ConnectionResetError) else 'broken_pipe' if isinstance(error,BrokenPipeError) else 'http_protocol'
+        endpoint=path if path in ('/agent/v1/health','/agent/v1/register','/agent/v1/heartbeat','/agent/v1/poll','/agent/v1/result','/agent/v1/disconnect','/agent/v1/relay','/agent/v2/exchange') else 'local_rpc' if auth else 'other'
+        try: event('http.transport','boundary='+('local_core' if auth else 'wallet_server_tunnel')+' · endpoint='+endpoint+' · category='+category+' · http_status_received='+str(response is not None).lower())
+        except (OSError,ValueError):pass
+        raise
     finally:
         if response is not None:response.close()
         conn.close()
