@@ -1,3 +1,7 @@
+# Build 86 validation
+
+The exact isolated helper launch fails before serving in Build 85 and passes in Build 86. Tests retain the real main loop and unprotected-caller refusal, redirecting only its socket into an isolated temporary directory. All seven source service entry points are imported under the packaged interpreter isolation. Generated-unit fault containment and safe helper-failure diagnostics are checked. Actual Core/Server startup, pairing, receiver-only wallets, SSH blocks, cloning/history recovery, controller handover, log privacy and nine UI suites are rerun. See `AGENT_BUILD86_HELPER_STARTUP.md` for limits and fixture substitutions.
+
 # Build 85 validation
 
 The stale-cleanup reproduction fails on Build 84 and passes on Build 85 with actual isolated Core and Wallet Server HTTP sessions. Handover retains one Server registration; obsolete controllers cannot stop it, and the current owner can. Duplicate-process lock, missing-environment protection, scoped failures, live/down-worker diagnostic export, privacy filtering and nonblocking export are tested. Startup, control traffic, planned Core restart, receiver-only direct wallets and chain recovery regressions remain. See `AGENT_BUILD85_SESSION_OWNERSHIP_AND_DIAGNOSTICS.md` for evidence limits and fixture substitutions.

@@ -4,8 +4,9 @@
 Core restarts in an independent user service even if the stream/worker fails.
 Only blocks/ and chainstate/ cross the helper boundary. Wallet files stay put.
 """
-import fcntl,hashlib,json,os,secrets,shutil,socket,socketserver,struct,subprocess,time
+import fcntl,hashlib,json,os,secrets,shutil,socket,socketserver,struct,subprocess,time,sys
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 from chain_clone_files import *
 from wallet_ops import rpc
 from peer_wallet import frame_read,frame_write,read_exact

@@ -4,9 +4,12 @@ from pathlib import Path
 _lock=threading.Lock();_last={};_running=False
 NUMBERS={'MainPID','ExecMainStatus','NRestarts','MemoryCurrent','MemoryPeak','MemoryMax'}
 STATES={'ActiveState','SubState','Result'}
+HELPERS={'chain','peers','retirement','renames','denials-v2','snap-ram','prepare'}
 
-def service(user):
+def service(user,helper=None):
+    if helper is not None and (user or helper not in HELPERS):raise ValueError('Unsupported diagnostic service.')
     unit='wallaby-agent-node.service' if user else 'wallaby-agent-secure@'+str(os.getuid())+'.service'
+    if helper is not None:unit='wallaby-agent-'+helper+'@'+str(os.getuid())+'.service'
     keys=sorted(NUMBERS|STATES|{'ExecStart','FragmentPath','DropInPaths','ControlGroup'})
     args=['/usr/bin/systemctl']+(['--user'] if user else [])+['show',unit,'--no-pager']+['-p'+k for k in keys]
     try:
@@ -18,11 +21,11 @@ def service(user):
             if value.isdecimal() and len(value)<=20:out[k]=int(value)
         for k in STATES:
             if re.fullmatch('[a-z-]{1,24}',raw.get(k,'')):out[k]=raw[k]
-        out['packaged_unit']=raw.get('FragmentPath')==('/usr/lib/systemd/user/'+unit if user else '/usr/lib/systemd/system/wallaby-agent-secure@.service')
+        out['packaged_unit']=raw.get('FragmentPath')==('/usr/lib/systemd/user/'+unit if user else '/usr/lib/systemd/system/wallaby-agent-'+(helper or 'secure')+'@.service')
         out['dropins']=len(raw.get('DropInPaths','').split())
         if user:out['packaged_launcher']=bool(re.search(r'path=/usr/bin/wallaby-agent(?:[ ;])',raw.get('ExecStart','')))
         group=raw.get('ControlGroup','')
-        if not user and group.startswith('/') and len(group)<512:
+        if not user and helper is None and group.startswith('/') and len(group)<512:
             base=Path('/sys/fs/cgroup');path=(base/group.lstrip('/')/'memory.events').resolve()
             if path.is_relative_to(base):
                 try:
@@ -55,6 +58,9 @@ def snapshot(reason,workspace=None):
             info.update(epoch=workspace.node_epoch,controller_present=workspace.node_controller is not None,node_thread_alive=bool(workspace.node and workspace.node.is_alive()),node_stop_set=bool(workspace.node_stop and workspace.node_stop.is_set()),connected=workspace.node_status.get('color')=='green',viewers=sum(p.poll() is None for p in workspace.viewers))
         event('node.diagnostics',json.dumps(info,sort_keys=True))
         for user in (True,False):event('node.service',json.dumps({'kind':'ordinary' if user else 'protected',**service(user)},sort_keys=True))
+        if reason in ('ordinary_start','ordinary_failure','log_export','protected_export'):
+            for helper in sorted(HELPERS):event('node.helper',json.dumps({'kind':helper,**service(False,helper)},sort_keys=True))
+            for row in helper_failures():event('node.helper_failure',json.dumps(row,sort_keys=True))
     except Exception:pass
 
 def schedule(reason,workspace=None):
@@ -82,3 +88,39 @@ def export_text():
             DiagnosticLog().merge(rows);event('diagnostics.handoff','Current protected diagnostics included in log export.')
         except (ValueError,OSError):event('diagnostics.handoff','Protected diagnostics unavailable at export. Ordinary process and service snapshot included; no workspace or wallet operation was changed.')
     return DiagnosticLog().text()
+
+
+def helper_failures():
+    """Classify recent fixed-helper failures; never copy raw journal messages.
+
+    A required helper can take a worker down before it can export RAM logs.
+    Service status and bounded journal categories therefore belong in exports.
+    """
+    import json
+    units={'wallaby-agent-'+name+'@'+str(os.getuid())+'.service':name for name in HELPERS|{'secure'}}
+    command=['/usr/bin/journalctl','--no-pager','--since=-15min','-n','80','--output=json','--output-fields=MESSAGE,_SYSTEMD_UNIT,UNIT,__REALTIME_TIMESTAMP']
+    for unit in sorted(units):command+=['-u',unit]
+    try:
+        result=subprocess.run(command,capture_output=True,text=True,timeout=1.5)
+        if result.returncode:return [{'available':False,'exit_code':result.returncode}]
+        out=[]
+        for line in result.stdout.splitlines()[-80:]:
+            if len(line)>8192:continue
+            try:raw=json.loads(line)
+            except (ValueError,TypeError):continue
+            if not isinstance(raw,dict):continue
+            unit=raw.get('UNIT') or raw.get('_SYSTEMD_UNIT');message=raw.get('MESSAGE')
+            if not isinstance(unit,str) or unit not in units or not isinstance(message,str):continue
+            row={'kind':units[unit]}
+            match=re.fullmatch(r'.*Main process exited, code=(exited|killed|dumped), status=([0-9]{1,3})(?:/[A-Z0-9]+)?',message)
+            failed=re.fullmatch(r".*Failed with result '(exit-code|signal|core-dump|timeout|oom-kill|resources|start-limit-hit)'\.",message)
+            missing=re.fullmatch(r"ModuleNotFoundError: No module named '([a-z_]{1,64})'",message)
+            if match:row.update(code=match[1],status=int(match[2]))
+            elif failed:row['result']=failed[1]
+            elif missing and missing[1] in {'chain_clone_files','wallet_ops','peer_wallet','cryptography','paramiko'}:row.update(exception='ModuleNotFoundError',module=missing[1])
+            else:continue
+            stamp=raw.get('__REALTIME_TIMESTAMP')
+            if isinstance(stamp,str) and stamp.isdecimal() and len(stamp)<=20:row['at_microseconds']=int(stamp)
+            if row not in out:out.append(row)
+        return out
+    except (OSError,ValueError,subprocess.TimeoutExpired):return [{'available':False}]
