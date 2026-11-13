@@ -391,7 +391,7 @@ NoDisplay=true
 X-KDE-autostart-phase=2
 ''')
 put('usr/share/icons/hicolor/scalable/apps/wallaby-agent.svg',(root/'web/wallaby-agent.svg').read_text())
-for document in ('README.md', 'VALIDATION.md', 'AGENT_BUILD88_WALLET_HISTORY.md', 'AGENT_BUILD89_CURRENT_RELEASE.md', 'AGENT_PROTOCOL.md', 'APPROVAL_PROTOCOL.md', 'DISC_FORMAT.md', 'QR_CODE_LICENSE.md', 'NOISE_LICENSE'):
+for document in ('README.md', 'VALIDATION.md', 'AGENT_BUILD88_WALLET_HISTORY.md', 'AGENT_BUILD89_CURRENT_RELEASE.md','AGENT_BUILD90_CARDS_AND_SYNC.md', 'AGENT_PROTOCOL.md', 'APPROVAL_PROTOCOL.md', 'DISC_FORMAT.md', 'QR_CODE_LICENSE.md', 'NOISE_LICENSE'):
  put('usr/share/doc/wallaby-agent/'+document,(root/document).read_text())
 put('usr/lib/wallaby-agent/configure-renames',(root/'packaging/configure_renames.py').read_text(),0o755)
 put('DEBIAN/postinst','''#!/bin/sh

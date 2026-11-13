@@ -29,7 +29,7 @@ def apply(store,p,session):
             if s.get('sync_offer_session'):retired.append(s['sync_offer_session'])
             del retired[:-128]
             s['sync_offer_session']=session;s.pop('sync_offer_revision',None);s.pop('sync_offer_snapshot_hash',None)
-        previous=s.get('sync_offer_revision',-1);content=digest(p['offers'])
+        previous=s.get('sync_offer_revision',-1);content=digest(p['offers']);changed=new or previous!=p['revision']
         if p['revision']<previous or p['revision']==previous and content!=s.get('sync_offer_snapshot_hash'):raise ValueError('Stale or conflicting public wallet-offer snapshot.')
         s['sync_offers']={o['id']:copy.deepcopy(o) for o in p['offers']};s['sync_offer_revision']=p['revision'];s['sync_offer_snapshot_hash']=content;s['sync_offers_received']=True
         # Withdrawal restricts an unstarted sender selection. Re-enabling may
@@ -42,6 +42,12 @@ def apply(store,p,session):
                 if q.get('kind')=='wallet_transfer' and q['direction']=='send' and row['state']=='pending' and key!=s.get('active_transfer') and not sender_enabled(s,q):
                     choice=s.get('sync_choices',{}).get(key)
                     if choice:choice['selected']=False
+
+    if changed:
+        from collections import Counter
+        from activity_log import event
+        counts=Counter(o['status'] for o in p['offers'])
+        event('sync.offers','Discovery snapshot · offers='+str(len(p['offers']))+' · states='+(','.join(k+':'+str(v) for k,v in sorted(counts.items())) or 'none'))
 
 def rows(store):
     from sync_preferences import policy_id

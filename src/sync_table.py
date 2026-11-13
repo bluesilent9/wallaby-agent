@@ -67,7 +67,7 @@ def state(store,requests):
         if offer['direction']=='send' and offer['status'] in ('disabled','permissions_pending'):continue
         ident=policy_id(offer);row=group(ident,offer['public_wallet']['wallet_name'])
         row['multisig']=row.get('multisig',False) or multisig(offer['public_wallet'])
-        row['offers'].append({'direction':offer['direction'],'status':offer['status']})
+        row['offers'].append({'direction':offer['direction'],'status':offer['status'],'peer':copy.deepcopy(offer['peer'])})
         if offer['direction']=='receive':row['deny_id']=offer['id']
     for r in requests:
         p=saved['pending'][r['id']]['proposal'];enabled=sender_enabled(saved,p)

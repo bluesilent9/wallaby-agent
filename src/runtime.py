@@ -1,5 +1,5 @@
 """Per-user worker, private status files and rootless systemd control."""
-PROCESS_BUILD='2.0.0~dev89'
+PROCESS_BUILD='2.0.0~dev90'
 import copy, json, os, random, signal, subprocess, tempfile, threading, time, sys
 from pathlib import Path
 from configuration import Config,SERVICES,discover_cookie
@@ -155,7 +155,7 @@ def _worker(kind):
 
 def monitor():
     retire_jellyfin()
-    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev89','pid':os.getpid()}))
+    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev90','pid':os.getpid()}))
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     from node_lifecycle import Lifecycle
     lifecycle=Lifecycle()

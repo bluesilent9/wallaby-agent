@@ -1,10 +1,12 @@
-# Wallaby Agent — Development Build 89
+# Wallaby Agent — Development Build 90
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · Development release.
 
 The Agent connects your local Core wallets to Wallaby Wallet while keeping wallet keys and local authorisation on this computer. Peer pairing uses authenticated scan-connect QR codes; wallet and blockchain data use direct paired SSH, with the Server providing signalling only.
 
-Build 89 fixes coloured Wallets-style cards and the Extinct-history comparison after connecting a peer. Every heartbeat advertises the comparison capability. Reopening Review invalidates previous unavailable results, and a verified peer comparison displays the same address/transaction examples as a local comparison. No peer is required to delete an already-preserved empty wallet with the warning.
+Build 90 makes wallet colours work under the protected page’s strict security policy, adds coloured direct-peer cards with connection lights, and displays the actual sync-discovery blocker instead of reporting every unavailable transfer as a missing Agent. The logged stale IPv6 Extinct transfer also requires the Wallet Server Build 8 request-renewal fix.
+
+[Build 90 changes and validation](AGENT_BUILD90_CARDS_AND_SYNC.md).
 
 The source tree now contains maintained code, current feature tests, protocol/data documentation and Build 88's reference notes. Historical releases are available in Git history rather than accumulated in the current distribution. New packaging builds only the current version and reuses an installer only after verifying its source-input and artifact hashes.
 

@@ -1,3 +1,7 @@
+# Build 90 validation
+
+The real-browser fixture enforces the production Content Security Policy and checks actual coloured wallet/peer backgrounds with no inline colour styles. It tests green/amber/red peer state, server/client labels, connection deletion, stale Server offers without executable requests, and the appearance of receiving controls after a valid request arrives. Local checks preserve deny entries and discovery reasons without inventing transfer authority.
+
 # Current validation
 
 Use `packaging/checks.py` to run current feature checks or specific unittest names. The runner isolates Core/config/runtime paths, refuses real desktop password prompts and confines test wallet deletion/archive swaps to temporary fixtures. It never builds old releases.
