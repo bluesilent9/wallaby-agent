@@ -1,3 +1,7 @@
+# Build 85 validation
+
+The stale-cleanup reproduction fails on Build 84 and passes on Build 85 with actual isolated Core and Wallet Server HTTP sessions. Handover retains one Server registration; obsolete controllers cannot stop it, and the current owner can. Duplicate-process lock, missing-environment protection, scoped failures, live/down-worker diagnostic export, privacy filtering and nonblocking export are tested. Startup, control traffic, planned Core restart, receiver-only direct wallets and chain recovery regressions remain. See `AGENT_BUILD85_SESSION_OWNERSHIP_AND_DIAGNOSTICS.md` for evidence limits and fixture substitutions.
+
 # Build 84 validation
 
 Actual isolated Core 31 and paired SSH test receiver-only private/watch wallet transfers, multisig/original-role restoration, two-wallet batches with independent choices, public vault watch sources and busy/withdrawn/changed/unlocked-source refusal. Clone fixtures run with no sender arming, including recovery after actual reindex. Block fixtures run without source switches, including a behind source, pruning gaps and three-Agent daisy chaining. Native Extinct history/LOST, scan checkpoint, startup, pairing attack, Mobile restriction and release checks are retained. Eight UI suites check receiver consent and removal of sender controls. See `AGENT_BUILD84_RECEIVER_INITIATED_SYNC.md` for fixture and hardware limits.

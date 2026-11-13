@@ -1,22 +1,23 @@
 """Only tunnel lifecycle/status crosses into the ordinary user service."""
-import re,time
+import re,time,secrets
 from diagnostics import ConnectionFailure,describe
 from secure_bridge import call,WorkspaceFailure
 
 class ProtectedNode:
-    def __init__(self,config,port,stop,status):self.port=port;self.stop=stop;self.status=status
+    def __init__(self,config,port,stop,status):self.port=port;self.stop=stop;self.status=status;self.controller=secrets.token_hex(16);self.generation=None
     def run(self):
         from secure_bridge import ensure_running
         generation=None;opened=False
         try:
-            ensure_running();reply=call('node.start',self.port)
+            ensure_running();reply=call('node.start',self.port,self.controller)
             if not isinstance(reply,dict) or not isinstance(reply.get('session'),str) or not 0<len(reply['session'])<=128 or any(ord(c)<32 for c in reply['session']):
                 raise WorkspaceFailure('worker_protocol','The local protected worker returned an invalid node session. Close and restart the protected workspace after finishing sensitive work.')
-            generation=reply['session']
+            generation=reply['session'];self.generation=generation
             while not self.stop.is_set():
-                result=call('node.status',generation)
+                result=call('node.status',generation,self.controller)
                 if not isinstance(result,dict) or result.get('color') not in ('red','amber','green') or not isinstance(result.get('message'),str) or len(result['message'])>2048 or any(ord(c)<32 for c in result['message']):
                     raise WorkspaceFailure('worker_protocol','The local protected worker returned an invalid node status. Close and restart the protected workspace after finishing sensitive work.')
+                if result.get('superseded') is True:raise ConnectionFailure('node','controller_superseded','A newer local node controller owns this connection. The previous controller has stopped without interrupting it.')
                 self.status(result['color'],result['message'])
                 if result.get('failed'):
                     failure=result.get('failure')
@@ -38,5 +39,9 @@ class ProtectedNode:
             raise ConnectionFailure('workspace','local_request','The local protected Bitcoin workspace could not complete the node connection request. Check its status on Services; this is not a Wallet Server protocol error.') from None
         finally:
             if generation is not None:
-                try:call('node.stop',generation)
+                try:call('node.stop',generation,self.controller)
                 except Exception:pass
+
+    def transport_failed(self,stage,code):
+        if self.generation is None:return
+        call('node.connection_lost',stage,code,self.generation,self.controller,timeout=2)

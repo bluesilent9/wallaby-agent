@@ -1,4 +1,5 @@
 """Per-user worker, private status files and rootless systemd control."""
+PROCESS_BUILD='2.0.0~dev85'
 import copy, json, os, random, signal, subprocess, tempfile, threading, time, sys
 from pathlib import Path
 from configuration import Config,SERVICES,discover_cookie
@@ -67,6 +68,14 @@ def apply_config(config,new):
     # The monitor observes SSH setting changes. Workers reattach to its new generation.
 
 def worker(kind):
+    if kind!='node':return _worker(kind)
+    from node_control import runtime_owner
+    with runtime_owner(runtime_dir()) as acquired:
+        from node_diagnostics import schedule
+        schedule('ordinary_start' if acquired else 'duplicate_service')
+        if acquired:return _worker(kind)
+
+def _worker(kind):
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     delay=15;last_failure=None
     def publish(color,message,**extra):
@@ -74,7 +83,7 @@ def worker(kind):
         if color=='green':last_failure=None
         write_status(kind,color,message,last_error=last_failure,**extra)
     while not stop.is_set():
-        tunnel=None;session_stop=None;stage='configuration';failure=None
+        tunnel=None;session_stop=None;node=None;stage='configuration';failure=None
         try:
             config=Config().values
             if not config['enabled'][kind]:break
@@ -100,11 +109,10 @@ def worker(kind):
                 def status(color,message,event=session_stop):
                     if not event.is_set():publish(color,message,tunnel=True,stage='node')
                 status('amber','SSH connected. Checking local Bitcoin Core RPC…')
-                from protected_memory import required
-                if required():
-                    from protected_node import ProtectedNode
-                    node=ProtectedNode(config,tunnel.port,session_stop,status)
-                else:node=NodeClient(config,tunnel.port,session_stop,status)
+                # The ordinary service never opens a second Server/Core session,
+                # even if a legacy launch path omitted the protection environment.
+                from protected_node import ProtectedNode
+                node=ProtectedNode(config,tunnel.port,session_stop,status)
                 def run_node(client=node,event=session_stop,errors=node_errors):
                     try:client.run()
                     except Exception as error:errors.append(describe('dashboard',error))
@@ -120,6 +128,9 @@ def worker(kind):
                 else:publish('green',f'Connected · [::1]:{tunnel.port}',tunnel=True,stage='ssh')
         except Exception as error:
             failure=describe(stage,error)
+            from node_diagnostics import schedule
+            schedule('ordinary_failure')
+            if failure.code=='controller_superseded':return
             if failure.stage=='dashboard' and tunnel is not None:
                 forwarded=tunnel.failure()
                 if forwarded.stage=='ssh_forward':failure=forwarded
@@ -128,8 +139,8 @@ def worker(kind):
         finally:
             if kind=='node' and failure is not None:
                 try:
-                    from secure_bridge import call
-                    call('node.connection_lost',failure.stage if failure.stage in ('rpc','dashboard','ssh','ssh_forward','ssh_local') else 'dashboard',failure.code,timeout=2)
+                    proxy=locals().get('node')
+                    if proxy is not None:proxy.transport_failed(failure.stage if failure.stage in ('rpc','dashboard','ssh','ssh_forward','ssh_local') else 'dashboard',failure.code)
                 except (ValueError,OSError):pass
             if session_stop is not None:session_stop.set()
             if tunnel is not None:tunnel.close()
@@ -144,7 +155,7 @@ def worker(kind):
 
 def monitor():
     retire_jellyfin()
-    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev84','pid':os.getpid()}))
+    (runtime_dir()/'monitor-build.json').write_text(json.dumps({'version':'2.0.0~dev85','pid':os.getpid()}))
     stop=threading.Event();signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     from node_lifecycle import Lifecycle
     lifecycle=Lifecycle()

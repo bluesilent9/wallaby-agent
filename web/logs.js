@@ -11,6 +11,6 @@ document.querySelector('#save-logs').addEventListener('click',async()=>{
   if(!response.ok)throw Error('Could not read the diagnostic log. Check ordinary Agent log storage.');
   const url=URL.createObjectURL(new Blob([await response.text()],{type:'text/plain;charset=utf-8'}));
   const link=document.createElement('a');link.href=url;link.download='Wallaby_Agent.log';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
-  status.textContent='Log download prepared. Protected events are included after safe workspace closure.';
+  status.textContent='Log download prepared. Current protected diagnostics are included when available; service diagnostics are included if the workspace is unavailable.';
  }catch(error){status.textContent=error.message;}finally{button.disabled=false;}
 });

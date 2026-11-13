@@ -36,7 +36,7 @@ def delivery_pending(state):
 class Workspace:
     def __init__(self):
         from node_recovery import Recovery
-        self.recovery=Recovery();self.node_epoch=0;self.peer_start_lock=threading.Lock()
+        self.recovery=Recovery();self.node_epoch=0;self.node_control_lock=threading.RLock();self.node_controller=None;self.peer_start_lock=threading.Lock()
         self.store=Store(root()/ 'state');self.store.identity_root=Config().root
         # Never replay the legacy non-volatile approvals.json into a new workspace.
         # Only the schema-limited denial store survives workspace shutdown.
@@ -258,11 +258,11 @@ class Workspace:
                 return
             if self.node_stop.is_set() and not state.get('active'):return
             time.sleep(.2)
-    def start_node(self,port):
+    def start_node(self,port,controller=None):
         from node_client import NodeClient
         from activity_log import event
         if self.recovery_state().get('expired'):raise ValueError('Connection recovery expired. Re-enable the node interface on Services to retry.')
-        self.node_generation=__import__('secrets').token_hex(16);generation=self.node_generation
+        self.node_controller=controller;self.node_generation=__import__('secrets').token_hex(16);generation=self.node_generation
         self.node_stop=threading.Event();stop=self.node_stop;self.node_port=port
         if not self.recovery_state().get('active'):self.node_status={'color':'amber','message':'Connecting the protected node interface.'}
         def work():
@@ -291,7 +291,7 @@ class Workspace:
                 # The exchange must share the live workspace Store object, not
                 # merely reopen its file: the optional peer service is attached
                 # to this object after asynchronous initialisation completes.
-                client.store=self.store
+                client.store=self.store;client.diagnostic_workspace=self;client.session_sequence=epoch
                 try:client.run()
                 except Exception as error:failure(error)
                 if not self.recovery_state().get('active'):return
@@ -351,6 +351,8 @@ class Workspace:
             if args:raise ValueError('Invalid diagnostic export.')
             enforce()
             from activity_log import DiagnosticLog
+            from node_diagnostics import snapshot
+            snapshot('protected_export',self)
             return DiagnosticLog().records()
         if method in ('ui.request_close','ui.prepare_close'):
             if method=='ui.request_close':
@@ -369,20 +371,10 @@ class Workspace:
             try:
                 enforce();self.begin_close();return {'ok':True}
             finally:self.lock.release()
-        if method=='node.connection_lost':
+        if method in ('node.connection_lost','node.status','node.stop'):
             enforce()
-            from diagnostics import ConnectionFailure
-            if len(args)!=2 or args[0] not in ('rpc','dashboard','ssh','ssh_forward','ssh_local') or not isinstance(args[1],str) or not __import__('re').fullmatch('[a-z][a-z0-9_]{0,63}',args[1]):raise ValueError('Invalid connection failure category.')
-            self.connection_lost(ConnectionFailure(args[0],args[1],'Node transport interrupted.'))
-            if self.node_stop:self.node_stop.set()
-            return {'ok':True}
-        if method in ('node.status','node.stop'):
-            enforce()
-            if len(args)!=1 or args[0]!=self.node_generation:return {'color':'red','message':'Node session changed. Reconnecting.','failed':True}
-            if method=='node.stop':
-                if self.node_stop:self.node_stop.set()
-                return {'ok':True}
-            return dict(self.node_status)
+            from node_control import control
+            return control(self,method,args)
         if method=='status' and not self.lock.acquire(blocking=False):
             enforce()
             result=__import__('copy').deepcopy(getattr(self,'_state_snapshot',{'pending':[],'denied':[],'setups':[],'archives':{},'burn':{},'transfer':{},'outbox_count':0}))
@@ -440,12 +432,8 @@ class Workspace:
             if method=='ui.open':return self.open_view(*args)
             if method=='ui.close':return self.close_views()
             if method=='node.start':
-                port=args[0]
-                if type(port) is not int or not 1<=port<=65535:raise ValueError('Invalid node tunnel port.')
-                if self.node and self.node.is_alive():
-                    if port!=self.node_port or self.node_stop.is_set():raise ValueError('Previous node session is still closing.')
-                    return {'session':self.node_generation}
-                return self.start_node(port)
+                from node_control import start
+                return start(self,args)
             if method=='status':return self.state()
             if method=='core.health':self.ops.core.ready();return {'ok':True}
             if method=='core.public':

@@ -6,7 +6,7 @@ SECONDS=15
 
 def notice(stage):
     return ('Connection issue between the agent and Bitcoin Core' if stage=='rpc'
-            else 'Connection issue between agent and the Wallet Server Server')
+            else 'Connection issue between the Agent and Wallaby Wallet')
 
 class Recovery:
     def __init__(self,clock=time.monotonic):

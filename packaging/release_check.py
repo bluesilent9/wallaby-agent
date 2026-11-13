@@ -12,6 +12,9 @@ def release_version(root):
     version=versions[0];build=match[1]
     badges=re.findall(r'\bBUILD\s+([0-9]+)\b',(root/'web/index.html').read_text())
     if badges!=[build]:raise ValueError('The shared window badge does not match the package/worker build.')
+    for name in ('app.py','runtime.py','node_client.py'):
+        module=ast.parse((root/'src'/name).read_text());labels=[n.value.value for n in module.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='PROCESS_BUILD' for t in n.targets) and isinstance(n.value,ast.Constant)]
+        if labels!=[version]:raise ValueError('The loaded-process build label does not match the installer.')
     for name,minimum in (('app.py',2),('runtime.py',1),('node_client.py',1)):
         found=[]
         for node in ast.walk(ast.parse((root/'src'/name).read_text())):

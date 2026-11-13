@@ -1,4 +1,5 @@
 """Wallet Server Agent v1 protocol: separate heartbeat, poll and RPC execution loops."""
+PROCESS_BUILD='2.0.0~dev85'
 import base64, concurrent.futures, http.client, json, os, re, socket, threading, time, uuid
 from decimal import Decimal
 from pathlib import Path
@@ -31,7 +32,7 @@ def exchange_http_reason(data):
     return {'Unsupported Agent capabilities.':'capabilities','Update Wallaby Agent to V2 Development Build 8 or later.':'agent_version','Resolve the node identity conflict first.':'identity_conflict','Connection expired. Register again.':'session_expired'}.get(value.get('error')) if isinstance(value.get('error'),str) else None
 
 def http_json(port,path,body=None,token=None,timeout=30,auth=None,response_limit=LIMIT):
-    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev84'}
+    headers={'Content-Type':'application/json','X-Wallaby-Agent':'1','X-Wallaby-Agent-Version':'2.0.0~dev85'}
     if token:headers['Authorization']='Bearer '+token
     if auth:headers['Authorization']='Basic '+base64.b64encode(auth.encode()).decode()
     raw=None if body is None else json.dumps(body,allow_nan=False,separators=(',',':')).encode()
@@ -152,6 +153,10 @@ class NodeClient:
         with self.lock:
             if self.error is not None or self.failed.is_set():return
             self.error=describe('dashboard',error);self.failed.set()
+        from activity_log import event
+        from node_diagnostics import schedule
+        event('node.session','Failed · sequence='+str(getattr(self,'session_sequence',0))+' · stage='+self.error.stage+' · code='+self.error.code+' · observed_rpc_requests='+str(len(self.seen)))
+        schedule('session_failed',getattr(self,'diagnostic_workspace',None))
         if getattr(self,'on_failure',None):self.on_failure(self.error)
         self.status('red',str(self.error))
     def consume(self,response):
@@ -246,6 +251,8 @@ class NodeClient:
             if not isinstance(r,dict) or r.get('protocol')!='wallaby-agent' or r.get('version')!=1 or not isinstance(r.get('connection_token'),str) or not r['connection_token']:
                 raise ConnectionFailure('dashboard','protocol','Wallet Server registration returned an incompatible Agent protocol or no session token. Check the Wallet Server Agent service/version on port 56443.')
             self.token=r['connection_token'];self.consume(r)
+            from activity_log import event
+            event('node.session','Registered · sequence='+str(getattr(self,'session_sequence',0))+' · pid='+str(os.getpid())+' · loaded_build='+__import__('worker_upgrade').VERSION)
             from agent_exchange import Exchange
             exchange=Exchange(self.port,self.token,getattr(self,'store',None))
             exchange.cancelled=lambda:self.stop.is_set() or self.failed.is_set()
@@ -262,6 +269,9 @@ class NodeClient:
         finally:
             self.failed.set()
             if self.token:
-                try:self.post('disconnect',{},timeout=2)
+                disconnected=False
+                try:self.post('disconnect',{},timeout=2);disconnected=True
                 except Exception:pass
+                from activity_log import event
+                event('node.session','Closed · sequence='+str(getattr(self,'session_sequence',0))+' · disconnect_confirmed='+str(disconnected).lower()+' · stop_requested='+str(self.stop.is_set()).lower())
             self.pool.shutdown(wait=False,cancel_futures=True)

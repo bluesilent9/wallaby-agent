@@ -31,6 +31,8 @@ with ExitStack() as stack:
  w=Workspace();w.configure({});w.start_node(int(server_port));received=[]
  def control(c):
   peers=getattr(w,'peers',None)
+  if c['op']=='node_control':return w.dispatch(c['method'],c['args'],{})
+  if c['op']=='node_liveness':return {'alive':bool(w.node and w.node.is_alive()),'stopped':bool(w.node_stop and w.node_stop.is_set()),'node':w.node_status,'recovery':w.recovery_state()}
   if c['op']=='status':return {'node':w.node_status,'peer':w.peer_action('status',{}),'relay_thread':bool(peers and peers.thread and peers.thread.is_alive()),'rpc_attached':bool(peers and peers.rpc),'received':len(received)}
   if c['op']=='invite':
    route={'host':'example.test','user':'fixture','port':22,'host_public_key':peers.identity['identity_key'],'host_fingerprint':__import__('wallet_preview').fingerprint(peers.identity['identity_key']),'agent_port':56443,'mobile_port':56444}
