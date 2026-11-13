@@ -1,6 +1,6 @@
 """One address-only historical archive; child labels never confer key authority."""
 import copy
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_labels import address_only,fixed_address,read_labels
 from wallet_ops import rpc
 

@@ -51,7 +51,7 @@ def require(store,key,name,details,staged=None):
 
 
 def verify_history(core,name,details,store):
-    from build8_policy import descriptors
+    from public_policy import descriptors
     from wallet_ops import install_vault
     from wallet_labels import apply_labels
     apply_labels(core,name,details.get('address_labels',[]),write=False)
@@ -354,7 +354,7 @@ class Recovery:
             # subsequent capability/descriptor checks still bind the exact job.
             rpc(self.core,'loadwallet',{'filename':name,'load_on_startup':True},timeout=86400)
             self.check_wallet(name,job)
-            from build8_policy import descriptors
+            from public_policy import descriptors
             if descriptors(rpc(self.core,'listdescriptors',[False],name))!=descriptors(job['details']['public_wallet']):raise ValueError('Local recovery wallet identity changed. No history import was started.')
             return
         if not job.get('staged'):raise ValueError('The received public wallet is not loaded. Inspect Core before continuing recovery.')
@@ -383,7 +383,7 @@ class Recovery:
     def prepare_replay(self,plan):
         from wallet_ops import install_vault
         from wallet_labels import apply_labels
-        from build8_policy import descriptors
+        from public_policy import descriptors
         chain=self.wait_rpc()
         if pruning_identity(chain)!=plan['pruning']:raise ValueError('Core restarted with different pruning settings. Network activity remains paused; no pruning option was changed by the Agent.')
         if rpc(self.core,'getnetworkinfo')['networkactive']:raise ValueError('Core network activity resumed before wallet preparation. Review a new recovery plan to avoid losing wallet history to pruning.')
@@ -445,7 +445,7 @@ class Recovery:
                     from extinct_upgrade import certify
                     from wallet_labels import fixed_address
                     certify(self.core,self.store,name,[fixed_address(r['desc']) for r in job['details']['public_wallet']['descriptors']])
-                from build8_policy import descriptors
+                from public_policy import descriptors
                 with self.store.edit() as saved:saved.setdefault('history_coverage',{})[name]={'identity':digest(sorted(descriptors(job['details']['public_wallet']))),'from_time':job['timestamp'],'tip':chain['bestblockhash']}
                 if not job.get('local_only'):self.store.queue('wallet_transfer_result',{'request_hash':key,'status':'complete','message':'Wallet and vault history verified; pruning settings were unchanged throughout recovery.'})
                 with self.store.edit() as saved:

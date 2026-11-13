@@ -3,7 +3,7 @@ import base64,copy,hashlib,json,os,re,secrets,shutil,subprocess,time,zipfile
 from pathlib import Path
 from approval_store import digest
 from wallet_ops import rpc
-from build8_policy import descriptors
+from public_policy import descriptors
 
 HEX=re.compile('[0-9a-f]{64}')
 def validate(p):

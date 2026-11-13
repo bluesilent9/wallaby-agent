@@ -6,7 +6,7 @@ identity (never a Bitcoin key), namespace and fresh per-transfer challenge.
 import base64,hashlib,json,re,subprocess,tempfile,time
 from pathlib import Path
 from approval_store import digest
-from build8_policy import descriptors,ipv6
+from public_policy import descriptors,ipv6
 
 NAMESPACE='wallaby-wallet-preview-v1'
 

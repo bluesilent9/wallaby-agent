@@ -1,7 +1,7 @@
 """Retire an unused receiving generation, never delete a wallet or signing key."""
 import copy,time
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_ops import rpc
 
 

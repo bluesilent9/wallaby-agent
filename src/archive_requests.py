@@ -1,7 +1,7 @@
 """Wallet Server owns task lifetime; local approval, denials and physical evidence stay here."""
 import copy,re
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 from vault_policy import text
 HEX=re.compile('[0-9a-f]{64}')
 

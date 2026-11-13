@@ -1,7 +1,7 @@
 """Public preservation and separate, locally authorised zero-funds deletion."""
 import copy,re,time,json
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_ops import rpc
 from wallet_labels import address_only,fixed_address
 from vendor.embit.script import address_to_scriptpubkey

@@ -6,7 +6,7 @@ and an owner-only askpass socket. No credentials, files or paths reach Wallet Se
 import base64,contextlib,hashlib,ipaddress,json,os,pwd,re,secrets,shutil,socket,struct,subprocess,sys,tempfile,threading,time
 from pathlib import Path
 from approval_store import Store,digest
-from build8_policy import ipv6,descriptors
+from public_policy import ipv6,descriptors
 from wallet_ops import rpc
 from ipv6_resolver import resolve as resolve_ipv6
 from diagnostics import ConnectionFailure

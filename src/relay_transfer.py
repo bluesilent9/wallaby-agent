@@ -2,7 +2,7 @@
 import hashlib,shutil,tempfile
 from pathlib import Path
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_ops import rpc
 from peer_wallet import active,work_dir,wallet_details,same_facts,validate_details,source_wallet,frame_read,frame_write,MAX_FILE
 

@@ -356,16 +356,9 @@ class Workspace:
             from node_diagnostics import snapshot
             snapshot('protected_export',self)
             return DiagnosticLog().records()
-        if method in ('ui.request_close','ui.prepare_close'):
-            if method=='ui.request_close':
-                if args:raise ValueError('The native close request takes no arguments.')
-            else:
-                # Compatibility for an already running older viewer. The wire
-                # decoder deliberately preserves fractional numbers as Decimal.
-                if len(args)!=1 or type(args[0]) not in (int,float,Decimal):raise ValueError('Invalid legacy close request.')
-                deadline=args[0]
-                if isinstance(deadline,Decimal) and not deadline.is_finite() or not time.monotonic()<deadline<time.monotonic()+8:raise ValueError('Close request expired; no workspace state was changed.')
-            admitted=self.lock.acquire(timeout=10) if method=='ui.request_close' else self.lock.acquire(blocking=False)
+        if method=='ui.request_close':
+            if args:raise ValueError('The native close request takes no arguments.')
+            admitted=self.lock.acquire(timeout=10)
             if not admitted:
                 from activity_log import event
                 event('workspace.close','Close deferred · reason=local_action_in_progress · RAM retained')

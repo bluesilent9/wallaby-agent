@@ -29,7 +29,7 @@ def requests(core,store):
             if a in group['addresses'] and group['addresses'][a]!=labels[a]:raise CloneError('Pending Extinct jobs disagree about historical labels.')
             group['addresses'][a]=labels[a]
         group['keys'].append(key)
-    from build8_policy import descriptors
+    from public_policy import descriptors
     saved=store.read()
     for key,job in original_jobs:
         parents=[(k,row['proposal']) for k,row in saved['pending'].items() if row['proposal'].get('kind')=='wallet_retire' and row['proposal'].get('phase')=='preserve' and not row.get('withdrawn') and not row.get('cancel_requested') and digest({'local_retirement_source_history':k,'wallet':job['wallet']})==key]
@@ -136,7 +136,7 @@ def apply(core,store,r,raw):
 
 
 def verify_originals(core,store,r,records):
-    from build8_policy import descriptors
+    from public_policy import descriptors
     from core_history import parse_record,TX_KEY
     available={row['txid']:row for row in records};saved=store.read()
     for o in r['originals']:
@@ -153,7 +153,7 @@ def verify_originals(core,store,r,records):
 
 def finish(core,store,requests_,proofs):
     from extinct_upgrade import snapshot,valid
-    from build8_policy import descriptors
+    from public_policy import descriptors
     chain=rpc(core,'getblockchaininfo')
     if chain.get('initialblockdownload') or chain['blocks']!=chain['headers']:raise CloneError('The cloned node is not caught up. Pending recovery remains; no history completion was claimed.')
     for name in rpc(core,'listwallets'):

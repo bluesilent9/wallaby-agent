@@ -1,7 +1,7 @@
 """Durable local extinction decisions; no transaction history or signing authority."""
 from approval_store import digest
 from wallet_ops import rpc
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_labels import address_only
 
 

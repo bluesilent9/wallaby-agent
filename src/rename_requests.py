@@ -2,7 +2,7 @@
 import copy,re,time,json
 from pathlib import Path
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_ops import rpc
 from wallet_rename import name,watch_name
 HEX=re.compile('[0-9a-f]{64}')

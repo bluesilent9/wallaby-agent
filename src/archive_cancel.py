@@ -4,7 +4,7 @@ from pathlib import Path
 from approval_store import digest
 from archive_format import identity
 from archive_inventory import evidence,member
-from build8_policy import descriptors
+from public_policy import descriptors
 from setup_messages import verify
 HEX=re.compile('[0-9a-f]{64}')
 CAPABILITY='wallet_archive_cancel_v1'

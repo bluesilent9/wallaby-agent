@@ -1,7 +1,7 @@
 """Strict encrypted multi-wallet container metadata; no executable archive paths."""
 import copy,re
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 
 MAX_ENTRIES=15
 HEX=re.compile('[0-9a-f]{64}')

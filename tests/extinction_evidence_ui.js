@@ -2,7 +2,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert'),path=require('p
 class E{constructor(tag,p={},...items){this.tag=tag;this.props=p;this.items=items.flat().filter(x=>x!=null);this.events={};this.value='';}append(...items){this.items.push(...items.filter(x=>x!=null));}replaceChildren(...items){this.items=items;}addEventListener(k,f){this.events[k]=f;}}
 let calls=[],buttons=[],page=null;const target=new E('section');
 const c={approvalSignature:"",window:{},el:(...x)=>new E(...x),$:()=>target,blockHeight:n=>Number(n).toLocaleString('en-US'),button:(label,style,action)=>{let b=new E('button',{},label);b.action=action;buttons.push(b);return b;},denyButton:()=>new E('button',{},'Deny'),showPage:x=>page=x,notify(){},refresh:async()=>{},reviewApproval:async()=>{},api:async(path,body)=>{calls.push({path,body});return {preservation_complete:true,message:'Preserved'};}};
-vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/wallet_setup.js'),'utf8'),c);
+vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/wallet_history.js'),'utf8'),c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/wallet_setup.js'),'utf8'),c);
 (async()=>{
  c.window.renderWalletApproval({kind:'wallet_retire',id:'preserve',retirement:{history_required:true,history_prepared:false,history_preparation_imports:true,message:'Recovery needed'}},new E('section'));
  assert.match(JSON.stringify(target),/preservation completes automatically/);await buttons.find(b=>b.items[0]==='Authorise extinction and history recovery').action();assert.equal(target.items.length,0);assert.equal(page,null);assert.equal(calls.length,1);

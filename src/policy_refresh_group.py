@@ -1,7 +1,7 @@
 """One local policy consent for an exact set of related signer wallets."""
 import copy,time
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_ops import rpc
 
 

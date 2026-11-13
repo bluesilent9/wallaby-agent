@@ -3,7 +3,7 @@ import copy,re,time
 from approval_store import digest
 from archive_format import identity
 from archive_inventory import member
-from build8_policy import descriptors
+from public_policy import descriptors
 from setup_messages import verify
 from wallet_preview import fingerprint
 HEX=re.compile('[0-9a-f]{64}')

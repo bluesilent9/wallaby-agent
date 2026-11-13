@@ -6,7 +6,7 @@ The production node receives the encrypted wallet backup, never a plaintext key.
 import hashlib
 from pathlib import Path
 from wallet_ops import rpc
-from build8_policy import descriptors
+from public_policy import descriptors
 from vendor.embit.descriptor import Descriptor
 from vendor.embit.descriptor.checksum import checksum
 from vendor.embit.descriptor.arguments import Key

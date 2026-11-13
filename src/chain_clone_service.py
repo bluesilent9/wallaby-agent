@@ -147,7 +147,7 @@ def receive_snapshot(root,stream,hello):
 
 def retained_descriptors(before,after):
     """Core may top up a keypool on reopen; it must never narrow or rewind it."""
-    from build8_policy import descriptors
+    from public_policy import descriptors
     if before.get('wallet_name')!=after.get('wallet_name') or descriptors(before)!=descriptors(after):return False
     old={r['desc']:r for r in before['descriptors']};new={r['desc']:r for r in after['descriptors']}
     for desc,row in old.items():

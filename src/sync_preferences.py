@@ -1,6 +1,6 @@
 """Local receive-policy exclusions. Never a signing exception or remote authority."""
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 
 def policy_id(proposal):return digest(sorted(descriptors(proposal['public_wallet'])))
 

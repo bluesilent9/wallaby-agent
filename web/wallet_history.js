@@ -26,10 +26,18 @@ function renderLocalWalletHistory(state){
  if(!data.groups.length)state.content.append(el('p',{},'No transactions are currently recorded for this wallet.'));
 }
 window.closeLocalWalletHistory=closeWalletHistory;
+window.renderRetirementEvidence=function(e){
+ const panel=el('section',{class:'hint retirement-history-evidence'},el('h3',{},e.remote?'Original history matches the directly connected Extinct wallet':'Original history matches the Extinct wallet'),el('p',{},(e.remote?(e.peer_name||'Paired Agent')+' · ':'')+e.archive+' · Checked every one of '+e.address_count.toLocaleString('en-AU')+' addresses and '+e.transaction_count.toLocaleString('en-AU')+' transactions. Transaction bytes, confirmed blocks and address labels match. The examples below are samples of that complete check.'));
+ const examples=el('details',{open:true},el('summary',{},'Compare verified history samples'));
+ for(const a of e.address_samples)examples.append(el('article',{class:'public-fact'},el('code',{},a.address),el('p',{},a.label+' · label matches Extinct wallet')));
+ for(const t of e.transaction_samples)examples.append(el('article',{class:'public-fact'},el('code',{},t.txid),el('p',{},'Block '+blockHeight(t.height)+' · original and Extinct transaction data match')));
+ panel.append(examples);return panel;
+};
 window.watchRetirementEvidence=function(id,box){
- const panel=el('section',{class:'hint retirement-remote-evidence',role:'status'},'Checking connected Agents for optional preserved-history evidence…');box.append(panel);let attempts=0;
- const update=async()=>{if(box.isConnected===false||attempts++>50)return;try{const r=await api('authorise/retirement-evidence',{id});if(box.isConnected===false)return;panel.replaceChildren(el('p',{},r.message||'Optional history comparison'));
-  if(r.state==='complete'&&r.evidence?.verified){const e=r.evidence;panel.append(el('h3',{},'Original history matches the directly connected Extinct wallet'),el('p',{},e.archive+' · '+e.address_count.toLocaleString('en-AU')+' addresses · '+e.transaction_count.toLocaleString('en-AU')+' transactions. Every record was compared.'));for(const a of e.address_samples)panel.append(el('p',{},a.address+' · '+a.label));for(const t of e.transaction_samples)panel.append(el('p',{},t.txid+' · block '+blockHeight(t.height)));}
+ const panel=el('section',{class:'hint retirement-remote-evidence',role:'status'},'Checking directly connected Agents for preserved-history evidence…');box.append(panel);let attempts=0;
+ const update=async()=>{if(box.isConnected===false||attempts++>50||document.querySelector('#page-authorise')?.hidden)return;try{const r=await api('authorise/retirement-evidence',{id});if(box.isConnected===false)return;
+  if(r.state==='complete'&&r.evidence?.verified){panel.replaceChildren(window.renderRetirementEvidence(r.evidence));box.querySelector('.retirement-elsewhere-warning')?.remove();}
+  else panel.replaceChildren(el('p',{},r.message||'Optional history comparison'));
   if(r.state==='checking'&&typeof setTimeout==='function')setTimeout(update,2000);
- }catch(error){panel.replaceChildren(el('p',{},'Optional remote evidence is unavailable. Deletion does not require a direct connection.'));}};if(typeof setTimeout==='function')setTimeout(update,0);
+ }catch(error){panel.replaceChildren(el('p',{},'Direct history comparison is unavailable. Deletion is still available with the preservation warning.'));}};if(typeof setTimeout==='function')setTimeout(update,0);
 };

@@ -1,18 +1,13 @@
 """Locally verified address archiving and explicitly authorised local retirement."""
 import copy,time,re
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_ops import rpc,sats
-from wallet_labels import apply_labels
-from vendor.embit.descriptor.checksum import checksum
 
 ARCHIVE='Wallaby Extinct'
 class MissingHistory(ValueError):pass
 
-def validate(p):
-    if p.get("version")==3:
-        from retirement_phases import validate as phased
-        return phased(p)
+def validate_inventory(p):
     fields={'kind','version','request_id','wallet','public_wallet','archive_label','require_zero_balance','delete_wallet'}
     if p.get('version')==2:fields.update(('nonce','delete_wallets'))
     if set(p)!=fields or p['kind']!='wallet_retire' or (p['version'],p['delete_wallet']) not in ((1,False),(2,True)) or type(p['version']) is not int or type(p['delete_wallet']) is not bool or p['require_zero_balance'] is not True:raise ValueError('Invalid wallet retirement proposal.')
@@ -34,8 +29,12 @@ def validate(p):
     if p['request_id']!=digest({k:v for k,v in p.items() if k!='request_id'}):raise ValueError('Retirement proposal hash differs.')
     return p
 
+def validate(p):
+    from retirement_phases import validate as current
+    return current(p)
+
 def inventory(core,store,p,collect_only=False,confirmed_manifest=None):
-    validate(p);name=p['wallet'];chain=rpc(core,'getblockchaininfo');info=rpc(core,'getwalletinfo',[],name)
+    validate_inventory(p);name=p['wallet'];chain=rpc(core,'getblockchaininfo');info=rpc(core,'getwalletinfo',[],name)
     if chain.get('initialblockdownload') or chain.get('blocks')!=chain.get('headers') or info.get('scanning') or info.get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('Complete local wallet history is required. Finish node download and rescan first.')
     from wallet_setup_signing import signers_for_policy
     if (p['version']==1 and not info.get('private_keys_enabled') and not signers_for_policy(core,p['public_wallet'])) or descriptors(rpc(core,'listdescriptors',[False],name))!=descriptors(p['public_wallet']):raise ValueError('The selected local wallet policy has no matching private signer or differs from the proposed public policy.')
@@ -127,13 +126,9 @@ class Retirement:
     def review(self,key):
         p=self.store.read()['pending'][key]['proposal']
         try:
-            if p.get('version')==3:
-                from retirement_phases import review
-                facts=review(self.core,self.store,p)
-                if facts.get('existing_preservation_verified'):
-                    from retirement_phases import report_existing
-                    facts=report_existing(self,key,p,facts)
-            else:facts=inventory(self.core,self.store,p)
+            from retirement_phases import review,report_existing
+            facts=review(self.core,self.store,p)
+            if facts.get('existing_preservation_verified'):facts=report_existing(self,key,p,facts)
         except MissingHistory as error:
             ident=digest({'local_retirement_history':key});job=self.store.read().get('history_jobs',{}).get(ident)
             present={}
@@ -144,7 +139,8 @@ class Retirement:
         self.reviews[key]=(facts,time.time());return {'kind':'wallet_retire','id':key,'retirement':facts}
     def prepare_history(self,key):
         p=self.store.read()['pending'][key]['proposal']
-        if p.get('version')==3 and p['phase']=='preserve':
+        validate(p)
+        if p['phase']=='preserve':
             from retirement_phases import prepare_history
             result=prepare_history(self.core,self.store,key,p)
             from retirement_continuation import authorise,finish
@@ -154,14 +150,11 @@ class Retirement:
                 return {'message':'History verified and preservation completed. Waiting for the separate deletion request; original wallets remain intact.','preservation_complete':True}
             result['message']='Extinction preservation is authorised. Authorise This Node recovery on Synchronisation; after it finishes, preservation will complete automatically. Deletion still requires a separate local approval.'
             return result
-        if p.get('version')==3:
-            from retirement_phases import internal
-            original=p;p=internal(p,p['wallet'],p['delete_wallets'])
-        else:original=p
-        validate(original);name=p['wallet'];raw=rpc(self.core,'listdescriptors',[False],name)
-        from wallet_setup_signing import signers_for_policy
+        from retirement_phases import internal
+        original=p;p=internal(p,p['wallet'],p['delete_wallets'])
+        name=p['wallet'];raw=rpc(self.core,'listdescriptors',[False],name)
         private=bool(rpc(self.core,'getwalletinfo',[],name).get('private_keys_enabled'))
-        if (p['version']==1 and not private and not signers_for_policy(self.core,raw)) or descriptors(raw)!=descriptors(p['public_wallet']):raise ValueError('Local signer/policy differs; no recovery job created.')
+        if descriptors(raw)!=descriptors(p['public_wallet']):raise ValueError('Local policy differs; no recovery job created.')
         from wallet_recovery import require
         from wallet_labels import read_labels
         details={'public_wallet':raw,'chain':rpc(self.core,'getblockchaininfo')['chain'],'funded_outputs':[],'address_labels':read_labels(self.core,name,raw,[]),'vaults':[r['public'] for r in self.store.read()['vaults'].values() if r.get('owner_wallet')==name]}
@@ -193,58 +186,12 @@ class Retirement:
             state['pending'].pop(key,None);state.get('retirement_continuations',{}).pop(key,None);state.setdefault('cancelled_requests',{})[key]='retirement';state['completed'][key]={'kind':'wallet_retire','at':time.time(),'result':result};state.get('retirement_cancel_pending',{}).pop(key,None)
         self.reviews.pop(key,None)
         return {'message':result['message']}
-    def approve(self,key,fingerprint=None,history_elsewhere_confirmed=False):
+    def approve(self,key):
         done=self.store.read()['completed'].get(key,{}).get('result',{})
         if done.get('phase')=='preserve' and done.get('status')=='complete' and done.get('history_verified') is True:return {'message':'Existing history was already independently verified. Waiting for separate deletion approval; original wallets remain intact.'}
+        validate(self.store.read()['pending'][key]['proposal'])
         self.active.add(key)
         try:
-            if self.store.read()['pending'][key]['proposal'].get('version')==3:
-                from retirement_phases import approve
-                return approve(self,key,fingerprint,history_elsewhere_confirmed)
-            return self._approve(key)
+            from retirement_phases import approve
+            return approve(self,key)
         finally:self.active.discard(key)
-    def _approve(self,key):
-        row=self.store.read()['pending'][key];old=self.reviews.get(key)
-        if row['state']!='pending' or not old or time.time()-old[1]>600:raise ValueError('Review the retirement request again.')
-        facts=inventory(self.core,self.store,row['proposal'])
-        if facts!=old[0]:raise ValueError('Local wallet history changed. Review it again.')
-        # An uncertain import is not automatically replayed, even after a restart.
-        with self.store.edit() as s:s['pending'][key]['state']='attempted'
-        try:
-            if self.store.read().get('retirement_cancel_pending',{}).get(key):return self._cancel_result(key)
-            if ARCHIVE not in rpc(self.core,'listwallets'):
-                if any(w['name']==ARCHIVE for w in rpc(self.core,'listwalletdir')['wallets']):rpc(self.core,'loadwallet',{'filename':ARCHIVE,'load_on_startup':True})
-                else:rpc(self.core,'createwallet',{'wallet_name':ARCHIVE,'disable_private_keys':True,'blank':True,'descriptors':True,'load_on_startup':True})
-            if rpc(self.core,'getwalletinfo',[],ARCHIVE)['private_keys_enabled']:raise ValueError('Historical archive must have private keys disabled.')
-            requests=[]
-            for item in facts['addresses']:
-                desc='addr('+item['address']+')';requests.append({'desc':desc+'#'+checksum(desc),'timestamp':0,'label':item['label']})
-            result=rpc(self.core,'importdescriptors',{'requests':requests},ARCHIVE,timeout=86400)
-            if not result or not all(x.get('success') for x in result):raise ValueError('Core did not complete every historical address import. Inspect the archive; no operation was replayed.')
-            apply_labels(self.core,ARCHIVE,facts['addresses'],write=False)
-            if self.store.read().get('retirement_cancel_pending',{}).get(key):return self._cancel_result(key)
-            # Recheck every safety condition after the possibly long archive rescan.
-            # The block tip may advance, but wallet history/addresses/policy may not.
-            fresh=inventory(self.core,self.store,row['proposal'])
-            for field in ('addresses','transactions','public_identity','deletion','local_wallets','retained_signers'):
-                if fresh[field]!=facts[field]:raise ValueError('Wallet changed during archiving. No deletion was attempted; review a fresh request.')
-            if self.store.read().get('retirement_cancel_pending',{}).get(key):return self._cancel_result(key)
-            deleted=False;deleted_wallets=[]
-            if facts['delete_wallet']:
-                from wallet_deletion import delete
-                # All paths/policies/zero balances were reviewed together. Unload
-                # the whole approved local group before deleting the first file.
-                for item in facts['deletion']:
-                    rpc(self.core,'unloadwallet',{'wallet_name':item['wallet'],'load_on_startup':False})
-                if set(facts['local_wallets'])&set(rpc(self.core,'listwallets')):raise ValueError('Core did not confirm every wallet unload; no deletion attempted.')
-                for item in facts['deletion']:
-                    if delete(item['target']).get('deleted') is not True:raise ValueError('Local wallet deletion was not confirmed.')
-                    deleted_wallets.append(item['wallet'])
-                deleted=True
-            result={'request_hash':key,'status':'complete'}
-            if row['proposal']['version']==2:result.update(archive_verified=True,history_verified=True,zero_balance_verified=True,wallet_deleted=deleted,archive_wallet=ARCHIVE,address_count=len(facts['addresses']),deleted_wallets=deleted_wallets)
-            self.queue_result(key,result)
-            with self.store.edit() as s:s['completed'][key]={'kind':'wallet_retire','at':time.time(),'result':result};s['pending'].pop(key,None)
-            return {'message':'Used public addresses and labels verified in Wallaby Extinct. '+('This node’s approved local wallet copies were unloaded, removed from startup and deleted.' if deleted else 'The original wallet remains loaded and unchanged (legacy archive-only request).')}
-        except Exception:
-            self.queue_result(key,{'request_hash':key,'status':'error','message':'Archive operation incomplete or uncertain. Inspect Core locally before a fresh request.'});raise

@@ -68,18 +68,21 @@ def request(owner,key):
     if facts.get('history_comparison',{}).get('verified'):return {'state':'complete','evidence':facts['history_comparison']}
     jobs=getattr(owner,'remote_comparisons',None)
     if jobs is None:jobs={};owner.remote_comparisons=jobs
-    binding=digest({'request':row['proposal'],'local_wallets':facts['local_wallets']})
-    if key in jobs and jobs[key]['binding']==binding and (jobs[key]['result']['state']=='checking' or time.monotonic()-jobs[key]['created']<15):return jobs[key]['result']
-    result={'state':'checking','message':'Checking connected Agents for optional Extinct history evidence. Deletion does not depend on this check.'};job={'binding':binding,'result':result,'created':time.monotonic()};jobs[key]=job
     peers=getattr(owner.store,'peers',None)
-    channels=[]
+    channels=[];direct_agents=0
     if peers and getattr(peers,'direct',None):
         for c in list(peers.channels.values()):
             try:
-                if c.peer['role']!='agent' or FEATURE not in getattr(c,'features',set()):continue
+                if c.peer['role']!='agent':continue
                 if peers.channel(c.peer['identity_key']) is not c:continue
-                peers.direct.require(c);channels.append(c)
+                peers.direct.require(c);direct_agents+=1
+                if FEATURE in getattr(c,'features',set()):channels.append(c)
             except ValueError:continue
+    binding=digest({'request':row['proposal'],'local_wallets':facts['local_wallets'],'review':review[1],'channels':sorted((c.id,c.peer['endpoint_id']) for c in channels)})
+    if key in jobs and jobs[key]['binding']==binding and (jobs[key]['result']['state']=='checking' or time.monotonic()-jobs[key]['created']<15):return jobs[key]['result']
+    result={'state':'checking','message':'Checking directly connected Agents against every original history record.'};job={'binding':binding,'result':result,'created':time.monotonic()};jobs[key]=job
+    from activity_log import event
+    event('extinction.compare','Review started · direct_agents='+str(direct_agents)+' · connected_candidates='+str(len(channels)))
     if not channels:
         job['result']={'state':'unavailable','message':'No connected Agent offers an Extinct history comparison. Before deleting, this history should already have been preserved in another node’s Extinct wallet.'};return job['result']
     def run():
@@ -110,10 +113,10 @@ def request(owner,key):
                 if len(evidence.get('address_samples',[]))>5 or len(evidence.get('transaction_samples',[]))>5:raise ValueError('Invalid comparison samples')
                 if any((a.get('address'),a.get('label')) not in address_set for a in evidence['address_samples']) or any((t.get('txid'),t.get('blockhash')) not in tx_set for t in evidence['transaction_samples']):raise ValueError('Comparison samples differ')
                 if any(type(t.get('height')) is not int or t['height']<0 or type(t.get('time')) is not int or t['time']<0 for t in evidence['transaction_samples']):raise ValueError('Invalid comparison block samples')
-                evidence.update(remote=True)
+                evidence.update(remote=True,peer_name=peers.valid_name(getattr(channel,'peer_display_name',None) or peers.persistence.read()['pairs'].get(channel.peer['endpoint_id'],{}).get('name') or 'Paired Agent'))
+                event('extinction.compare','Complete · addresses='+str(evidence['address_count'])+' · transactions='+str(evidence['transaction_count']))
                 job['result']={'state':'complete','evidence':evidence,'message':'Original history matches the Extinct wallet on a directly paired Agent.'};return
             except Exception as error:
-                from activity_log import event
                 event('extinction.compare','Optional receiving comparison unavailable · exception='+type(error).__name__)
             finally:
                 if stream:peers.wallet_bridge.abort(stream)

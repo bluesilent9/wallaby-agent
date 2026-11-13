@@ -13,7 +13,7 @@ from wallet_ops import rpc,install_vault,sats
 from wallet_recovery import Recovery,require,pruning_identity,staging_timestamp
 from peer_wallet import wallet_details
 from approval_store import Store,digest
-from test_build8 import paired
+from fixture_public_policy import paired
 from vendor.embit.transaction import Transaction,TransactionInput,TransactionOutput
 from vendor.embit.script import Script,address_to_scriptpubkey,p2wpkh
 from vendor.embit import ec

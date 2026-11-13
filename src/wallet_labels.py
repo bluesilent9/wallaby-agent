@@ -1,6 +1,6 @@
 """Public address-book facts read from Core, included in the signed wallet review."""
 import re
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_ops import rpc
 from vendor.embit.script import address_to_scriptpubkey
 

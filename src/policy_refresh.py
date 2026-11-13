@@ -1,7 +1,7 @@
 """Locally approve additive public policies; keys, quorum and old history survive."""
 import copy,re,time
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_ops import rpc,sats
 from wallet_setup_signing import restricted
 from vendor.embit.descriptor import Descriptor

@@ -7,7 +7,7 @@ wallet, complete public policy and history before restoration is recorded.
 import io,secrets,tempfile
 from pathlib import Path
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_ops import rpc
 from core_history import database,compact_read,supported
 

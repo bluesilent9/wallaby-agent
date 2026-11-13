@@ -6,7 +6,7 @@ from wallet_ops import rpc
 from wallet_setup import MemoryCore,secret_dialog
 from setup_policy import policy
 from setup_messages import verify
-from build8_policy import descriptors
+from public_policy import descriptors
 from disc_backup import decrypt_file
 from disc_archive import recover,direct_read,decode_header,align,HEADER,MAX_PACKAGE,MAX_MEDIA
 from vendor.embit.descriptor import Descriptor

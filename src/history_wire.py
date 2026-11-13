@@ -37,7 +37,7 @@ def export(core,store,p,details,folder,version=1):
     if not wanted<=labels.keys():raise ValueError('Source Extinct labels are incomplete.')
     manifest={'addresses':[{'address':a,'label':labels[a]} for a in sorted(wanted)],'transactions':[{'txid':i,'blockhash':alltx[i][0]['blockhash']} for i in sorted(ids)]}
     rows=collect(core,[name],ids,folder);validate_rows(core,rows,manifest,allow_unfunded=version==2)
-    packet={'version':version,'public_identity':digest(sorted(__import__('build8_policy').descriptors(p['public_wallet']))),'manifest':manifest,'records':rows}
+    packet={'version':version,'public_identity':digest(sorted(__import__('public_policy').descriptors(p['public_wallet']))),'manifest':manifest,'records':rows}
     if version==2:
         from extinct_history_sync import coverage
         packet['coverage']=coverage(core,name,wanted,ids)
@@ -62,7 +62,7 @@ def receive(core,store,p,details,header,stream,read_exact,folder):
             block=read_exact(stream,min(65536,remaining));f.write(block);hasher.update(block);remaining-=len(block)
     if hasher.hexdigest()!=message['sha256']:raise ValueError('Public history checksum mismatch. No archive was updated.')
     packet=json.loads(path.read_text())
-    if not isinstance(packet,dict) or type(packet.get('version')) is not int or packet['version'] not in (1,2) or set(packet)!=({'version','public_identity','manifest','records','coverage'} if packet['version']==2 else {'version','public_identity','manifest','records'}) or packet['public_identity']!=digest(sorted(__import__('build8_policy').descriptors(p['public_wallet']))):raise ValueError('Public historical policy identity differs from the authorised archive.')
+    if not isinstance(packet,dict) or type(packet.get('version')) is not int or packet['version'] not in (1,2) or set(packet)!=({'version','public_identity','manifest','records','coverage'} if packet['version']==2 else {'version','public_identity','manifest','records'}) or packet['public_identity']!=digest(sorted(__import__('public_policy').descriptors(p['public_wallet']))):raise ValueError('Public historical policy identity differs from the authorised archive.')
     if packet['version']==1:
         from retirement_phases import manifest
         manifest(packet['manifest'])

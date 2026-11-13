@@ -13,7 +13,7 @@ SECRET={b'key',b'ckey',b'mkey',b'wkey',b'walletdescriptorkey',b'walletdescriptor
 def create(core,name,path):
     from peer_wallet import work_dir
     from core_ram_path import for_core
-    from build8_policy import descriptors
+    from public_policy import descriptors
     supported(core);path=Path(path)
     if path.exists():raise ValueError('A public recovery snapshot already exists.')
     with tempfile.TemporaryDirectory(dir=work_dir(core)) as folder:
@@ -44,7 +44,7 @@ def create(core,name,path):
 
 
 def verify(path):
-    from build8_policy import descriptors
+    from public_policy import descriptors
     flags=False
     with database(Path(path).resolve()) as db:
         for key,value in db.execute('select key,value from main'):

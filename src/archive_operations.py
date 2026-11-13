@@ -3,7 +3,7 @@ import copy,hashlib,shutil,time
 from pathlib import Path
 from approval_store import digest
 from wallet_ops import rpc
-from build8_policy import descriptors
+from public_policy import descriptors
 from wallet_setup import MemoryCore,secret_dialog
 from wallet_setup_signing import signers_for_policy
 from archive_format import identity,bundle

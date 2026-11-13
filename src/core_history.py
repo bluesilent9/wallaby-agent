@@ -149,7 +149,7 @@ def install(core,store,archive,rows,manifest,coverage=None,*,allow_unfunded=Fals
     from core_ram_path import for_core
     from wallet_deletion import target,delete
     from archive_swap import swap,cleanup
-    from build8_policy import descriptors
+    from public_policy import descriptors
     from wallet_labels import address_only
     supported(core)
     info=rpc(core,'getwalletinfo',[],archive);raw=rpc(core,'listdescriptors',[False],archive)
@@ -200,7 +200,7 @@ def install(core,store,archive,rows,manifest,coverage=None,*,allow_unfunded=Fals
 
 
 def check(core,wallet,raw,rows,manifest):
-    from build8_policy import descriptors
+    from public_policy import descriptors
     info=rpc(core,'getwalletinfo',[],wallet)
     if info.get('private_keys_enabled') is not False or info.get('scanning') or descriptors(rpc(core,'listdescriptors',[False],wallet))!=descriptors(raw):raise ValueError('Restored public archive capability or policy differs.')
     for row in manifest['addresses']:

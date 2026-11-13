@@ -99,9 +99,7 @@ class Peers:
         auto=role in ('auto','connect')
         if role not in ('agent','mobile','auto','connect') or self.identity['role']=='mobile' and not auto:raise ValueError('Invalid pairing role.')
         self.validate_route(relay);now=int(time.time());ident=secrets.token_hex(32)
-        message={'protocol':'wallaby-wallet-peer-pair','version':1,'kind':'agent_invitation','invitation_id':ident,'issuer_role':'agent','allowed_peer_role':role,'issuer_identity_key':self.identity['identity_key'],'issuer_noise_public_key':self.identity['noise_public_key'],'issuer_endpoint_id':self.identity['endpoint_id'],'cipher_suite':CIPHER,'pairing_secret':b64(secrets.token_bytes(32)),'expires_at':now+120,'relay':relay}
-        if auto:message.update(version=2,issuer_role=self.identity['role'],allowed_peer_role='auto' if self.identity['role']=='agent' else 'agent',issuer_name=self.valid_name(self.device_name))
-        if role=='connect':message.update(version=3,pairing_mode='scan-connect')
+        message={'protocol':'wallaby-wallet-peer-pair','version':3,'kind':'agent_invitation','invitation_id':ident,'issuer_role':self.identity['role'],'allowed_peer_role':('auto' if self.identity['role']=='agent' else 'agent') if auto else role,'issuer_identity_key':self.identity['identity_key'],'issuer_noise_public_key':self.identity['noise_public_key'],'issuer_endpoint_id':self.identity['endpoint_id'],'cipher_suite':CIPHER,'pairing_secret':b64(secrets.token_bytes(32)),'expires_at':now+120,'relay':relay,'issuer_name':self.valid_name(self.device_name),'pairing_mode':'scan-connect'}
         with self.lock:self.invitations={ident:message}
         return sign(self.store,message,INVITATION)
     @staticmethod
@@ -112,11 +110,10 @@ class Peers:
     def import_invitation(self,envelope):
         m=envelope.get('message',{}) if isinstance(envelope,dict) else {};fields={'protocol','version','kind','invitation_id','issuer_role','allowed_peer_role','issuer_identity_key','issuer_noise_public_key','issuer_endpoint_id','cipher_suite','pairing_secret','expires_at','relay'}
         version=m.get('version')
-        if version in (2,3):fields.add('issuer_name')
-        if version==3:fields.add('pairing_mode')
-        if set(m)!=fields or m['protocol']!='wallaby-wallet-peer-pair' or type(version) is not int or version not in (1,2,3) or m['kind']!='agent_invitation' or m['issuer_role'] not in ('agent','mobile') or version==1 and m['issuer_role']!='agent' or m['allowed_peer_role'] not in ((self.identity['role'],'auto') if version in (2,3) else (self.identity['role'],)) or m['issuer_role']==self.identity['role']=='mobile' or m['cipher_suite']!=CIPHER or not hexid(m['invitation_id']) or type(m['expires_at']) is not int or not time.time()<m['expires_at']<=time.time()+120 or m['issuer_endpoint_id']!=endpoint(m['issuer_role'],m['issuer_identity_key']):raise ValueError('Expired, wrong-role or invalid pairing invitation. Automatic pairing requires a matching updated Agent or Mobile.')
-        if version==3 and m['pairing_mode']!='scan-connect':raise ValueError('Invalid QR connection mode.')
-        if version in (2,3):
+        fields.update(('issuer_name','pairing_mode'))
+        if set(m)!=fields or m['protocol']!='wallaby-wallet-peer-pair' or type(version) is not int or version!=3 or m['kind']!='agent_invitation' or m['issuer_role'] not in ('agent','mobile') or m['allowed_peer_role'] not in (self.identity['role'],'auto') or m['issuer_role']==self.identity['role']=='mobile' or m['cipher_suite']!=CIPHER or not hexid(m['invitation_id']) or type(m['expires_at']) is not int or not time.time()<m['expires_at']<=time.time()+120 or m['issuer_endpoint_id']!=endpoint(m['issuer_role'],m['issuer_identity_key']):raise ValueError('Expired, wrong-role or invalid pairing invitation. Automatic pairing requires a matching updated Agent or Mobile.')
+        if m['pairing_mode']!='scan-connect':raise ValueError('Invalid QR connection mode.')
+        if version==3:
             self.valid_name(m['issuer_name'])
             if m['issuer_role']=='mobile' and m['allowed_peer_role']!='agent':raise ValueError('A Mobile can pair only with an Agent.')
         binary(m['pairing_secret']);binary(m['issuer_noise_public_key']);self.validate_route(m['relay']);verify(self.store,envelope,m['issuer_identity_key'],INVITATION)
@@ -127,7 +124,7 @@ class Peers:
         # The user imports the QR directly from the trusted Agent screen, not Server.
         c=Channel(self,peer,m['pairing_secret'],m['invitation_id'],True);self.channels[peer['endpoint_id']]=c;self.importing=m;c.first()
         self.diagnostic('pairing_started','QR accepted; authenticated pairing started')
-        return {'message':'Connecting securely. Direct connection setup starts automatically.' if version==3 else 'Older pairing format: confirm this device on the QR-generating device.','peer':peer,'automatic':version==3}
+        return {'message':'Connecting securely. Direct connection setup starts automatically.','peer':peer,'automatic':True}
     @staticmethod
     def valid_name(name):
         if not isinstance(name,str) or not name.strip() or len(name)>128 or any(ord(ch)<32 for ch in name):raise ValueError('Invalid peer device name.')
@@ -135,7 +132,7 @@ class Peers:
     def peer_name(self,c,body):
         # Authenticated display metadata only; roles and pinned keys cannot change.
         if not isinstance(body,dict) or 'device_name' not in body:return
-        c.features={'extinct_compare_v1'} if isinstance(body.get('features'),list) and 'extinct_compare_v1' in body['features'] else set()
+        if 'features' in body:c.features={'extinct_compare_v1'} if isinstance(body['features'],list) and 'extinct_compare_v1' in body['features'] else set()
         name=self.valid_name(body['device_name']);saved=self.persistence.read();row=saved['pairs'].get(c.peer['endpoint_id'])
         if row and row['peer']==c.peer and row['name']!=name:
             row['name']=name;saved['revision']+=1;self.persistence.commit(saved['revision']-1,saved)
@@ -162,7 +159,7 @@ class Peers:
             c.local_grant=True
             if c.remote_grant:self.persist(c)
             c.send('grant',digest(c.prologue),{'accepted':True});c.ready=c.remote_grant
-            if c.ready:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name})
+            if c.ready:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name,'features':['extinct_compare_v1']})
             return {'message':'Local peer permission granted. Compare the same channel code on both devices.'}
     def revoke(self,ident):
         with self.lock:
@@ -325,7 +322,7 @@ class Peers:
                 if value['id'] not in self.acks:self.acks.append(value['id'])
         if self.acks:self.rpc({'action':'ack','ids':self.acks[:16]});self.acks=self.acks[16:]
         for c in list(self.channels.values()):
-            if c.ready and time.monotonic()>=self.backpressured_until and time.monotonic()-getattr(c,'pinged',0)>20:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name});c.pinged=time.monotonic()
+            if c.ready and time.monotonic()>=self.backpressured_until and time.monotonic()-getattr(c,'pinged',0)>20:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name,'features':['extinct_compare_v1']});c.pinged=time.monotonic()
             if c.ready and any(r.get('endpoint_id')==c.peer['endpoint_id'] and r.get('noise_public_key')==c.peer['noise_public_key'] for r in directory) and time.monotonic()-getattr(c,'reported',0)>30:
                 self.control('channel',{'peer_id':c.peer['endpoint_id'],'peer_role':c.peer['role'],'peer_noise_public_key':c.peer['noise_public_key'],'channel_id':c.id,'handshake_hash':c.handshake_hash,'state':'ready' if time.monotonic()-c.seen<=75 else 'closed','paired_by_qr':True});c.reported=time.monotonic()
                 if getattr(self,'direct',None):

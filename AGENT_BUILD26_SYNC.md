@@ -1,9 +1,0 @@
-# Agent V2 Build 26: disabled in-flight wallet previews
-
-The supplied Australia log records `sync.disable` followed by `exchange_unpaired_preview` at 05:12:25 UTC on 2 November 2026. A receiver can disable a policy while an already-created sender preview is in transit. The prior Agent removes the pending request correctly, then rejects the whole exchange because that preview no longer has a pending partner.
-
-Build 26 accepts no new authority: when no pending partner exists, it only considers one exact receive request in the last validated full snapshot whose descriptor policy is currently locally disabled. It verifies the signature and unchanged transfer ID, challenge, descriptor identity and both IPv6 endpoints using the existing checks, then ignores the preview. It does not store it, recreate the pending request, remove a denial, import a wallet or approve a transfer. The diagnostic records the ignored race without wallet keys or addresses. Unknown/unpaired requests remain errors. Existing active previews remain immutable.
-
-Four new tests and 17 existing targeted tests pass, including 11 distinct requests, explicit enable/disable transitions, other previews and acknowledgements in the same exchange, real signatures, altered bindings and no-snapshot refusal.
-
-Dashboard coordination: its chat identified changed/late sender outbox previews rejecting the complete server exchange and blocking other updates. That correction remains on the Dashboard side. Russia also reports an identity conflict after its 05:09:54 UTC reconnect; Agent does not bypass that check or reset its identity. These logs lack per-node authoritative queue counts, so the precise Russia-versus-Australia request deficit cannot be attributed to Agent alone. This Agent fix addresses the independently reproduced receiver race, and requires no new message kind or schema.

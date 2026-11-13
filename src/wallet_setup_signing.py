@@ -5,7 +5,7 @@ Wallet Server names never establish a signing role; every account is matched loc
 """
 import re
 from wallet_ops import rpc
-from build8_policy import descriptors
+from public_policy import descriptors
 from vendor.embit.descriptor import Descriptor
 from vendor.embit.descriptor.checksum import checksum
 

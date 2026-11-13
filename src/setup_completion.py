@@ -3,7 +3,7 @@ import re
 from approval_store import digest
 from setup_messages import verify
 from wallet_ops import rpc
-from build8_policy import descriptors
+from public_policy import descriptors
 
 PENDING='Wallaby setup pending:'
 READY='Wallaby setup ready:'

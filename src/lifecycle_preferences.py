@@ -1,6 +1,6 @@
 """Separate persistent denials for extinction and direct-SSH restoration."""
 from approval_store import digest
-from build8_policy import descriptors
+from public_policy import descriptors
 
 
 def intent(state,p):

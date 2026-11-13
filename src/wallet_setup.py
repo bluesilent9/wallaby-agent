@@ -206,7 +206,7 @@ class WalletSetup:
                     role_wallet(self,session,roles[ident],fresh,destination=self.core,target=target)
                     info=rpc(self.core,'getwalletinfo',[],target)
                     if not info.get('private_keys_enabled') or info.get('unlocked_until')!=0:raise ValueError('Persistent signer failed encrypted/locked verification.')
-                    from build8_policy import descriptors
+                    from public_policy import descriptors
                     if descriptors(rpc(self.core,'listdescriptors',[False],target))!=descriptors(public_policy(fresh)):raise ValueError('Persistent signing wallet differs from the approved full policy.')
                     local[ident]=target
             self.check_cancel(fresh['proposal_hash'])

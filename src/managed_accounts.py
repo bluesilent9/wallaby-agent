@@ -2,7 +2,7 @@
 import re
 from approval_store import digest
 from diagnostics import LocalActionFailure
-from build8_policy import descriptors
+from public_policy import descriptors
 from vendor.embit.descriptor.checksum import checksum
 
 KEY=re.compile(r'Wallaby key [0-9a-f]{12} [0-9a-f]{8}(?:_watch)?')

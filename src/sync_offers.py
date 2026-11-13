@@ -2,7 +2,7 @@
 import copy,json
 from approval_store import digest
 from peer_protocol import hexid
-from build8_policy import descriptors
+from public_policy import descriptors
 from vault_policy import text
 STATUSES={'ready','secure_pairing_required','peer_offline','permissions_pending','discovery_pending','review_paused','history_recovery','local_outcome','earlier_operation','peer_changed','preview_changed','preview_expired','invalid_pair','disabled'}
 

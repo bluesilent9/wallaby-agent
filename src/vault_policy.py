@@ -75,6 +75,6 @@ def validate_proposal(p):
     elif p.get('kind')=='sign_psbt':
         raise ValueError('Legacy immediate-broadcast signing is disabled; update Wallet Server.')
     else:
-        from build8_policy import proposal
+        from public_policy import proposal
         return proposal(p)
     return p
