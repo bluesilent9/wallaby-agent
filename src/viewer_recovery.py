@@ -25,7 +25,7 @@ def tracked_viewers(worker):
     return rows
 
 def resume(page='authorise'):
-    if page not in ('authorise','synchronisation','burn','message','peers'):raise ValueError('Invalid protected page.')
+    if page not in ('authorise','synchronisation','burn','message','peers','wallets'):raise ValueError('Invalid protected page.')
     worker={};status=call('service_status',timeout=10,peer=worker)
     # Replace only exact viewer children in this worker's cgroup. A stuck Qt
     # process can exist even though no usable window is visible on this desktop.

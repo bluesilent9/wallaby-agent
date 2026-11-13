@@ -59,7 +59,15 @@ def rows(store):
             identity=(p.get('transfer_id'),p['direction'],p['peer']['node_id'],policy_id(p));indexed.setdefault(identity,[]).append(key)
     for offer in saved.get('sync_offers',{}).values():
         policy=policy_id(offer)
-        if offer['direction']=='receive' and policy in saved.get('sync_exclusions',{}):continue
         linked=indexed.get((offer['transfer_id'],offer['direction'],offer['peer']['node_id'],policy),[])
         result.append({**copy.deepcopy(offer),'request_id':linked[0] if len(linked)==1 else None})
     return sorted(result,key=lambda r:(r['public_wallet']['wallet_name'].casefold(),r['peer']['hostname'].casefold(),r['id']))
+
+
+def receive_blocker(saved,p):
+    matches=[o for o in saved.get('sync_offers',{}).values() if o['direction']=='receive' and o['transfer_id']==p['transfer_id'] and o['peer']['node_id']==p['peer']['node_id']]
+    states={o['status'] for o in matches}
+    if not states or states=={'ready'}:return None
+    if states & {'preview_changed','preview_expired','peer_changed'}:
+        return 'Wallet Server must renew the signed receiving request. The source or its review changed; no wallet has been received. Your direct pairing and selection are retained.'
+    return 'The source is advertised, but its wallet transfer is not ready ('+', '.join(sorted(states))+'). Wait for current discovery and direct connection checks; no wallet has been received.'

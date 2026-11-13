@@ -21,15 +21,15 @@ function renderSync(t){
  const wallets=[...(t.wallets||[])].sort((a,b)=>a.wallet_name.localeCompare(b.wallet_name,undefined,{sensitivity:'base'})||a.policy_id.localeCompare(b.policy_id));
  const chosenIds=new Set();
  for(const w of wallets){
-  const tr=el('tr',{'data-wallet':w.policy_id}),actions=el('td'),menus={},chosen={};
+  const tr=el('tr',{'data-wallet':w.policy_id,class:w.denied?'sync-denied':'sync-enabled'}),actions=el('td'),menus={},chosen={};
   for(const direction of ['send','receive']){
    const options=(w[direction]||[]).filter(r=>r.direct_ready&&r.state==='pending'&&!(direction==='receive'&&w.denied));
    const key=w.policy_id+'|'+direction,previous=syncPeerChoices.get(key),current=options.find(r=>r.selected)||options.find(r=>r.id===previous)||options[0];
    const select=el('select',{'aria-label':(direction==='send'?'Send to ':'Receive from ')+w.wallet_name});
    const notices=(w.offers||[]).filter(o=>o.direction===direction&&o.peer);
-   if(!options.length)select.append(el('option',{value:''},notices.length?notices.map(o=>o.peer.hostname).join(', ')+' — waiting for transfer request':'No Agent Detected'));
+   if(!options.length)select.append(el('option',{value:''},notices.length?notices.map(o=>o.peer.hostname).join(', ')+(w.denied?'':' — waiting for transfer request'):(w.denied?'Source availability not reported':'No Agent Detected')));
    for(const r of options)select.append(el('option',{value:r.id},direction==='send'?r.receiver:r.sender));
-   select.title=options.length?'Choose the source Agent':notices.length?notices.map(o=>o.peer.hostname).join(', ')+' — waiting for transfer request':'No Agent Detected';select.disabled=!!t.busy||!options.length;select.classList.toggle('no-agent',!options.length&&!notices.length);select.classList.toggle('waiting-route',!options.length&&!!notices.length);
+   select.title=options.length?'Choose the source Agent':notices.length?notices.map(o=>o.peer.hostname).join(', ')+(w.denied?'':' — waiting for transfer request'):(w.denied?'Source availability not reported':'No Agent Detected');select.disabled=!!t.busy||w.denied||!options.length;select.classList.toggle('no-agent',!options.length&&!notices.length);select.classList.toggle('waiting-route',!options.length&&!!notices.length);
    if(current){select.value=current.id;chosen[direction]=current;syncPeerChoices.set(key,current.id);}
    select.addEventListener('change',()=>{const target=options.find(r=>r.id===select.value);if(!target)return;select.blur();syncPeerChoices.set(key,target.id);run(async()=>{await api('synchronisation/route',{id:target.id,selected:!!current?.selected,watch_only:target.watch_only});transferSignature='';});});menus[direction]=select;
   }
@@ -38,12 +38,12 @@ function renderSync(t){
    const r=chosen[direction];if(!r)continue;chosenIds.add(r.id);
    if(direction==='send')continue;
    const select=checkBox((direction==='send'?'Send ':'Receive ')+w.wallet_name,!!r.selected,!!t.busy,selected=>api('synchronisation/route',{id:r.id,selected,watch_only:r.watch_only}));
-   checks.append(el('label',{},select,direction==='send'?'Send':'Receive'));
+   checks.append(select);
    const watch=checkBox('Watch only '+direction+' '+w.wallet_name,!!r.watch_only,!!t.busy||r.watch_only_locked,watch_only=>api('synchronisation/route',{id:r.id,selected:!!r.selected,watch_only}));watchCell.append(watch);
 
   }
   if(!active){const watch=checkBox('Watch only '+w.wallet_name,!!w.local_wallets?.length&&!w.local_private,true,()=>{});watchCell.append(watch);}
-  if(w.denied){actions.append(el('p',{class:'warning'},'Incoming synchronisation disabled'),button('Enable receiving','secondary',async()=>{await api('authorise/enable-sync',{id:w.policy_id});transferSignature='';}));}
+  if(w.denied){actions.append(button('Enable receiving','secondary',async()=>{await api('authorise/enable-sync',{id:w.policy_id});transferSignature='';}));}
   else if(w.deny_id){const deny=button('Deny receiving','secondary',async()=>{await api('authorise/disable-sync',{id:w.deny_id});transferSignature='';});deny.disabled=!!t.busy;actions.append(deny);}
   if(w.send?.some(r=>r.state==='pending'))actions.append(el('small',{},'Receiver starts transfer'));
   if(w.local_wallets?.length)actions.append(el('small',{},'On this Agent'));

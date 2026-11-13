@@ -213,8 +213,8 @@ class Workspace:
         saved=self.store.read()
         connected=self.node_status['color']=='green'
         result={'recovery':self.recovery_state(),'connected':connected,'pending':[{'id':k,'kind':v['proposal']['kind'],'state':('staged' if getattr(self,'archive_ops',None) and self.archive_ops.jobs.get(k,{}).get('phase')=='queued' else v['state']),'wallet_name':__import__('approval_store').title(v['proposal']),'direction':v['proposal'].get('direction'),'rename_stage':v.get('rename_stage'),'rename_error_code':v.get('rename_error_code'),'replaces':sorted(original for original,row in saved['pending'].items() if row.get('cancel_requested')==k) if v['proposal']['kind']=='builder_cancel' else []} for k,v in saved['pending'].items() if (not v.get('withdrawn') or v['proposal']['kind']=='wallet_rename' and v['state']=='attempted') and not v.get('cancel_requested') and v['proposal']['kind']!='broadcast_transaction'],'denied':[{'id':k,'proposal':{'kind':v['proposal']['kind']},'wallet_name':v.get('wallet_name','')} for k,v in saved['denied'].items()],'sync':saved['sync'],'outbox_count':len(saved['outbox']),'transaction_deliveries':[{'id':key,'kind':row['kind'],'wallet':row.get('proposal',{}).get('wallet','Local node'),'state':row.get('delivery','queued'),'status':row.get('status'),'message':row.get('message',''),'txid':row.get('artifact_txid'),'at':row['at']} for key,row in sorted(saved['completed'].items(),key=lambda pair:pair[1].get('at',0),reverse=True) if row.get('kind') in ('sign_psbt_partial','broadcast_transaction') and row.get('outbox_id')][:16],'transfer':self.transfer.state(),'protected':{'running':True,'viewer':True,**enforce()},'burn':self.burn_state(),'archives':self.archives.state(),'exclusions':list(saved.get('sync_exclusions',{}).values()),'request_exclusions':list(saved.get('request_denials',{}).values()),'obsolete_sync_denials':__import__('extinct_sync').obsolete_denials(self.store),'identity':self.setup.own_identity(),'busy':self.busy(),'setups':[{'id':key,'name':v['proposal']['name'],'phase':v['phase'],'cancellation_id':saved.get('cancelled_setups',{}).get(key)} for key,v in self.setup.sessions.items() if v['phase']!='complete']}
-        self._state_snapshot=__import__('copy').deepcopy(result)
         result['pending']=[r for r in result['pending'] if r['kind']!='wallet_transfer']+result['transfer']['receive_approvals']
+        self._state_snapshot=__import__('copy').deepcopy(result)
         return result
     def service_status(self):
         if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
@@ -328,7 +328,7 @@ class Workspace:
         self.viewers=[]
         return {'message':'Protected window closed. The node interface will disconnect and its protected workspace will close automatically.'}
     def open_view(self,page):
-        if page not in ('authorise','synchronisation','burn','message','peers'):raise ValueError('Invalid protected page.')
+        if page not in ('authorise','synchronisation','burn','message','peers','wallets'):raise ValueError('Invalid protected page.')
         if any(p.poll() is None for p in self.viewers):
             self.window_required=True
             return {'message':'The protected window is already open.'}

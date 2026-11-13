@@ -27,6 +27,10 @@ class BatchTransfer(Transfer):
             row=saved['pending'].get(key)
             if not row or row.get('withdrawn') or row['state']!='pending' or row['proposal']['direction']!=direction:raise ValueError('Selected requests changed. Review them again.')
             p=row['proposal']
+            if direction=='receive':
+                from sync_offers import receive_blocker
+                blocker=receive_blocker(saved,p)
+                if blocker:raise ValueError(blocker)
             if not __import__('sync_table').sender_enabled(saved,p):raise ValueError('The receiver has not enabled this wallet. No transfer was started.')
             if p.get('transfer_version')==3 and not __import__('sync_table').direct_ready(self.store,p):raise ValueError('No Agent Detected. Reconnect the directly paired Agent and review the selected wallets again.')
             from managed_accounts import guard

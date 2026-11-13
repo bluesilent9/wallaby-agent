@@ -110,7 +110,12 @@ def prepare(core,store,key,p):
     payload=sign(store,preview);verify(store,payload)
     with store.edit() as s:
         # Only an unchanged currently active request can acquire a verified local snapshot.
-        if key not in s['pending'] or s['pending'][key].get('withdrawn'):raise ValueError('Synchronisation request changed during local verification.')
+        if key not in s['pending'] or s['pending'][key].get('withdrawn') or s['pending'][key]['proposal']!=p:raise ValueError('Synchronisation request changed during local verification.')
+        existing=s.get('transfer_previews',{}).get(key)
+        if existing:
+            # Concurrent read-only reviews must not generate two signed snapshots
+            # for one immutable request (even when only the timestamp differs).
+            return existing
         s.setdefault('transfer_previews',{})[key]=payload;s.get('preview_errors',{}).pop(key,None)
     store.queue('wallet_transfer_preview',{'request_hash':key,**payload});return payload
 

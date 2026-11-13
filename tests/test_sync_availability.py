@@ -24,3 +24,13 @@ class DiscoveryRoutes(unittest.TestCase):
   with patch('activity_log.event') as event:
    apply(self.store,{'kind':'wallet_sync_offers','version':1,'revision':1,'offers':[self.offer]},'session')
    args=event.call_args.args;self.assertIn('peer_changed:1',args[1]);self.assertNotIn(self.raw['wallet_name'],args[1]);self.assertNotIn('wallet-laptop',args[1])
+
+ def test_denial_does_not_hide_advertised_source_or_enable_transfer(self):
+  from sync_offers import rows
+  self.offer['status']='disabled';apply(self.store,{'kind':'wallet_sync_offers','version':1,'revision':1,'offers':[self.offer]},'session');self.assertEqual(rows(self.store)[0]['peer']['hostname'],'wallet-laptop');view=state(self.store,[]);wallet=view['wallets'][0];self.assertTrue(wallet['denied']);self.assertEqual(wallet['offers'][0]['peer']['hostname'],'wallet-laptop');self.assertFalse(wallet['pending']);self.assertEqual(wallet['receive'],[])
+
+ def test_changed_server_preview_cannot_proceed_as_a_ready_receive(self):
+  from sync_offers import receive_blocker
+  p={'transfer_id':self.offer['transfer_id'],'peer':self.offer['peer']}
+  self.offer['status']='preview_changed';self.assertIn('renew',receive_blocker({'sync_offers':{'offer':self.offer}},p))
+  self.offer['status']='ready';self.assertIsNone(receive_blocker({'sync_offers':{'offer':self.offer}},p))
