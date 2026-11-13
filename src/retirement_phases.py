@@ -197,10 +197,13 @@ def review(core,store,p):
         if not preserved and (facts is None or not {(r['address'],r['label']) for r in p['manifest']['addresses']}<=local_addresses or not {digest(r) for r in p['manifest']['transactions']}<=local_transactions):verify_public(core,p)
         return {'phase':'preserve','wallet':p['public_wallet'].get('wallet_name','Retiring wallet'),'archive':p['wallet'],'addresses':p['manifest']['addresses'],'transactions':len(p['manifest']['transactions']),'blocks':chain['blocks'],'manifest_hash':p['manifest_hash'],'delete_wallet':False,'local_wallets':[],'retained_signers':[],'history_method':'existing' if preserved else 'native' if sources else 'rescan','native_sources':sources,'archive_upgrade':whole}
     facts=local_facts(core,store,p);available=local_archives(core)
-    pin=receipt(store,p)
+    receipt(store,p)
     from retirement_evidence import compare
     evidence=compare(core,p,facts,available)
-    facts.update(phase='delete',archive=None,manifest_hash=p['manifest_hash'],preservation_fingerprint=pin,preservation_archive=p['preservation']['archive_wallet'],preservation_node=p['preservation']['node_id'],local_extinct_wallets=available,history_elsewhere_confirmation_required=not evidence['verified'],history_comparison=evidence)
+    if not evidence['verified']:
+        from direct_identity import require
+        require(store,p['preservation']['receipt']['public_key'])
+    facts.update(phase='delete',archive=None,manifest_hash=p['manifest_hash'],preservation_archive=p['preservation']['archive_wallet'],preservation_node=p['preservation']['node_id'],local_extinct_wallets=available,history_elsewhere_confirmation_required=not evidence['verified'],history_comparison=evidence)
     return facts
 
 def imports(core,p,timestamp=0,only_missing=False):
@@ -259,7 +262,6 @@ def approve(owner,key,fingerprint_value=None,history_elsewhere_confirmed=False):
     facts=review(owner.core,owner.store,p)
     # A new block is harmless; any changed wallet/evidence/path needs new review.
     if {k:v for k,v in facts.items() if k not in ('blocks','tip')}!={k:v for k,v in old[0].items() if k not in ('blocks','tip')}:raise ValueError('Retirement data changed since review.')
-    if p['phase']=='delete' and fingerprint_value!=facts['preservation_fingerprint']:raise ValueError('Independently compare the preserving Agent fingerprint before deletion.')
     from activity_log import event
     event('extinction.'+p['phase'],'Local approval accepted · addresses='+str(len(p['manifest']['addresses']))+' · transactions='+str(len(p['manifest']['transactions'])))
     with owner.store.edit() as s:s['pending'][key]['state']='attempted'

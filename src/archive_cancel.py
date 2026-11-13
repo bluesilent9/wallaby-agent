@@ -138,7 +138,9 @@ class Cancellations:
         return facts
     def authorise(self,p,facts,pin,require_disc=True):
         facts=self.display_author(p,facts)
-        if facts['creator_confirmation_required'] and pin!=facts['creator_fingerprint']:raise ValueError('Independently compare and enter the original Agent fingerprint before handling a disc created on another Agent.')
+        if facts['creator_confirmation_required']:
+            from direct_identity import require_fingerprint
+            require_fingerprint(self.store,facts['creator_fingerprint'])
         if require_disc and not facts['disc_read_verified']:raise ValueError('Read the original disc in Disc Operations on this Agent and verify its complete membership before cleanup.')
     def review(self,key):
         p,job,facts=self.facts(key)

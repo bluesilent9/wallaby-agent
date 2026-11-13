@@ -233,11 +233,12 @@ class Transfer:
             from wallet_preview import verify_bound
             payload=self.store.read().get('transfer_previews',{}).get(key)
             if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('The initial node-verified wallet preview is missing. Wallet Server Build 8 needs the documented preview protocol update; receiving is disabled until then.')
+            if row['proposal'].get('transfer_version')!=3:raise ValueError('Reconnect the paired Agents and request a current direct wallet sync. Manual identity entry is no longer supported.')
             proof=verify_bound(self.store,payload,row['proposal'])
             if row['proposal'].get('transfer_version')==3:
                 from peer_mesh import manager
-                c=manager(self.store).binding(row['proposal']);sender_fingerprint=__import__('wallet_preview').fingerprint(c.peer['identity_key'])
-            if sender_fingerprint!=proof['fingerprint']:raise ValueError('The Agent identity fingerprint must match the sending Agent’s own screen. Wallet Server is not a trusted source for it.')
+                c=manager(self.store).binding(row['proposal']);manager(self.store).direct.require(c);sender_fingerprint=__import__('wallet_preview').fingerprint(c.peer['identity_key'])
+            if sender_fingerprint!=proof['fingerprint']:raise ValueError('The signed preview differs from the authenticated direct Agent identity. No transfer was authorised.')
             if row['state']!='pending':raise ValueError('This receiving request was already attempted. Reconcile it before retrying.')
             if not readiness(row['proposal'])['listening']:raise ValueError('Start the receiving machine’s IPv6 SSH listener using the displayed instructions, then Authorise again.')
             if self.thread and self.thread.is_alive():raise ValueError('Receiving is already active. Finish or cancel it first.')
@@ -445,147 +446,11 @@ class Transfer:
             if self.listener is listener and not self.store.read().get('sync_batch'):self.close()
     def send(self,key,username=None,password=None,fingerprint=None):
         row=self.store.read()['pending'].get(key)
-        if row and row['proposal'].get('transfer_version')==3:
-            from relay_transfer import send
-            return send(self,key)
-        with self.lock:
-            current,row=active(self.store)
-            if key!=current or not row or row['state']!='pending' or row['proposal']['direction']!='send':raise ValueError('Review the active sending request.')
-            if not isinstance(username,str) or not re.fullmatch('[a-z_][a-z0-9_-]{0,63}',username):raise ValueError('Enter the receiving machine’s local username.')
-            if not isinstance(password,str) or len(password)>1024 or '\n' in password or '\r' in password:raise ValueError('Invalid receiving login password.')
-            if not isinstance(fingerprint,str) or not re.fullmatch('SHA256:[A-Za-z0-9+/]{43}',fingerprint):raise ValueError('Compare and enter the fingerprint shown on the receiving Agent. Do not obtain it from Wallet Server.')
-            payload=self.store.read().get('transfer_previews',{}).get(key)
-            if not row['proposal'].get('preview_challenge') or not payload:raise ValueError('Wallet Server needs the initial signed-preview protocol update before this wallet can be sent. No credentials or wallet file were sent.')
-            from wallet_preview import verify_bound
-            verify_bound(self.store,payload,row['proposal'])
-            p=row['proposal'];peer=ipv6(p['peer']['ipv6']);own=local_ipv6(peer)
-            if not own:raise ValueError('No routable local IPv6 route to the receiving peer.')
-            details=wallet_details(self.core,p,self.store)
-            if not same_facts(details,{k:payload['preview'][k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels') if k in payload['preview']}):raise ValueError('Wallet history changed. Review the current sending details again before sending.')
-            validate_details(details)
-            self.details=details
-            choice=self.store.read().get('sync_batch',{}).get('options',{}).get(key,{})
-            watch=not p['source_has_private_keys'] or choice.get('watch_only',False)
-            name=None if watch else source_wallet(self.core,p,public_preview=True)
-            with tempfile.TemporaryDirectory(prefix='send-',dir=work_dir(self.core)) as d:
-                root=Path(d);backup=root/'wallet.dat';known=root/'known_hosts';ask=self.store.root/('askpass-'+secrets.token_hex(6)+'.sock');process=None;auth=None;errors=bytearray()
-                try:
-                    scan=subprocess.run(['/usr/bin/ssh-keyscan','-6','-T','5','-p',str(PORT),peer],capture_output=True,text=True,timeout=20)
-                    matched=[]
-                    for line in scan.stdout.splitlines():
-                        fields=line.split()
-                        if len(fields)!=3:continue
-                        value='SHA256:'+base64.b64encode(hashlib.sha256(base64.b64decode(fields[2],validate=True)).digest()).decode().rstrip('=')
-                        if value==fingerprint:matched.append(line)
-                    if not matched:
-                        if scan.stdout.strip():raise ValueError('The receiving SSH host key does not match the fingerprint you entered. Compare it directly with the receiving Agent. No password or wallet file was sent.')
-                        raise ValueError(unreachable_message(peer))
-                    known.write_text('\n'.join(matched)+'\n');known.chmod(0o600)
-                    auth=socket.socket(socket.AF_UNIX);auth.bind(str(ask));ask.chmod(0o600);auth.listen(1);auth.settimeout(30)
-                    def answer():
-                        try:
-                            c,_=auth.accept()
-                            with c:
-                                if struct.unpack('3i',c.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))[1]==os.getuid():c.sendall(password.encode()+b'\n')
-                        except OSError:pass
-                    threading.Thread(target=answer,daemon=True).start()
-                    env={**os.environ,'SSH_ASKPASS':'/usr/bin/wallaby-agent','SSH_ASKPASS_REQUIRE':'force','DISPLAY':os.environ.get('DISPLAY',':0'),'WALLABY_ASKPASS_SOCKET':str(ask)}
-                    cmd=['/usr/bin/ssh','-6','-b',own,'-F','/dev/null','-T','-p',str(PORT),'-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(known),'-o','GlobalKnownHostsFile=/dev/null','-o','PreferredAuthentications=password','-o','PubkeyAuthentication=no','-o','NumberOfPasswordPrompts=1','-o','ConnectTimeout=10','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=2','-o','ForwardAgent=no','-o','ClearAllForwardings=yes',username+'@'+peer,'/usr/bin/wallaby-agent peer-receive']
-                    process=subprocess.Popen(cmd,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,start_new_session=True)
-                    def drain():
-                        while True:
-                            chunk=process.stderr.read(1024)
-                            if not chunk:break
-                            if len(errors)<8192:errors.extend(chunk[:8192-len(errors)])
-                    threading.Thread(target=drain,daemon=True).start()
-                    # Deadline covers peer review, file transfer and restoration; never replay automatically.
-                    timer=threading.Timer(86400,process.kill);timer.daemon=True;timer.start()
-                    try:
-                        manifest={'operation':'manifest','transfer_id':p['transfer_id'],'peer_ipv6':own,'details':details}
-                        if p.get('transfer_version') in (2,3):manifest['watch_only']=watch
-                        elif watch:raise ValueError('Watch-only transfer requires the Build 8 direct protocol.')
-                        frame_write(process.stdin,manifest)
-                        reply=frame_read(process.stdout)
-                        if reply.get('status')!='review_required':raise ValueError('Receiver did not accept this paired request. Authorise on the receiving Agent first.')
-                        reply=frame_read(process.stdout)
-                        if reply.get('status')!='ready':raise ValueError('Receiver did not approve the direct wallet history.')
-                        from signer_restoration import requested,validate_offer,permit_backup
-                        restoration_offer=None
-                        if requested(p):
-                            if 'restore_roles_v1' not in reply.get('features',[]):raise ValueError('The receiver needs Build 65 original-role restoration support. No wallet file was created or sent.')
-                            restoration_offer=validate_offer(p,reply.get('restoration'),reply.get('watch_only',False))
-                        native_peer='chain_sync_v1' in reply.get('features',[])
-                        native_history='core_history_v1' in reply.get('features',[])
-                        if native_peer:
-                            from chain_sync import send as send_chain
-                            send_chain(self.core,process.stdin,lambda _:frame_read(process.stdout),frame_write)
-                        effective_watch=reply.get('watch_only',False)
-                        if type(effective_watch) is not bool or watch and not effective_watch:raise ValueError('Receiver did not honour watch-only mode. No private wallet file was created or sent.')
-                        if effective_watch and restoration_offer:
-                            from watch_snapshot import create
-                            name=source_wallet(self.core,p,public_preview=True);create(self.core,name,backup);size=backup.stat().st_size
-                            if not 0<size<=MAX_FILE:raise ValueError('Public recovery snapshot exceeds the transfer limit.')
-                            checksum=hashlib.sha256(backup.read_bytes()).hexdigest()
-                            header={'operation':'watch_snapshot','size':size,'sha256':checksum,'restoration':{'permit_hash':digest(restoration_offer),'binding_id':restoration_offer['bindings'][0]['binding_id']}}
-                            with self.store.edit() as saved:saved['pending'][key]['state']='attempted'
-                            frame_write(process.stdin,header)
-                            with backup.open('rb') as f:shutil.copyfileobj(f,process.stdin,65536)
-                            process.stdin.flush();answer=frame_read(process.stdout)
-                            if answer.get('status')!='loaded' or answer.get('transfer_id')!=p['transfer_id'] or answer.get('wallet_identity')!=digest(sorted(descriptors(p['public_wallet']))):raise ValueError('Receiver did not verify its complete watch-only restoration snapshot.')
-                            frame_write(process.stdin,{'status':'confirmed'});self.complete(key);return {'ok':True}
-                        if effective_watch:
-                            with self.store.edit() as state:state['pending'][key]['state']='attempted'
-                            if native_history and __import__('extinct_sync').grouped(p['public_wallet']):
-                                from history_wire import export
-                                file,history_header=export(self.core,self.store,p,details,root,version=2 if 'core_history_v2' in reply.get('features',[]) else 1)
-                                frame_write(process.stdin,history_header)
-                                with file.open('rb') as f:
-                                    while True:
-                                        chunk=f.read(65536)
-                                        if not chunk:break
-                                        process.stdin.write(chunk)
-                                process.stdin.flush()
-                            else:frame_write(process.stdin,{'operation':'public_wallet'})
-                            reply=frame_read(process.stdout)
-                            if reply.get('status')=='history_deferred' and reply.get('transfer_id')==p['transfer_id']:
-                                frame_write(process.stdin,{'status':'confirmed'})
-                                with self.store.edit() as state:state['pending'][key]['state']='pending'
-                                self.error='Extinct history deferred by the receiving Agent until local extinction completes. Core block catch-up completed; no archive import was reported.'
-                                return {'ok':True,'deferred':True}
-                            if reply.get('status')=='recovery_required' and reply.get('transfer_id')==p['transfer_id']:
-                                frame_write(process.stdin,{'status':'confirmed'});self.pending_recovery(key);return {'ok':True,'recovery_required':True}
-                            if reply.get('status')!='loaded' or reply.get('transfer_id')!=p['transfer_id'] or reply.get('wallet_identity')!=digest(sorted(descriptors(p['public_wallet']))):raise ValueError('Receiver did not confirm a matching watch wallet.')
-                            frame_write(process.stdin,{'status':'confirmed'});self.complete(key);return {'ok':True}
-                        # Revalidate the source immediately before making a consistent Core backup.
-                        source_wallet(self.core,p,require_encrypted=True,restoration_permit=restoration_offer);rpc(self.core,'backupwallet',[__import__('core_ram_path').for_core(self.core,backup)],name)
-                        size=backup.stat().st_size
-                        if not 0<size<=MAX_FILE:raise ValueError('Wallet backup exceeds the 256 MiB transfer limit.')
-                        h=hashlib.sha256()
-                        with backup.open('rb') as f:
-                            for chunk in iter(lambda:f.read(65536),b''):h.update(chunk)
-                        header={'size':size,'sha256':h.hexdigest()}
-                        if restoration_offer:header['restoration']=permit_backup(p,restoration_offer,backup)
-                        with self.store.edit() as s:s['pending'][key]['state']='attempted'
-                        frame_write(process.stdin,header)
-                        with backup.open('rb') as f:shutil.copyfileobj(f,process.stdin,65536)
-                        process.stdin.flush();reply=frame_read(process.stdout)
-                        if reply.get('status')=='recovery_required' and reply.get('transfer_id')==p['transfer_id']:
-                            frame_write(process.stdin,{'status':'confirmed'});self.pending_recovery(key);return {'ok':True,'recovery_required':True}
-                        if reply.get('status')!='loaded' or reply.get('transfer_id')!=p['transfer_id'] or reply.get('wallet_identity')!=digest(sorted(descriptors(p['public_wallet']))):raise ValueError('Receiver did not confirm a matching, loaded wallet. Check both Core instances before retrying.')
-                        frame_write(process.stdin,{'status':'confirmed'});self.complete(key);return {'ok':True}
-                    except (ValueError,BrokenPipeError,OSError) as error:
-                        text=errors.decode(errors='replace').lower()
-                        if 'permission denied' in text:raise ValueError('SSH login was rejected by the receiving computer. Check its local username and computer login password; ensure that account is permitted to log in and that the receiver allows password authentication. This is not the Bitcoin wallet passphrase. The wallet file was not sent before login.') from None
-                        if 'invalid choice' in text or 'no such file' in text:raise ValueError('The receiving machine needs this Agent build and its locally authorised Synchronisation page. Update and open the receiving Agent before retrying.') from None
-                        if 'timed out' in text or 'no route' in text or 'connection refused' in text:raise ValueError('Direct SSH to the receiver failed. Check SSH and UFW on the receiver, then its modem’s inbound IPv6 TCP 22 exception. If the sender restricts outgoing traffic, allow outbound TCP 22. Check VPNs and that both displayed IPv6 addresses are current.') from None
-                        raise ValueError(str(error)+' Check both Agents; confirm Authorise was clicked on the receiver and review any receiver error. If a transfer was attempted, inspect Core before retrying.') from None
-                    finally:timer.cancel()
-                finally:
-                    if process and process.poll() is None:process.kill()
-                    if process:process.wait(timeout=5)
-                    if auth:auth.close()
-                    ask.unlink(missing_ok=True)
-                    password=None
+        if not row or row['proposal'].get('transfer_version')!=3:
+            raise ValueError('Use the paired direct connection and approve Receive on the receiving Agent. Legacy login transfers are unavailable.')
+        from relay_transfer import send
+        return send(self,key)
+
 
 def peer_receive(input_stream=None,output_stream=None,ssh_connection=None):
     from protected_memory import required,inside

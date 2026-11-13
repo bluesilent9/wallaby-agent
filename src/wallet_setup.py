@@ -117,22 +117,13 @@ class WalletSetup:
         self.reviews[key]=(facts,time.time());return {'kind':'wallet_setup_policy','id':key,'setup':facts,'unlock_estimates':self.unlock_estimates(facts)}
     def check_cancel(self,binding):
         if binding in self.store.read().get('cancelled_setups',{}):raise ValueError('Wallet Server requested cancellation. Review Delete and Cancel or Backup and Cancel on Authorise before continuing.')
-    def approve_proposal(self,key,pins):
+    def approve_proposal(self,key,pins=None):
         self.enforce();row=self.store.read()['pending'][key];p=proposal(row['proposal']);own=self.own_identity()
         if rpc(self.core,'getblockchaininfo')['chain']!=p['chain']:raise ValueError('The proposed network differs from this local node.')
         from peer_mesh import observe,pins as trusted_pins
         observe(self.store,p,'proposal',strict=True)
-        if p.get('version')==2:pins=trusted_pins(self.store,p)
-        identities={r['agent_key'] for r in p['cosigners']}
-        expected={fingerprint(key) for key in identities}
-        # Current UI enters each distinct producer once. Accept exact legacy role
-        # maps only when every role still matches its full independent fingerprint.
-        if p['kind']!='wallet_setup' or row['state']!='pending' or not isinstance(pins,dict):raise ValueError('Review and independently verify every distinct producing Agent.')
-        if set(pins)==expected:
-            if any(pins[f]!=f for f in expected):raise ValueError('An independently entered Agent fingerprint does not match.')
-        elif set(pins)=={r['id'] for r in p['cosigners']}:
-            if any(pins[r['id']]!=fingerprint(r['agent_key']) for r in p['cosigners']):raise ValueError('An independently entered Agent fingerprint does not match.')
-        else:raise ValueError('Verify each distinct producing Agent in this exact wallet setup.')
+        if p['kind']!='wallet_setup' or row['state']!='pending':raise ValueError('Review this exact wallet setup first.')
+        pins=trusted_pins(self.store,p)
         from combined_wallet import wallet_name
         local_roles=[r for r in p['cosigners'] if r['agent_key']==own['public_key'] and r['storage']=='node']
         planned=[wallet_name(p,r) for r in local_roles] or [wallet_name(p)]

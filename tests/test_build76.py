@@ -63,7 +63,17 @@ class Startup(unittest.TestCase):
    until(direct_ready)
    for a in agents:
     status=a.call(op='status');self.assertTrue(status['relay_thread']);self.assertFalse(status['peer']['pending']);self.assertEqual(status['peer']['pairs'][0]['role'],'agent')
+   keys=[a.call(op='status')['peer']['identity']['identity_key'] for a in agents]
+   self.assertTrue(agents[0].call(op='check_identity',key=keys[1])['verified'])
+   self.assertTrue(agents[1].call(op='check_identity',key=keys[0])['verified'])
+   agents[0].call(op='policy_agreement',key=keys[1],policy='exact-policy')
+   until(lambda:agents[1].call(op='policy_agreement',key=keys[0],policy='exact-policy')['verified'])
+   until(lambda:agents[0].call(op='policy_agreement',key=keys[1],policy='exact-policy')['verified'])
+   self.assertFalse(agents[0].call(op='policy_agreement',key=keys[1],policy='server-substitution')['verified'])
    agents[1].call(op='listen');agents[0].call(op='send');until(lambda:agents[1].call(op='status')['received']==1,10)
+   ident=agents[0].call(op='status')['peer']['pairs'][0]['id']
+   agents[0].call(op='disconnect_direct',ident=ident)
+   self.assertFalse(agents[0].call(op='check_identity',key=keys[1])['verified'])
    # Close in dependency order while their isolated Core nodes still exist.
    for a in reversed(agents):a.close()
    server.close()

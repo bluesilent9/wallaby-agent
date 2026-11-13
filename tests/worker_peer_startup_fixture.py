@@ -31,6 +31,16 @@ with ExitStack() as stack:
  w=Workspace();w.configure({});w.start_node(int(server_port));received=[]
  def control(c):
   peers=getattr(w,'peers',None)
+  if c['op']=='check_identity':
+   from direct_identity import require
+   try:require(w.store,c['key']);return {'verified':True}
+   except ValueError:return {'verified':False}
+  if c['op']=='policy_agreement':
+   from peer_protocol import PROTOCOL,CIPHER
+   required={'protocol':PROTOCOL,'version':1,'cipher_suite':CIPHER,'required_agent_keys':sorted([peers.identity['identity_key'],c['key']])}
+   try:return {'verified':peers.agreement(required,'a'*64,'policy',{'policy':c['policy']})}
+   except ValueError:return {'verified':False}
+  if c['op']=='disconnect_direct':peers.direct.delete(c['ident']);return True
   if c['op']=='node_control':return w.dispatch(c['method'],c['args'],{})
   if c['op']=='node_liveness':return {'alive':bool(w.node and w.node.is_alive()),'stopped':bool(w.node_stop and w.node_stop.is_set()),'node':w.node_status,'recovery':w.recovery_state()}
   if c['op']=='status':return {'node':w.node_status,'peer':w.peer_action('status',{}),'relay_thread':bool(peers and peers.thread and peers.thread.is_alive()),'rpc_attached':bool(peers and peers.rpc),'received':len(received)}

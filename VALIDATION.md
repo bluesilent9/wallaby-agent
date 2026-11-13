@@ -1,3 +1,7 @@
+# Build 87 validation
+
+Actual isolated Core deletion succeeds without a fingerprint after complete local preservation checks. Invalid signatures, changed transaction data and missing history remain blocked. Two production Agent processes with a real Wallet Server listener and direct SSH confirm exact policy agreement and reject disagreement/disconnection. Tests also cover substituted/revoked peer identities, paired Mobile restrictions, no manual trust bypass, local disc reads, public API field removal, multisig extinction with missing signers, receiver-only transfers, startup isolation, diagnostic privacy and recovery. Ten UI suites check that typed fingerprint controls are absent while local approvals and evidence remain. See `AGENT_BUILD87_AUTOMATIC_IDENTITIES.md` for fixture substitutions and limits.
+
 # Build 86 validation
 
 The exact isolated helper launch fails before serving in Build 85 and passes in Build 86. Tests retain the real main loop and unprotected-caller refusal, redirecting only its socket into an isolated temporary directory. All seven source service entry points are imported under the packaged interpreter isolation. Generated-unit fault containment and safe helper-failure diagnostics are checked. Actual Core/Server startup, pairing, receiver-only wallets, SSH blocks, cloning/history recovery, controller handover, log privacy and nine UI suites are rerun. See `AGENT_BUILD86_HELPER_STARTUP.md` for limits and fixture substitutions.

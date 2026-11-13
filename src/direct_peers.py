@@ -182,7 +182,7 @@ class Direct:
         # Stream records are blocked from relay independently in Channel.send.
         return self.ready(frame['to'])
     def require(self,c):
-        if not self.ready(c.peer['endpoint_id']):raise ValueError('A direct peer connection is required for wallet and blockchain transfer. Open Peer Connections; no bulk data will be sent through Wallet Server.')
+        if not self.ready(c.peer['endpoint_id']):raise ValueError('A direct Agent connection is required. Open Peer Connections and reconnect the relevant Agent before continuing.')
     def status(self,ident):
         state=self.active.get(ident);pending=self.states.get(ident)
         return {'state':'disabled' if ident in self.disabled else 'ready' if self.ready(ident) else 'negotiating' if pending and not pending.closed else 'waiting','message':self.messages.get(ident,'Waiting for a direct connection.'),'expires_in':max(0,int(state.deadline-time.monotonic())) if state and self.ready(ident) else None,'server':bool(state and state.selected and not state.sessions[state.selected].client)}

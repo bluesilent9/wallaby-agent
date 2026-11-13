@@ -30,9 +30,9 @@ class Channel:
         self.handshake_hash=self.noise.get_handshake_hash().hex();self.seen=time.monotonic()
         if self.local_grant:self.send('grant',digest(self.prologue),{'accepted':True})
     def send(self,kind,operation,body,ttl=None):
-        if kind.startswith('stream_'):
+        if kind.startswith('stream_') or kind=='policy_agreement':
             direct=getattr(self.owner,'direct',None)
-            if not direct:raise ValueError('Direct peer transport is required for bulk data.')
+            if not direct:raise ValueError('Connect the paired Agent in Peer Connections before continuing. Policy confirmation and transfers require the direct connection.')
             direct.require(self)
         ttl=ttl if ttl is not None else (3600 if kind.startswith('stream_') or kind in ('ping','pong') else 120)
         with self.lock:
@@ -52,7 +52,7 @@ class Channel:
         if not isinstance(record,dict) or set(record)!={'protocol','version','header','role','operation_hash','payload_type','expires_at','body'} or record['protocol']!=PROTOCOL or type(record['version']) is not int or record['version']!=1 or record['header']!=expected or record['role']!=self.peer['role'] or not hexid(record['operation_hash']) or type(record['expires_at']) is not int or not time.time()<=record['expires_at']<=time.time()+3600:raise ValueError('Encrypted application header, role or expiry mismatch.')
         if not isinstance(record['payload_type'],str) or len(record['payload_type'])>48:raise ValueError('Invalid encrypted payload type.')
         kind=record['payload_type']
-        if kind.startswith('stream_') and not direct:raise ValueError('Bulk records are forbidden on the Server relay.')
+        if (kind.startswith('stream_') or kind=='policy_agreement') and not direct:raise ValueError('Wallet data and policy confirmations require the direct Agent connection.')
         self.rx+=1;self.seen=time.monotonic()
         if kind=='grant':
             if record['operation_hash']!=digest(self.prologue) or record['body']!={'accepted':True}:raise ValueError('Invalid local peer grant.')

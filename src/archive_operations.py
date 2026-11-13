@@ -166,10 +166,12 @@ class Operations:
         return local
     def destroyed(self,key,confirmed,creator_pin=None):
         self.enforce();p=validate_task(self.store.read()['pending'][key]['proposal'])
-        if p.get('version')==2:raise ValueError('Use the extinct-disc checklist with the independently verified preserving Agent fingerprint.')
+        if p.get('version')==2:raise ValueError('Use the extinct-disc checklist and connect the preserving Agent.')
         if p['kind']!='destroy_disc' or confirmed is not True:raise ValueError('Confirm physical destruction locally before completing the task.')
         proof=self.destruction_proof(p)
-        if proof.get('creator_confirmation_required') and creator_pin!=proof['creator_fingerprint']:raise ValueError('Independently compare the original replacement Agent fingerprint before recording destruction.')
+        if proof.get('creator_confirmation_required'):
+            from direct_identity import require_fingerprint
+            require_fingerprint(self.store,proof['creator_fingerprint'])
         result(self.store,p,'complete',destruction_confirmed_locally=True,archive_id=p['archive_id'],image_sha256=p['replacement_image_sha256'])
         with self.store.edit() as s:s['pending'].pop(key,None);s['completed'][key]={'kind':'destroy_disc','at':time.time()}
         from policy_refresh_backups import destroyed
