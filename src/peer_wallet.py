@@ -275,6 +275,8 @@ class Transfer:
         with self.store.edit() as s:s.pop('active_transfer',None)
         self.details=None # The request remains in the Wallet Server-owned list.
     def receive(self,key,p):
+        from activity_log import event
+        event('sync.receive','Direct receive started · request='+key[:12])
         conn=None;path=None;listener=self.listener
         try:
             if p.get('transfer_version')==3:
@@ -286,9 +288,10 @@ class Transfer:
                 if self.error:raise ValueError(self.error)
                 try:conn,_=listener.accept();break
                 except socket.timeout:continue
-            if conn is None:return
+            if conn is None:raise ValueError('The approved source did not open the direct wallet stream before receiving expired. No wallet was installed.')
             uid=struct.unpack('3i',conn.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))[1]
             if uid!=os.getuid():raise ValueError('Incoming SSH account differs from the authorised local user.')
+            event('sync.receive','Authenticated wallet stream connected · request='+key[:12])
             self.connection=conn
             conn.settimeout(LIFETIME);stream=conn.makefile('rwb',buffering=0);header=frame_read(stream)
             batch=self.store.read().get('sync_batch')
@@ -435,6 +438,7 @@ class Transfer:
                 saved=self.store.read()['pending'].get(key)
                 if saved and saved['state']=='attempted':self.pending_recovery(key)
             self.error=str(e) if isinstance(e,(ValueError,FileExistsError)) else 'Direct transfer failed or its outcome is uncertain. Inspect Core before retrying.'
+            event('sync.receive','Stopped · request='+key[:12]+' · exception='+type(e).__name__+' · attempted='+str(bool(saved and saved['state']=='attempted')).lower() if p.get('transfer_version')==3 else 'Stopped · legacy request')
             if conn:
                 try:frame_write(conn.makefile('rwb',buffering=0),{'status':'error','message':self.error})
                 except OSError:pass

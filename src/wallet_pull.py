@@ -33,10 +33,13 @@ class Pull:
             self.sent={k:v for k,v in self.sent.items() if time.monotonic()-v['at']<2400}
             if len(self.sent)>=128:raise ValueError('Too many recent receiving requests. No automatic retry was started.')
             self.sent[token]=entry
+        from activity_log import event as log_event
+        log_event('sync.pull','Request sent to pinned source · request='+key[:12])
         channel.send('stream_wallet_pull',entry['operation'],{'token':token,'transfer_id':p['transfer_id'],'preview_hash':digest(payload),'watch_only':watch},ttl=60)
         deadline=time.monotonic()+20
         while not event.wait(.1):
             if not self.transfer.listener or self.peers.stop.is_set() or time.monotonic()>deadline:raise ValueError('The source did not accept the receiving request. Install Build 84 on both Agents and check their direct connection. No sender approval is required.')
+        log_event('sync.pull','Source response · status='+(entry['reason'] or 'accepted')+' · request='+key[:12])
         if entry['reason']:raise ValueError(MESSAGES[entry['reason']])
     def __call__(self,channel,record):
         self.peers.direct.require(channel)

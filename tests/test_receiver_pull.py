@@ -20,7 +20,17 @@ class ReceiverPull(DirectCore):
   if source_watch:
    raw=p['public_wallet'];rpc(self.core,'unloadwallet',['Original']);shutil.rmtree(Path(self.core.config['cookie']).parent/'wallets'/'Original');rpc(self.core,'createwallet',{'wallet_name':'Original','disable_private_keys':True,'blank':True})
    results=rpc(self.core,'importdescriptors',[[{k:v for k,v in r.items() if k in ('desc','timestamp','active','internal','range')} for r in raw['descriptors']]],'Original');self.assertTrue(all(r['success'] for r in results));p['public_wallet']=rpc(self.core,'listdescriptors',[False],'Original');p['source_has_private_keys']=False
-  self.setup_peers();p.update(transfer_version=3,node_ipv6=None);p['peer']['ipv6']=None;p['transport']={'protocol':PROTOCOL,'version':1,'cipher_suite':CIPHER,'sender_endpoint':self.a.identity['endpoint_id'],'receiver_endpoint':self.b.identity['endpoint_id'],'sender_identity':self.a.identity['identity_key'],'receiver_identity':self.b.identity['identity_key'],'sender_noise_key':self.a.identity['noise_public_key'],'receiver_noise_key':self.b.identity['noise_public_key']}
+  if getattr(self,'extinct_source',False):
+   from vendor.embit.descriptor.checksum import checksum
+   from fixture_signer_restoration import PASSWORD
+   desc=p['public_wallet']['descriptors'][0]['desc'];self.old_address=rpc(self.core,'deriveaddresses',[desc,*([[0,0]] if '*' in desc else [])])[0];miner=rpc(self.core,'getnewaddress',[],'Miner');rpc(self.core,'generatetoaddress',[1,self.old_address]);rpc(self.core,'generatetoaddress',[101,miner]);rpc(self.core,'walletpassphrase',[PASSWORD,60],'Original');rpc(self.core,'sendall',{'recipients':[miner]},'Original');rpc(self.core,'walletlock',[],'Original');rpc(self.core,'generatetoaddress',[1,miner])
+   rpc(self.core,'createwallet',{'wallet_name':'Wallaby Extinct','disable_private_keys':True,'blank':True});desc='addr('+self.old_address+')';self.lost='Retired Treasury | LOST:06/11/2026 01:02:03 UTC';rpc(self.core,'importdescriptors',[[{'desc':desc+'#'+checksum(desc),'timestamp':0,'label':self.lost}]],'Wallaby Extinct');p['public_wallet']=rpc(self.core,'listdescriptors',[False],'Wallaby Extinct');p['source_has_private_keys']=False;source_watch=True
+  if getattr(self,'active_archive_owner',False):self.wallet(self.receiver.core,'Active local copy',kind)
+  self.setup_peers()
+  if getattr(self,'extinct_source',False):
+   from extinct_upgrade import certify
+   certify(self.core,self.sender,'Wallaby Extinct',[self.old_address])
+  p.update(transfer_version=3,node_ipv6=None);p['peer']['ipv6']=None;p['transport']={'protocol':PROTOCOL,'version':1,'cipher_suite':CIPHER,'sender_endpoint':self.a.identity['endpoint_id'],'receiver_endpoint':self.b.identity['endpoint_id'],'sender_identity':self.a.identity['identity_key'],'receiver_identity':self.b.identity['identity_key'],'sender_noise_key':self.a.identity['noise_public_key'],'receiver_noise_key':self.b.identity['noise_public_key']}
   incoming=[p]
   if getattr(self,'batch_two',False):
    rpc(self.core,'createwallet',{'wallet_name':'Second wallet','passphrase':__import__('fixture_signer_restoration').PASSWORD});second=copy.deepcopy(p);second['transfer_id']='e'*64;second['preview_challenge']='d'*64;second['public_wallet']=rpc(self.core,'listdescriptors',[False],'Second wallet');incoming.append(second)
@@ -37,17 +47,22 @@ class ReceiverPull(DirectCore):
   if getattr(self,'stale',False):
    with self.sender.edit() as s:s['transfer_previews'][sk]['preview']['generated_at']+=1
   if getattr(self,'unlock',False):rpc(self.core,'walletpassphrase',[__import__('fixture_signer_restoration').PASSWORD,60],'Original')
-  receiver.authorise_batch({});receiver.thread.join(20)
+  from sync_approvals import groups
+  group=groups(receiver.store)[0];review=receiver.review_receive(group['id']);self.assertEqual(len(review['wallets']),len(incoming));receiver.authorise_receive(group['id'],review['token']);receiver.thread.join(20)
   for t in self.a.wallet_pull.threads:t.join(10)
-  if getattr(self,'source_busy',False) or getattr(self,'withdraw',False) or getattr(self,'stale',False) or getattr(self,'unlock',False):
+  if getattr(self,'source_busy',False) or getattr(self,'withdraw',False) or getattr(self,'stale',False) or getattr(self,'unlock',False) or getattr(self,'active_archive_owner',False):
    self.assertTrue(receiver.error,receiver.state());self.assertNotIn(sk,self.sender.read()['completed']);self.assertNotIn(rk,self.store.read()['completed']);self.assertNotIn('Wallaby Sync '+p['transfer_id'][:24],rpc(self.receiver.core,'listwallets'));return
   self.assertFalse(receiver.error,receiver.error);self.assertNotIn(sk,self.sender.read().get('sync_choices',{}));self.assertFalse(self.sender.read().get('sync_batch'))
   self.assertFalse(self.pump_error,self.pump_error);self.assertIn(sk,self.sender.read()['completed']);self.assertIn(rk,self.store.read()['completed']);names=[n for n in rpc(self.receiver.core,'listwallets') if __import__('public_policy').descriptors(rpc(self.receiver.core,'listdescriptors',[False],n))==__import__('public_policy').descriptors(p['public_wallet'])];self.assertEqual(len(names),1);name=names[0];self.assertEqual(rpc(self.receiver.core,'getwalletinfo',[],name)['private_keys_enabled'],not watch and not source_watch)
   if getattr(self,'batch_two',False):
    self.assertIn(digest(outgoing[1]),self.sender.read()['completed']);self.assertIn(digest(incoming[1]),self.store.read()['completed'])
    second_names=[n for n in rpc(self.receiver.core,'listwallets') if __import__('public_policy').descriptors(rpc(self.receiver.core,'listdescriptors',[False],n))==__import__('public_policy').descriptors(incoming[1]['public_wallet'])];self.assertEqual(len(second_names),1);self.assertTrue(rpc(self.receiver.core,'getwalletinfo',[],second_names[0])['private_keys_enabled'])
+  if getattr(self,'extinct_source',False):
+   self.assertEqual(rpc(self.receiver.core,'getwalletinfo',[],name)['txcount'],rpc(self.core,'getwalletinfo',[],'Wallaby Extinct')['txcount']);self.assertGreater(rpc(self.receiver.core,'getwalletinfo',[],name)['txcount'],0);self.assertEqual(rpc(self.receiver.core,'getaddressinfo',[self.old_address],name)['labels'],[self.lost])
   if restoration:self.assertEqual(self.store.read()['local_retirements'][ident]['state'],'restored')
 
+ def test_extinct_import_still_refuses_an_active_local_owner(self):self.extinct_source=True;self.active_archive_owner=True;self.relay(watch=True)
+ def test_extinct_history_and_lost_labels_transfer_through_authorise_group(self):self.extinct_source=True;self.relay(watch=True)
  def test_receiver_batch_serialises_two_wallets_with_independent_watch_choices(self):self.batch_two=True;self.relay(watch=True)
  def test_receiver_requests_single_sig_without_sender_selection_or_click(self):self.relay()
  def test_receiver_requests_multisig_without_sender_click(self):self.relay('multi',restoration=True)

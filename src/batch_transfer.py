@@ -7,14 +7,14 @@ from wallet_recovery import Recovery
 
 class BatchTransfer(Transfer):
     def __init__(self,core,store=None):
-        super().__init__(core,store);self.recovery=Recovery(self.core,self.store);self.recovery.resume_monitor()
+        super().__init__(core,store);self.recovery=Recovery(self.core,self.store);self.recovery.resume_monitor();self.receive_reviews={}
         # Receiving sockets and password authority never survive a UI-service restart.
         saved=self.store.read()
         if saved.get('sync_batch') or saved.get('active_transfer'):
             release(self.store);self.error='Agent restarted during synchronisation. Inspect attempted wallets; no transfer was repeated.'
     def state(self):
         result=super().state();from sync_offers import rows as offers
-        result['offers']=offers(self.store);result['offers_received']=bool(self.store.read().get('sync_offers_received'));result['offer_server_support']=self.store.read().get('sync_offer_server_support');result['sync_denials']=list(self.store.read().get('sync_exclusions',{}).values());result.update(__import__('sync_table').state(self.store,result['rows']));result['recovery']=self.recovery.state();clones=getattr(getattr(getattr(self.store,'peers',None),'blocks',None),'clones',None);result['clone_running']=bool(clones and (clones.running or clones.preparing));result['busy']=bool(self.store.read().get('sync_batch') or result['clone_running']);return result
+        result['offers']=offers(self.store);result['offers_received']=bool(self.store.read().get('sync_offers_received'));result['offer_server_support']=self.store.read().get('sync_offer_server_support');result['sync_denials']=list(self.store.read().get('sync_exclusions',{}).values());result.update(__import__('sync_table').state(self.store,result['rows']));result['receive_approvals']=__import__('sync_approvals').groups(self.store);result['recovery']=self.recovery.state();clones=getattr(getattr(getattr(self.store,'peers',None),'blocks',None),'clones',None);result['clone_running']=bool(clones and (clones.running or clones.preparing));result['busy']=bool(self.store.read().get('sync_batch') or result['clone_running']);return result
     def complete(self,key):
         super().complete(key)
         if self.store.read().get('sync_batch'):self.success_until=0
@@ -38,9 +38,32 @@ class BatchTransfer(Transfer):
             if direction=='receive' and __import__('signer_restoration').requested(p):
                 option=saved.get('sync_choices',{}).get(key,{})
                 __import__('signer_restoration').offer(self.store,p,not p['source_has_private_keys'] or option.get('watch_only',False))
-    def authorise_batch(self,fingerprints=None):
+    def review_receive(self,ident):
+        from sync_approvals import find,binding
+        group=find(self.store,ident);self.validate_batch(group['keys'],'receive')
+        details=[self.review(key) for key in group['keys']]
+        token=binding(self.store,group);self.receive_reviews={ident:(token,time.monotonic())}
+        return {'kind':'wallet_sync_receive','id':ident,'source':group['source'],'token':token,'wallets':details}
+    def authorise_receive(self,ident,token):
+        from sync_approvals import find,binding
+        group=find(self.store,ident);review=self.receive_reviews.get(ident)
+        if not review or review[0]!=token or time.monotonic()-review[1]>600 or binding(self.store,group)!=token:
+            raise ValueError('The receiving review changed or expired. Review the exact wallets and watch-only choices again.')
+        self.receive_reviews.pop(ident,None)
+        return self.authorise_batch(keys=group['keys'])
+    def cancel_receive(self,ident):
+        from sync_approvals import find
+        from sync_queue import choose
+        group=find(self.store,ident)
+        for key in group['keys']:
+            choice=self.store.read()['sync_choices'][key];choose(self.store,key,False,choice['watch_only'])
+        self.receive_reviews.pop(ident,None)
+        return {'message':'Receiving selection cancelled. No wallet transfer was authorised.'}
+    def authorise_batch(self,fingerprints=None,keys=None):
         if fingerprints is None:fingerprints={}
-        keys=selected(self.store,'receive');self.validate_batch(keys,'receive')
+        keys=selected(self.store,'receive') if keys is None else keys
+        if not keys:raise ValueError('Select receiving wallets on Synchronisation first.')
+        self.validate_batch(keys,'receive')
         saved=self.store.read()
         if isinstance(fingerprints,dict):
             fingerprints=dict(fingerprints)
@@ -60,7 +83,10 @@ class BatchTransfer(Transfer):
         freeze(self.store,keys,'receive')
         try:
             with self.store.edit() as s:s['active_transfer']=keys[0]
-            return super().authorise(keys[0],fingerprints[keys[0]])
+            result=super().authorise(keys[0],fingerprints[keys[0]])
+            from activity_log import event
+            event('sync.receive','Local approval accepted · wallets='+str(len(keys))+' · direct_pull=true')
+            return result
         except Exception:release(self.store);raise
     def receive(self,key,p):
         try:

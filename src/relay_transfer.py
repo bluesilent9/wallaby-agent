@@ -71,7 +71,8 @@ def send_contents(self,key,p,peers,stream,details,watch,name,root,backup):
         with self.store.edit() as state:state['pending'][key]['state']='attempted'
         if native_history and __import__('extinct_sync').grouped(p['public_wallet']):
             from history_wire import export
-            file,history_header=export(self.core,self.store,p,details,root)
+            if 'core_history_v2' not in reply.get('features',[]):raise ValueError('Update the receiving Agent for complete Extinct history before approving this transfer. No legacy history was sent.')
+            file,history_header=export(self.core,self.store,p,details,root,version=2)
             frame_write(stream,history_header)
             with file.open('rb') as f:
                 while True:
