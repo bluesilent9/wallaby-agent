@@ -9,6 +9,7 @@ from peer_wallet import active,work_dir,wallet_details,same_facts,validate_detai
 def send(self,key):
     from peer_mesh import manager
     from relay_stream import Bridge
+    self.send_stage='source_validation'
     with self.lock:
         current,row=active(self.store)
         if key!=current or not row or row['state']!='pending' or row['proposal']['direction']!='send':raise ValueError('Review this exact pending sending request first.')
@@ -21,7 +22,7 @@ def send(self,key):
         watch=not p['source_has_private_keys'] or choice.get('watch_only',False);name=None if watch else source_wallet(self.core,p,public_preview=True)
         bridge=getattr(peers,'wallet_bridge',None)
         if bridge is None:bridge=peers.wallet_bridge=Bridge(peers,self.store)
-        stream=bridge.open(p)
+        self.send_stage='stream_open';stream=bridge.open(p)
         try:
             with tempfile.TemporaryDirectory(prefix='relay-send-',dir=work_dir(self.core)) as folder:
                 root=Path(folder);backup=root/'wallet.dat'
@@ -32,13 +33,13 @@ def send(self,key):
                 if row and row['state']=='attempted':row['state']='recovery_required'
             raise
         finally:
-            bridge.remove(stream)
+            bridge.abort(stream)
 
 def send_contents(self,key,p,peers,stream,details,watch,name,root,backup):
     manifest={'operation':'manifest','transfer_id':p['transfer_id'],'peer_endpoint':peers.identity['endpoint_id'],'details':details}
     if p.get('transfer_version') in (2,3):manifest['watch_only']=watch
     elif watch:raise ValueError('Watch-only transfer requires the Build 8 direct protocol.')
-    frame_write(stream,manifest)
+    self.send_stage='manifest';frame_write(stream,manifest)
     reply=frame_read(stream)
     if reply.get('status')!='review_required':raise ValueError('Receiver did not accept this paired request. Authorise on the receiving Agent first.')
     reply=frame_read(stream)
@@ -52,7 +53,7 @@ def send_contents(self,key,p,peers,stream,details,watch,name,root,backup):
     native_history='core_history_v1' in reply.get('features',[])
     if native_peer:
         from chain_sync import send as send_chain
-        send_chain(self.core,stream,lambda _:frame_read(stream),frame_write)
+        self.send_stage='chain_sync';send_chain(self.core,stream,lambda _:frame_read(stream),frame_write)
     effective_watch=reply.get('watch_only',False)
     if type(effective_watch) is not bool or watch and not effective_watch:raise ValueError('Receiver did not honour watch-only mode. No private wallet file was created or sent.')
     if effective_watch and restoration_offer:
@@ -68,11 +69,11 @@ def send_contents(self,key,p,peers,stream,details,watch,name,root,backup):
         if answer.get('status')!='loaded' or answer.get('transfer_id')!=p['transfer_id'] or answer.get('wallet_identity')!=digest(sorted(descriptors(p['public_wallet']))):raise ValueError('Receiver did not verify its complete watch-only restoration snapshot.')
         frame_write(stream,{'status':'confirmed'});self.complete(key);return {'ok':True}
     if effective_watch:
-        with self.store.edit() as state:state['pending'][key]['state']='attempted'
         if native_history and __import__('extinct_sync').grouped(p['public_wallet']):
             from history_wire import export
             if 'core_history_v2' not in reply.get('features',[]):raise ValueError('Update the receiving Agent for complete Extinct history before approving this transfer. No legacy history was sent.')
-            file,history_header=export(self.core,self.store,p,details,root,version=2)
+            self.send_stage='history_export';file,history_header=export(self.core,self.store,p,details,root,version=3 if 'core_history_v3' in reply.get('features',[]) else 2)
+            with self.store.edit() as state:state['pending'][key]['state']='attempted'
             frame_write(stream,history_header)
             with file.open('rb') as f:
                 while True:
@@ -80,7 +81,10 @@ def send_contents(self,key,p,peers,stream,details,watch,name,root,backup):
                     if not chunk:break
                     stream.write(chunk)
             stream.flush()
-        else:frame_write(stream,{'operation':'public_wallet'})
+        else:
+            self.send_stage='public_wallet'
+            with self.store.edit() as state:state['pending'][key]['state']='attempted'
+            frame_write(stream,{'operation':'public_wallet'})
         reply=frame_read(stream)
         if reply.get('status')=='history_deferred' and reply.get('transfer_id')==p['transfer_id']:
             frame_write(stream,{'status':'confirmed'})
@@ -92,7 +96,7 @@ def send_contents(self,key,p,peers,stream,details,watch,name,root,backup):
         if reply.get('status')!='loaded' or reply.get('transfer_id')!=p['transfer_id'] or reply.get('wallet_identity')!=digest(sorted(descriptors(p['public_wallet']))):raise ValueError('Receiver did not confirm a matching watch wallet.')
         frame_write(stream,{'status':'confirmed'});self.complete(key);return {'ok':True}
     # Revalidate the source immediately before making a consistent Core backup.
-    source_wallet(self.core,p,require_encrypted=True,restoration_permit=restoration_offer);rpc(self.core,'backupwallet',[__import__('core_ram_path').for_core(self.core,backup)],name)
+    self.send_stage='private_backup';source_wallet(self.core,p,require_encrypted=True,restoration_permit=restoration_offer);rpc(self.core,'backupwallet',[__import__('core_ram_path').for_core(self.core,backup)],name)
     size=backup.stat().st_size
     if not 0<size<=MAX_FILE:raise ValueError('Wallet backup exceeds the 256 MiB transfer limit.')
     h=hashlib.sha256()

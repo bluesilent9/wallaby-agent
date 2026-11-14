@@ -39,7 +39,7 @@ def snapshot(core,wallet,*,with_transactions=False):
             if len(row[0])>8*1024*1024:raise ValueError('Oversized coverage record')
             from denial_storage import strict_json
             candidate=strict_json(row[0]);body={k:v for k,v in candidate.items() if k!='checksum'}
-            if set(candidate)!={'version','chain','addresses','txids','tip','height','checksum'} or candidate['version']!=1 or candidate['checksum']!=digest(body):raise ValueError('Invalid coverage record')
+            if set(candidate)-{'basis'}!={'version','chain','addresses','txids','tip','height','checksum'} or candidate.get('basis','local_scan') not in ('local_scan','trusted_direct_snapshot') or candidate['version']!=1 or candidate['checksum']!=digest(body):raise ValueError('Invalid coverage record')
             if not isinstance(candidate['addresses'],list) or len(candidate['addresses'])>10000 or candidate['addresses']!=sorted(set(candidate['addresses'])) or not all(isinstance(v,str) for v in candidate['addresses']):raise ValueError('Invalid coverage addresses')
             import re
             if not isinstance(candidate['txids'],list) or len(candidate['txids'])>100000 or candidate['txids']!=sorted(set(candidate['txids'])) or not all(isinstance(v,str) and re.fullmatch('[0-9a-f]{64}',v) for v in candidate['txids']):raise ValueError('Invalid coverage transactions')
@@ -84,11 +84,14 @@ def check_marker(core,wallet,expected):
     if not valid(core,state):raise ValueError('The verified Extinct history coverage is no longer on the current chain.')
 
 
-def certify(core,store,wallet,allowed_addresses):
+def certify(core,store,wallet,allowed_addresses,*,basis='local_scan'):
+    if basis not in ('local_scan','trusted_direct_snapshot'):raise ValueError('Invalid history provenance.')
     state=snapshot(core,wallet);chain=rpc(core,'getblockchaininfo')
     if set(state['addresses'])!=set(allowed_addresses):raise ValueError('Extinct addresses changed during the whole-wallet upgrade. Review again; no completion was recorded.')
     if chain.get('initialblockdownload') or chain['blocks']!=chain.get('headers') or state['info'].get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('Finish Core and Extinct wallet synchronisation before recording complete history.')
-    marker={'version':1,'chain':chain['chain'],'addresses':state['addresses'],'txids':state['txids'],'tip':chain['bestblockhash'],'height':chain['blocks']};marker['checksum']=digest(marker)
+    marker={'version':1,'chain':chain['chain'],'addresses':state['addresses'],'txids':state['txids'],'tip':chain['bestblockhash'],'height':chain['blocks']}
+    if basis!='local_scan':marker['basis']=basis
+    marker['checksum']=digest(marker)
     if state['marker']==marker:return
     labels=read_labels(core,wallet,state['raw'],[])
     # Exact labels, including LOST text, are checked on the restored replacement.
@@ -97,7 +100,7 @@ def certify(core,store,wallet,allowed_addresses):
     install(core,store,wallet,[],manifest,coverage=marker)
     check_marker(core,wallet,marker)
     from activity_log import event
-    event('extinction.upgrade','Whole Extinct history verified · addresses='+str(len(state['addresses']))+' · transaction_records='+str(len(state['txids'])))
+    event('extinction.upgrade','Extinct history coverage recorded · basis='+basis+' · addresses='+str(len(state['addresses']))+' · transaction_records='+str(len(state['txids'])))
 
 
 def upgrade(core,store,wallet):
@@ -120,4 +123,4 @@ def preserved(core,store,p):
     covered.update(r['address'] for r in p['manifest']['addresses'])
     # Newly added entries are independently verified from their active wallet or
     # chain by retirement_phases. All previous entries must already be certified.
-    certify(core,store,p['wallet'],covered)
+    certify(core,store,p['wallet'],covered,basis=(state['marker'] or {}).get('basis','local_scan'))

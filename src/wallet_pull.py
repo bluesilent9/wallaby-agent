@@ -12,6 +12,10 @@ MESSAGES={
     'busy':'The source Agent is busy. Finish its current operation, then approve receiving again.',
     'request_changed':'The source no longer has this exact wallet offer. Refresh synchronisation on the receiver.',
     'preview_changed':'The source wallet or signed preview changed. Refresh and review the receiving request again.',
+    'source_catching_up':'The source Core is still catching up. Finish its blockchain synchronisation, then review receiving again.',
+    'history_incomplete':'The source Extinct archive has not passed whole-history coverage checks. Upgrade its history on the source Agent before receiving.',
+    'history_changed':'The source archive changed during export. Review the current receiving request again.',
+    'blocks_unavailable':'The source has pruned blocks needed by this receiver. Use the direct Blockchain or cloning recovery controls.',
     'transfer_failed':'The source could not finish sending this wallet. Check its Synchronisation status; no transfer was retried automatically.'}
 
 class Pull:
@@ -91,9 +95,17 @@ class Pull:
             self.reply(channel,operation,b,'accepted')
             self.transfer.send(key)
         except Exception as error:
+            if reason=='transfer_failed':
+                reason={'For a source still downloading, use the separate Blockchain over direct SSH controls. Wallet transfer requires the source to finish catching up.':'source_catching_up','Upgrade and verify the source Extinct archive before sending a complete history update.':'history_incomplete','The complete source history changed or contains records absent from this transfer. Review the archive again; no complete update was sent.':'history_changed','The sending node has pruned blocks needed by the receiver. No Internet fallback was started; use a sender retaining the missing range.':'blocks_unavailable'}.get(str(error),'transfer_failed')
             if reserved:self.transfer.error=MESSAGES[reason]
             from activity_log import event
-            event('sync.pull','Receiver-requested send stopped · reason='+reason+' · exception='+type(error).__name__)
+            import traceback
+            from pathlib import Path
+            frames=traceback.extract_tb(error.__traceback__);site=frames[-1] if frames else None
+            location=(Path(site.filename).stem+':'+str(site.lineno)) if site and Path(site.filename).parent==Path(__file__).parent else 'external'
+            stage=getattr(self.transfer,'send_stage','source_validation')
+            if stage not in ('source_validation','stream_open','manifest','chain_sync','history_export','public_wallet','private_backup'):stage='other'
+            event('sync.pull','Receiver-requested send stopped · reason='+reason+' · stage='+stage+' · site='+location+' · exception='+type(error).__name__)
             try:self.reply(channel,operation,b,reason)
             except Exception:pass
         finally:

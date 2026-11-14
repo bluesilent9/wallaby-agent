@@ -56,7 +56,9 @@ class Bridge:
         with self.lock:
             if len(self.streams)>=4:raise ValueError('Another encrypted wallet stream is active.')
             self.streams[stream.id]=stream
-        stream.message('stream_open',{'transfer_id':p['transfer_id']});stream.wait(stream.opened);return stream
+        try:
+            stream.timeout=20;stream.message('stream_open',{'transfer_id':p['transfer_id']});stream.wait(stream.opened);stream.timeout=2400;return stream
+        except Exception:self.abort(stream);raise
     def open_blocks(self,channel,cancel=None,*,clone=False):
         self.peers.direct.require(channel)
         if channel.peer['role']!='agent':raise ValueError('Block transfer requires paired Agent permission.')
@@ -170,7 +172,7 @@ class Bridge:
                     try:part,position=stream.incoming.get(timeout=.2)
                     except queue.Empty:continue
                     sock.sendall(part);stream.message('stream_ack',{'offset':position})
-            except Exception:self.remove(stream)
+            except Exception:self.abort(stream)
         threading.Thread(target=incoming,daemon=True).start()
         try:
             while not stream.dead:
@@ -178,4 +180,4 @@ class Bridge:
                 if not part:break
                 stream.write(part)
         except Exception:pass
-        finally:self.remove(stream)
+        finally:self.abort(stream)

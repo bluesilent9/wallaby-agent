@@ -242,7 +242,7 @@ class Transfer:
             if row['state']!='pending':raise ValueError('This receiving request was already attempted. Reconcile it before retrying.')
             if not readiness(row['proposal'])['listening']:raise ValueError('Start the receiving machine’s IPv6 SSH listener using the displayed instructions, then Authorise again.')
             if self.thread and self.thread.is_alive():raise ValueError('Receiving is already active. Finish or cancel it first.')
-            self.close();self.manifest_approved=False;self.error='';path=socket_path(self.store)
+            self.close();self.cancel_requested=False;self.manifest_approved=False;self.error='';path=socket_path(self.store)
             if path.exists():path.unlink()
             self.listener=socket.socket(socket.AF_UNIX);self.listener.bind(str(path));path.chmod(0o600);self.listener.listen(1);self.listener.settimeout(1);self.deadline=time.monotonic()+LIFETIME
             self.thread=threading.Thread(target=self.receive,args=(key,row['proposal']),daemon=True);self.thread.start();return self.state()
@@ -323,7 +323,7 @@ class Transfer:
             from signer_restoration import requested,offer,verify_received,finish as finish_restoration,candidates
             if candidates(self.store.read(),p['public_wallet']) and not requested(p):raise ValueError('This wallet needs a Build 65 restoration invitation and signed restoration preview.')
             restoration_offer=offer(self.store,p,watch)
-            ready={'status':'ready','features':['chain_sync_v1','core_history_v1','restore_roles_v1','core_history_v2']}
+            ready={'status':'ready','features':['chain_sync_v1','core_history_v1','restore_roles_v1','core_history_v2','core_history_v3']}
             if restoration_offer:ready['restoration']=restoration_offer
             if p.get('transfer_version') in (2,3):ready['watch_only']=watch
             frame_write(stream,ready)
@@ -348,12 +348,12 @@ class Transfer:
                         packet=receive_history(self.core,self.store,p,details,header,stream,read_exact,folder)
                         try:
                             from local_extinction import eligible
-                            eligible(self.core,self.store,p['public_wallet'],verified_history=packet.get('coverage') if packet['version']==2 else None)
+                            eligible(self.core,self.store,p['public_wallet'],verified_history=packet.get('coverage') if packet['version']>=2 else None)
                         except ValueError as error:
                             frame_write(stream,{'status':'history_deferred','transfer_id':p['transfer_id'],'message':str(error)});frame_read(stream)
                             from chain_sync import finish
                             finish(self.core,self.store);self.error=str(error);return
-                        if packet['version']==2:
+                        if packet['version']>=2:
                             from extinct_history_sync import install_packet
                             name=install_packet(self.core,self.store,key,p,details,packet)
                         else:
@@ -437,7 +437,7 @@ class Transfer:
             if p.get('transfer_version')==3:
                 saved=self.store.read()['pending'].get(key)
                 if saved and saved['state']=='attempted':self.pending_recovery(key)
-            self.error=str(e) if isinstance(e,(ValueError,FileExistsError)) else 'Direct transfer failed or its outcome is uncertain. Inspect Core before retrying.'
+            self.error='Receiving cancelled locally. Completed wallet work was retained; no transfer was retried.' if getattr(self,'cancel_requested',False) else str(e) if isinstance(e,(ValueError,FileExistsError)) else 'Direct transfer failed or its outcome is uncertain. Inspect Core before retrying.'
             event('sync.receive','Stopped · request='+key[:12]+' · exception='+type(e).__name__+' · attempted='+str(bool(saved and saved['state']=='attempted')).lower() if p.get('transfer_version')==3 else 'Stopped · legacy request')
             if conn:
                 try:frame_write(conn.makefile('rwb',buffering=0),{'status':'error','message':self.error})

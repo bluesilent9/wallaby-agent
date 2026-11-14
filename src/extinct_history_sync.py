@@ -34,13 +34,14 @@ def coverage(core,wallet,wanted,txids):
     if not valid(core,state) or not set(wanted)<=set(state['addresses']):raise ValueError('Upgrade and verify the source Extinct archive before sending a complete history update.')
     if set(wanted)==set(state['addresses']) and set(txids)!=set(state['txids']):raise ValueError('The complete source history changed or contains records absent from this transfer. Review the archive again; no complete update was sent.')
     marker={'version':1,'chain':chain['chain'],'addresses':sorted(wanted),'txids':sorted(txids),'tip':chain['bestblockhash'],'height':chain['blocks']}
+    if state['marker'].get('basis')=='trusted_direct_snapshot':marker['basis']='trusted_direct_snapshot'
     marker['checksum']=digest(marker)
     return marker
 
 
 def validate_coverage(core,value,wanted,txids):
     fields={'version','chain','addresses','txids','tip','height','checksum'}
-    if not isinstance(value,dict) or set(value)!=fields or type(value['version']) is not int or value['version']!=1 or value['checksum']!=digest({k:v for k,v in value.items() if k!='checksum'}):raise ValueError('Invalid direct Extinct history coverage.')
+    if not isinstance(value,dict) or set(value)-{'basis'}!=fields or value.get('basis','local_scan') not in ('local_scan','trusted_direct_snapshot') or type(value['version']) is not int or value['version']!=1 or value['checksum']!=digest({k:v for k,v in value.items() if k!='checksum'}):raise ValueError('Invalid direct Extinct history coverage.')
     if value['addresses']!=sorted(wanted) or value['txids']!=sorted(txids) or type(value['height']) is not int or value['height']<0 or not isinstance(value['tip'],str) or not re.fullmatch('[0-9a-f]{64}',value['tip']):raise ValueError('Direct history coverage differs from the exact authorised addresses or records.')
     chain=rpc(core,'getblockchaininfo')
     if value['chain']!=chain['chain'] or chain.get('initialblockdownload') or chain['blocks']!=chain['headers']:raise ValueError('Finish local chain synchronisation before accepting Extinct history coverage.')
@@ -74,5 +75,8 @@ def install_packet(core,store,key,p,details,packet):
     install(core,store,name,packet['records'],packet['manifest'],allow_unfunded=True)
     # Native install preserves the entire receiving database. Certify only the
     # independently covered union after Core has read back every incoming row.
-    certify(core,store,name,covered)
+    basis=packet['coverage'].get('basis','local_scan')
+    old=snapshot(core,name)
+    if (old['marker'] or {}).get('basis')=='trusted_direct_snapshot':basis='trusted_direct_snapshot'
+    certify(core,store,name,covered,basis=basis)
     return name

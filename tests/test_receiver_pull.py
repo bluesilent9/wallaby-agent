@@ -26,8 +26,17 @@ class ReceiverPull(DirectCore):
    desc=p['public_wallet']['descriptors'][0]['desc'];self.old_address=rpc(self.core,'deriveaddresses',[desc,*([[0,0]] if '*' in desc else [])])[0];miner=rpc(self.core,'getnewaddress',[],'Miner');rpc(self.core,'generatetoaddress',[1,self.old_address]);rpc(self.core,'generatetoaddress',[101,miner]);rpc(self.core,'walletpassphrase',[PASSWORD,60],'Original');rpc(self.core,'sendall',{'recipients':[miner]},'Original');rpc(self.core,'walletlock',[],'Original');rpc(self.core,'generatetoaddress',[1,miner])
    rpc(self.core,'createwallet',{'wallet_name':'Wallaby Extinct','disable_private_keys':True,'blank':True});desc='addr('+self.old_address+')';self.lost='Retired Treasury | LOST:06/11/2026 01:02:03 UTC';rpc(self.core,'importdescriptors',[[{'desc':desc+'#'+checksum(desc),'timestamp':0,'label':self.lost}]],'Wallaby Extinct');p['public_wallet']=rpc(self.core,'listdescriptors',[False],'Wallaby Extinct');p['source_has_private_keys']=False;source_watch=True
   if getattr(self,'active_archive_owner',False):self.wallet(self.receiver.core,'Active local copy',kind)
+  if getattr(self,'pruned_history',False):
+   # Download and validate once, then genuinely discard the historical block
+   # files on BOTH nodes before transferring any archive history.
+   rpc(self.core,'generatetoaddress',[600,miner])
+   for height in range(1,rpc(self.core,'getblockcount')+1):rpc(self.receiver.core,'submitblock',[rpc(self.core,'getblock',[rpc(self.core,'getblockhash',[height]),0])])
+   for core in (self.core,self.receiver.core):
+    rpc(core,'pruneblockchain',[300]);chain=rpc(core,'getblockchaininfo');self.assertTrue(chain['pruned']);self.assertGreater(chain['pruneheight'],2)
+    block=rpc(core,'getblockhash',[2]);self.assertGreater(rpc(core,'getblockheader',[block])['confirmations'],0)
+    with self.assertRaises(ValueError):rpc(core,'getblock',[block])
   self.setup_peers()
-  if getattr(self,'extinct_source',False):
+  if getattr(self,'extinct_source',False) and not getattr(self,'uncertified',False):
    from extinct_upgrade import certify
    certify(self.core,self.sender,'Wallaby Extinct',[self.old_address])
   p.update(transfer_version=3,node_ipv6=None);p['peer']['ipv6']=None;p['transport']={'protocol':PROTOCOL,'version':1,'cipher_suite':CIPHER,'sender_endpoint':self.a.identity['endpoint_id'],'receiver_endpoint':self.b.identity['endpoint_id'],'sender_identity':self.a.identity['identity_key'],'receiver_identity':self.b.identity['identity_key'],'sender_noise_key':self.a.identity['noise_public_key'],'receiver_noise_key':self.b.identity['noise_public_key']}
@@ -48,8 +57,16 @@ class ReceiverPull(DirectCore):
    with self.sender.edit() as s:s['transfer_previews'][sk]['preview']['generated_at']+=1
   if getattr(self,'unlock',False):rpc(self.core,'walletpassphrase',[__import__('fixture_signer_restoration').PASSWORD,60],'Original')
   from sync_approvals import groups
+  self.receiving=receiver
+  if getattr(self,'cancel_connected',False):
+   def cancel():
+    self.pause_started.wait(5);self.cancel_result=receiver.stop_receiving();self.resume_source.set()
+   self.canceller=threading.Thread(target=cancel);self.canceller.start()
   group=groups(receiver.store)[0];review=receiver.review_receive(group['id']);self.assertEqual(len(review['wallets']),len(incoming));receiver.authorise_receive(group['id'],review['token']);receiver.thread.join(20)
   for t in self.a.wallet_pull.threads:t.join(10)
+  if getattr(self,'cancel_connected',False):self.canceller.join(5)
+  if getattr(self,'source_export_failed',False) or getattr(self,'cancel_connected',False):
+   self.assertFalse(receiver.thread.is_alive());self.assertFalse(receiver.state()['busy']);self.assertFalse(self.sender.read().get('sync_batch'));self.assertNotIn(rk,self.store.read()['completed']);self.assertEqual(self.sender.read()['pending'][sk]['state'],'pending');self.assertFalse(self.b.stop.is_set());return
   if getattr(self,'source_busy',False) or getattr(self,'withdraw',False) or getattr(self,'stale',False) or getattr(self,'unlock',False) or getattr(self,'active_archive_owner',False):
    self.assertTrue(receiver.error,receiver.state());self.assertNotIn(sk,self.sender.read()['completed']);self.assertNotIn(rk,self.store.read()['completed']);self.assertNotIn('Wallaby Sync '+p['transfer_id'][:24],rpc(self.receiver.core,'listwallets'));return
   self.assertFalse(receiver.error,receiver.error);self.assertNotIn(sk,self.sender.read().get('sync_choices',{}));self.assertFalse(self.sender.read().get('sync_batch'))
@@ -59,8 +76,42 @@ class ReceiverPull(DirectCore):
    second_names=[n for n in rpc(self.receiver.core,'listwallets') if __import__('public_policy').descriptors(rpc(self.receiver.core,'listdescriptors',[False],n))==__import__('public_policy').descriptors(incoming[1]['public_wallet'])];self.assertEqual(len(second_names),1);self.assertTrue(rpc(self.receiver.core,'getwalletinfo',[],second_names[0])['private_keys_enabled'])
   if getattr(self,'extinct_source',False):
    self.assertEqual(rpc(self.receiver.core,'getwalletinfo',[],name)['txcount'],rpc(self.core,'getwalletinfo',[],'Wallaby Extinct')['txcount']);self.assertGreater(rpc(self.receiver.core,'getwalletinfo',[],name)['txcount'],0);self.assertEqual(rpc(self.receiver.core,'getaddressinfo',[self.old_address],name)['labels'],[self.lost])
+   if getattr(self,'uncertified',False):
+    from extinct_upgrade import snapshot,valid
+    state=snapshot(self.receiver.core,name);self.assertTrue(valid(self.receiver.core,state));self.assertEqual(state['marker']['basis'],'trusted_direct_snapshot');self.assertFalse(self.store.read().get('history_jobs'))
+    from extinct_history_sync import coverage
+    self.assertEqual(coverage(self.receiver.core,name,state['addresses'],state['txids'])['basis'],'trusted_direct_snapshot')
   if restoration:self.assertEqual(self.store.read()['local_retirements'][ident]['state'],'restored')
 
+ def test_source_export_failure_wakes_receiver_and_releases_authorisation(self):
+  self.extinct_source=True;self.source_export_failed=True
+  with patch('history_wire.export',side_effect=ValueError('Upgrade and verify the source Extinct archive before sending a complete history update.')):self.relay(watch=True)
+ def test_trusted_existing_extinct_records_copy_without_claiming_a_local_scan(self):
+  self.extinct_source=True;self.uncertified=True
+  with patch('wallet_recovery.Recovery.register_watch_history',side_effect=AssertionError('No historical rescan is needed for a trusted snapshot.')):self.relay(watch=True)
+ def test_trusted_snapshot_still_refuses_active_local_wallet_ownership(self):
+  self.extinct_source=True;self.uncertified=True;self.active_archive_owner=True;self.relay(watch=True)
+ def test_trusted_snapshot_does_not_export_malformed_transaction_records(self):
+  self.extinct_source=True;self.uncertified=True;self.source_export_failed=True
+  from history_wire import collect
+  def damaged(*args,**kwargs):
+   rows=collect(*args,**kwargs);rows[0]['record']='00';return rows
+  with patch('history_wire.collect',side_effect=damaged):self.relay(watch=True)
+ def test_pruned_source_and_receiver_transfer_old_history_using_retained_headers(self):
+  # Recreate this test's two isolated nodes with manual pruning enabled.
+  self.source.close();self.receiver.close();self._cleanups=[c for c in self._cleanups if getattr(c[0],'__self__',None) not in (self.source,self.receiver)]
+  from regtest_support import Regtest
+  self.source=Regtest(['-prune=1','-txindex=0','-fastprune=1']);self.receiver=Regtest(['-prune=1','-txindex=0','-fastprune=1']);self.addCleanup(self.source.close);self.addCleanup(self.receiver.close);self.core=self.source.core
+  from wallet_ops import rpc
+  rpc(self.core,'createwallet',{'wallet_name':'Miner'});rpc(self.core,'generatetoaddress',[1,rpc(self.core,'getnewaddress',[],'Miner')])
+  self.extinct_source=True;self.uncertified=True;self.pruned_history=True
+  with patch('wallet_recovery.Recovery.register_watch_history',side_effect=AssertionError('A pruned archive transfer must not rescan.')):self.relay(watch=True)
+ def test_cancel_connected_receive_without_closing_other_agent(self):
+  self.cancel_connected=True;self.pause_started=threading.Event();self.resume_source=threading.Event()
+  def delayed(*args,**kwargs):
+   self.pause_started.set();self.resume_source.wait(5)
+   return __import__('peer_wallet').frame_read(args[1])
+  with patch('chain_sync.send',side_effect=delayed):self.relay(watch=True)
  def test_signed_disc_origin_survives_grouped_receive_and_cannot_be_relabelled(self):
   from wallet_preview import verify
   with patch('wallet_traits.source_storage',return_value='disc'):self.relay(watch=True)

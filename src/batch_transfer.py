@@ -58,6 +58,7 @@ class BatchTransfer(Transfer):
     def cancel_receive(self,ident):
         from sync_approvals import find
         from sync_queue import choose
+        if self.store.read().get('sync_batch',{}).get('direction')=='receive':return self.stop_receiving()
         group=find(self.store,ident)
         for key in group['keys']:
             choice=self.store.read()['sync_choices'][key];choose(self.store,key,False,choice['watch_only'])
@@ -132,6 +133,29 @@ class BatchTransfer(Transfer):
             release(self.store)
             for data in credentials.values():data['password']=None
     def stop_receiving(self):
-        if self.connection:raise ValueError('A wallet transfer is running. Wait for its outcome before ending receiving authorisation.')
-        self.close();release(self.store)
-        return {'ok':True}
+        saved=self.store.read();batch=saved.get('sync_batch',{})
+        if batch.get('direction')=='send' or getattr(self,'sending',False):raise ValueError('This control cancels receiving, not an outgoing transfer.')
+        self.cancel_requested=True
+        keys=set(batch.get('keys',[]))
+        if saved.get('active_transfer'):keys.add(saved['active_transfer'])
+        with self.store.edit() as state:
+            for key in keys:
+                choice=state.get('sync_choices',{}).get(key)
+                if choice:choice['selected']=False
+        peers=getattr(self.store,'peers',None);bridge=getattr(peers,'wallet_bridge',None)
+        if bridge:
+            from relay_stream import wire_hash
+            operations={wire_hash(saved['pending'][k]['proposal']) for k in keys if k in saved['pending']}
+            for stream in list(bridge.streams.values()):
+                if stream.operation in operations:bridge.abort(stream)
+        self.close()
+        # A Core import already in progress reaches its normal safe checkpoint.
+        # Do not release its operation reservation while it can still mutate Core.
+        thread=self.thread
+        if thread and thread is not threading.current_thread() and thread.is_alive():thread.join(timeout=2)
+        running=bool(thread and thread.is_alive())
+        if not running:release(self.store)
+        self.receive_reviews.clear();self.details=None
+        from activity_log import event
+        event('sync.receive','Local cancellation requested · finishing_core_operation='+str(running).lower())
+        return {'ok':True,'cancelling':running,'message':'Receiving cancellation requested. Waiting for the current Core operation to reach a safe checkpoint.' if running else 'Receiving cancelled. Existing wallets and completed work were retained. You can close the protected window normally.'}
