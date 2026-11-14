@@ -1,6 +1,7 @@
 """Explicit local sending action through a QR-pinned encrypted channel."""
 import hashlib,shutil,tempfile
 from pathlib import Path
+from contextlib import nullcontext
 from approval_store import digest
 from public_policy import descriptors
 from wallet_ops import rpc
@@ -13,27 +14,31 @@ def send(self,key):
     with self.lock:
         current,row=active(self.store)
         if key!=current or not row or row['state']!='pending' or row['proposal']['direction']!='send':raise ValueError('Review this exact pending sending request first.')
-        p=row['proposal'];peers=manager(self.store);peers.binding(p);saved=self.store.read();payload=saved.get('transfer_previews',{}).get(key)
-        if not payload:raise ValueError('The signed initial preview is missing.')
-        from wallet_preview import verify_bound
-        verify_bound(self.store,payload,p);details=wallet_details(self.core,p,self.store)
-        if not same_facts(details,{k:payload['preview'][k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels')}):raise ValueError('Wallet facts changed; start a fresh review before sending.')
-        validate_details(details);choice=saved.get('sync_batch',{}).get('options',{}).get(key,{})
-        watch=not p['source_has_private_keys'] or choice.get('watch_only',False);name=None if watch else source_wallet(self.core,p,public_preview=True)
-        bridge=getattr(peers,'wallet_bridge',None)
-        if bridge is None:bridge=peers.wallet_bridge=Bridge(peers,self.store)
-        self.send_stage='stream_open';stream=bridge.open(p)
-        try:
-            with tempfile.TemporaryDirectory(prefix='relay-send-',dir=work_dir(self.core)) as folder:
-                root=Path(folder);backup=root/'wallet.dat'
-                return send_contents(self,key,p,peers,stream,details,watch,name,root,backup)
-        except Exception:
-            with self.store.edit() as state:
-                row=state['pending'].get(key)
-                if row and row['state']=='attempted':row['state']='recovery_required'
-            raise
-        finally:
-            bridge.abort(stream)
+        p=row['proposal']
+        from wallet_loading import ownership_wallets
+        from extinct_sync import grouped,ALIASES
+        with ownership_wallets(self.core,names=set(ALIASES)|{p['public_wallet']['wallet_name']}) if grouped(p['public_wallet']) else nullcontext():
+            peers=manager(self.store);peers.binding(p);saved=self.store.read();payload=saved.get('transfer_previews',{}).get(key)
+            if not payload:raise ValueError('The signed initial preview is missing.')
+            from wallet_preview import verify_bound
+            verify_bound(self.store,payload,p);details=wallet_details(self.core,p,self.store)
+            if not same_facts(details,{k:payload['preview'][k] for k in ('public_wallet','chain','funded_outputs','vaults','address_labels')}):raise ValueError('Wallet facts changed; start a fresh review before sending.')
+            validate_details(details);choice=saved.get('sync_batch',{}).get('options',{}).get(key,{})
+            watch=not p['source_has_private_keys'] or choice.get('watch_only',False);name=None if watch else source_wallet(self.core,p,public_preview=True)
+            bridge=getattr(peers,'wallet_bridge',None)
+            if bridge is None:bridge=peers.wallet_bridge=Bridge(peers,self.store)
+            self.send_stage='stream_open';stream=bridge.open(p)
+            try:
+                with tempfile.TemporaryDirectory(prefix='relay-send-',dir=work_dir(self.core)) as folder:
+                    root=Path(folder);backup=root/'wallet.dat'
+                    return send_contents(self,key,p,peers,stream,details,watch,name,root,backup)
+            except Exception:
+                with self.store.edit() as state:
+                    row=state['pending'].get(key)
+                    if row and row['state']=='attempted':row['state']='recovery_required'
+                raise
+            finally:
+                bridge.abort(stream)
 
 def send_contents(self,key,p,peers,stream,details,watch,name,root,backup):
     manifest={'operation':'manifest','transfer_id':p['transfer_id'],'peer_endpoint':peers.identity['endpoint_id'],'details':details}

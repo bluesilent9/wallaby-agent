@@ -26,6 +26,11 @@ class ReceiverPull(DirectCore):
    desc=p['public_wallet']['descriptors'][0]['desc'];self.old_address=rpc(self.core,'deriveaddresses',[desc,*([[0,0]] if '*' in desc else [])])[0];miner=rpc(self.core,'getnewaddress',[],'Miner');rpc(self.core,'generatetoaddress',[1,self.old_address]);rpc(self.core,'generatetoaddress',[101,miner]);rpc(self.core,'walletpassphrase',[PASSWORD,60],'Original');rpc(self.core,'sendall',{'recipients':[miner]},'Original');rpc(self.core,'walletlock',[],'Original');rpc(self.core,'generatetoaddress',[1,miner])
    rpc(self.core,'createwallet',{'wallet_name':'Wallaby Extinct','disable_private_keys':True,'blank':True});desc='addr('+self.old_address+')';self.lost='Retired Treasury | LOST:06/11/2026 01:02:03 UTC';rpc(self.core,'importdescriptors',[[{'desc':desc+'#'+checksum(desc),'timestamp':0,'label':self.lost}]],'Wallaby Extinct');p['public_wallet']=rpc(self.core,'listdescriptors',[False],'Wallaby Extinct');p['source_has_private_keys']=False;source_watch=True
   if getattr(self,'active_archive_owner',False):self.wallet(self.receiver.core,'Active local copy',kind)
+  if getattr(self,'unloaded_receiver_wallet',False):
+   rpc(self.receiver.core,'createwallet',{'wallet_name':'Normally unloaded','load_on_startup':False});rpc(self.receiver.core,'unloadwallet',{'wallet_name':'Normally unloaded'})
+  if getattr(self,'unloaded_receiver_archive',False):
+   rpc(self.receiver.core,'createwallet',{'wallet_name':'Wallaby Extinct','disable_private_keys':True,'blank':True,'load_on_startup':False});rpc(self.receiver.core,'unloadwallet',{'wallet_name':'Wallaby Extinct'})
+  if getattr(self,'unloaded_active_owner',False):rpc(self.receiver.core,'unloadwallet',{'wallet_name':'Active local copy'})
   if getattr(self,'archive_subset',False):
    from vendor.embit.descriptor.checksum import checksum
    extra=rpc(self.core,'getnewaddress',[],'Miner');body='addr('+extra+')'
@@ -67,6 +72,7 @@ class ReceiverPull(DirectCore):
   send=BatchTransfer(self.core,self.sender);receiver=BatchTransfer(self.receiver.core,self.store);self.addCleanup(send.close);self.addCleanup(receiver.close);
   from wallet_pull import Pull
   self.a.wallet_pull=Pull(self.a,send,guard=lambda:bool(getattr(self,'source_busy',False)));self.b.wallet_pull=Pull(self.b,receiver)
+  if getattr(self,'unloaded_source_archive',False):rpc(self.core,'unloadwallet',{'wallet_name':'Wallaby Extinct'})
   if getattr(self,'withdraw',False):
    with self.sender.edit() as s:s['pending'][sk]['withdrawn']=True
   if getattr(self,'stale',False):
@@ -81,6 +87,12 @@ class ReceiverPull(DirectCore):
   group=groups(receiver.store)[0];review=receiver.review_receive(group['id']);self.assertEqual(len(review['wallets']),len(incoming));receiver.authorise_receive(group['id'],review['token']);receiver.thread.join(20)
   for t in self.a.wallet_pull.threads:t.join(10)
   if getattr(self,'cancel_connected',False):self.canceller.join(5)
+  if getattr(self,'unloaded_receiver_wallet',False):self.assertNotIn('Normally unloaded',rpc(self.receiver.core,'listwallets'))
+  if getattr(self,'unloaded_active_owner',False):self.assertNotIn('Active local copy',rpc(self.receiver.core,'listwallets'))
+  if getattr(self,'unloaded_source_archive',False):
+   self.assertNotIn('Wallaby Extinct',rpc(self.core,'listwallets'));rpc(self.core,'loadwallet',{'filename':'Wallaby Extinct'})
+  if getattr(self,'unloaded_receiver_archive',False):
+   self.assertNotIn('Wallaby Extinct',rpc(self.receiver.core,'listwallets'));rpc(self.receiver.core,'loadwallet',{'filename':'Wallaby Extinct'})
   if getattr(self,'source_export_failed',False) or getattr(self,'cancel_connected',False):
    self.assertFalse(receiver.thread.is_alive());self.assertFalse(receiver.state()['busy']);self.assertFalse(self.sender.read().get('sync_batch'));self.assertNotIn(rk,self.store.read()['completed']);self.assertEqual(self.sender.read()['pending'][sk]['state'],'pending');self.assertFalse(self.b.stop.is_set());return
   if getattr(self,'source_busy',False) or getattr(self,'withdraw',False) or getattr(self,'stale',False) or getattr(self,'unlock',False) or getattr(self,'active_archive_owner',False):
@@ -106,6 +118,14 @@ class ReceiverPull(DirectCore):
  def test_trusted_existing_extinct_records_copy_without_claiming_a_local_scan(self):
   self.extinct_source=True;self.uncertified=True
   with patch('wallet_recovery.Recovery.register_watch_history',side_effect=AssertionError('No historical rescan is needed for a trusted snapshot.')):self.relay(watch=True)
+ def test_unloaded_receiver_wallet_is_inspected_then_returned_to_unloaded_state(self):
+  self.extinct_source=True;self.uncertified=True;self.unloaded_receiver_wallet=True;self.relay(watch=True)
+ def test_unloaded_active_owner_is_detected_and_returned_to_unloaded_state(self):
+  self.extinct_source=True;self.uncertified=True;self.active_archive_owner=True;self.unloaded_active_owner=True;self.relay(watch=True)
+ def test_unloaded_source_archive_is_temporarily_loaded_for_export(self):
+  self.extinct_source=True;self.uncertified=True;self.unloaded_source_archive=True;self.relay(watch=True)
+ def test_unloaded_existing_receiver_archive_is_loaded_through_import_then_restored(self):
+  self.extinct_source=True;self.uncertified=True;self.unloaded_receiver_archive=True;self.relay(watch=True)
  def test_existing_archive_inventory_preserves_records_without_a_direct_address_match(self):
   self.extinct_source=True;self.uncertified=True;self.archive_extra_record=True;self.relay(watch=True)
  def test_requested_archive_subset_is_not_mistaken_for_a_source_mutation(self):

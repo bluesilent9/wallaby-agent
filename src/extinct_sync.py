@@ -114,7 +114,7 @@ def import_watch(core,store,key,p,details,native=False,coverage=None):
         if name not in loaded:raise ValueError('Load the existing Wallaby Extinct archive in Core before synchronising it. No archive was overwritten.')
         info=rpc(core,'getwalletinfo',[],name);raw=rpc(core,'listdescriptors',[False],name)
         if info.get('private_keys_enabled') or info.get('scanning') or not address_only(raw):raise ValueError('Existing Wallaby Extinct must be an idle private-key-disabled address-only archive. No wallet was changed.')
-        labels=read_labels(core,name,raw,[]);by_address={r['address']:r for r in labels}
+        labels=read_labels(core,name,raw,[]) if raw.get('descriptors') else [];by_address={r['address']:r for r in labels}
         for row in details.get('address_labels',[]):
             old=by_address.get(row['address'])
             if old and old['label'] and old['label']!=row['label']:raise ValueError('Existing extinct address label conflicts with the signed sender preview. Reconcile locally; no labels were replaced.')

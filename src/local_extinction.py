@@ -3,6 +3,7 @@ from approval_store import digest
 from wallet_ops import rpc
 from public_policy import descriptors
 from wallet_labels import address_only
+from wallet_loading import inspect_local_wallets
 
 
 def prepare(store,p,names,core=None):
@@ -19,6 +20,7 @@ def complete(store,ident):
     with store.edit() as saved:saved['local_retirements'][ident]['state']='complete'
 
 
+@inspect_local_wallets
 def eligible(core,store,raw,verified_history=None):
     from wallet_labels import fixed_address
     addresses={fixed_address(r['desc']) for r in raw['descriptors']}
@@ -34,7 +36,7 @@ def eligible(core,store,raw,verified_history=None):
         # Server summaries/addresses never supply that evidence. A restoration
         # or unfinished local extinction overrides the old archive membership.
         loaded=rpc(core,'listwallets');directories={r['name'] for r in rpc(core,'listwalletdir')['wallets']}
-        if directories-set(loaded)-set(ALIASES):raise ValueError('Load every local wallet before checking legacy Extinct ownership; no history was imported.')
+        if directories-set(loaded)-set(ALIASES):raise ValueError('The local wallet inventory changed during ownership inspection. Review receiving again; no history was imported.')
         blocked={a for row in records.values() if row['state']!='complete' for a in row['address_ids']}
         from extinct_upgrade import snapshot,valid
         for wallet in ALIASES:

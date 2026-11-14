@@ -9,6 +9,7 @@ from approval_store import digest
 from wallet_ops import rpc
 from wallet_labels import fixed_address,read_labels
 from extinct_upgrade import snapshot,valid
+from wallet_loading import inspect_local_wallets
 
 
 def summary(core,wallet):
@@ -66,6 +67,7 @@ def preflight(core,store,p,packet):
     return covered
 
 
+@inspect_local_wallets
 def install_packet(core,store,key,p,details,packet):
     from extinct_sync import import_watch
     from core_history import install
