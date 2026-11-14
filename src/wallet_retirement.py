@@ -125,7 +125,13 @@ class Retirement:
     def __init__(self,core,store):self.core=core;self.store=store;self.reviews={};self.active=set()
     def review(self,key):
         p=self.store.read()['pending'][key]['proposal']
+        from wallet_loading import ownership_wallets
+        with ownership_wallets(self.core,names={p['wallet']} if p.get('phase')=='preserve' else set()):return self._review(key)
+    def _review(self,key):
+        p=self.store.read()['pending'][key]['proposal']
         try:
+            if p.get('phase')=='preserve' and p['wallet'] not in rpc(self.core,'listwallets'):
+                raise MissingHistory('The local Extinct archive is absent. Receive the current archive from a directly paired Agent before reviewing preservation again.')
             from retirement_phases import review,report_existing
             facts=review(self.core,self.store,p)
             if facts.get('existing_preservation_verified'):facts=report_existing(self,key,p,facts)
@@ -133,8 +139,12 @@ class Retirement:
             ident=digest({'local_retirement_history':key});job=self.store.read().get('history_jobs',{}).get(ident)
             present={}
             if p.get('phase')=='preserve':
-                info=rpc(self.core,'getwalletinfo',[],p['wallet'])
-                present={'existing_transactions':info.get('txcount',0)}
+                available=p['wallet'] in rpc(self.core,'listwallets')
+                info=rpc(self.core,'getwalletinfo',[],p['wallet']) if available else {}
+                present={'existing_transactions':info.get('txcount',0),'archive_present':available,'history_transfer_first':not bool(job)}
+                if not job:
+                    from activity_log import event
+                    event('extinction.waiting_history','Preservation waiting for local archive history · archive_present='+str(available).lower()+' · existing_records='+str(info.get('txcount',0)))
             return {'kind':'wallet_retire','id':key,'retirement':{'wallet':p['wallet'],'history_required':True,'history_preparation_imports':p.get('phase')=='preserve','history_prepared':job is not None,'continuation_authorised':self.store.read().get('retirement_continuations',{}).get(key,{}).get('state')=='authorised','message':'History recovery is prepared. Open Synchronisation and review This Node before returning to this request.' if job else str(error),**present}}
         self.reviews[key]=(facts,time.time());return {'kind':'wallet_retire','id':key,'retirement':facts}
     def prepare_history(self,key):
