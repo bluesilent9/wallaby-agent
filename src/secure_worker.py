@@ -25,9 +25,12 @@ def delivery_pending(state):
     for item in state['outbox'].values():
         if item['kind'] in ('wallet_sync_preferences','wallet_setup_identity','node_identity','wallet_transfer_preview','wallet_mobile_verification_record'):continue
         payload=item['payload']
-        # Retirement cancellation is an explicit outcome the Wallet Server must flag;
-        # retain it until acknowledged, unlike optional sync denial notices.
-        if item['kind']=='wallet_retirement_result':return True
+        # A denial/cancellation records that an operation did not run. The
+        # receiver may close while this advisory notice awaits delivery. Actual
+        # mutations, uncertain results and active Core work remain barriers.
+        if item['kind']=='wallet_retirement_result':
+            if payload.get('status') in ('cancelled','denied') and set(payload)<={'request_hash','status','message','phase','manifest_hash'}:continue
+            return True
         signed=payload.get('message',{})
         if payload.get('status')=='denied' or isinstance(signed,dict) and signed.get('status')=='denied':continue
         return True
@@ -320,6 +323,9 @@ class Workspace:
         if reasons:
             from activity_log import event
             event('workspace.close','Close refused · blockers='+','.join(reasons)+' · RAM retained')
+            from collections import Counter
+            deliveries=Counter((item['kind'] if item['kind'] in ('wallet_retirement_result','wallet_transfer_result','partial_sign_result','broadcast_result') else 'other')+':'+(item.get('payload',{}).get('status') if item.get('payload',{}).get('status') in ('complete','cancelled','denied','error','recovery_required') else 'other') for item in saved['outbox'].values())
+            event('workspace.close','Delivery categories · '+(','.join(k+'='+str(v) for k,v in sorted(deliveries.items())) or 'none'))
             raise ValueError('Finish active wallet work and wait for queued Wallet Server deliveries before closing the protected window and disconnecting its node. Blocking: '+', '.join({'active_wallet_work':'wallet operations or history recovery','undelivered_operation_result':'completed operation results awaiting Wallet Server delivery'}[v] for v in reasons)+'.')
         if deadline is not None and time.monotonic()>=deadline:raise ValueError('Close request expired; no workspace state was changed.')
         self.last_sidebar_counts=getattr(self,'_state_snapshot',{}).get('sidebar_counts',__import__('sidebar_counts').checked({}))

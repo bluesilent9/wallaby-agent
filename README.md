@@ -1,12 +1,12 @@
-# Wallaby Agent — Development Build 99
+# Wallaby Agent — Development Build 100
 
 Ubuntu 26.04 LTS amd64 · Bitcoin Core 31 · Development release.
 
 The Agent connects your local Core wallets to Wallaby Wallet while keeping wallet keys and local authorisation on this computer. Peer pairing uses authenticated scan-connect QR codes; wallet and blockchain data use direct paired SSH, with the Server providing signalling only.
 
-Build 99 moves wallet discovery and complete transfer scope to directly paired Agents. Receiver approval and durable receiver denials control transfers; Wallet Server does not provide executable transfer requests or address subsets. Extinct archives missing addresses, transactions or labels use the same receiving approval and merge process. An obsolete unstarted preservation request targeting a deleted archive is cancelled from locally checked Core directory facts.
+Build 100 fixes workspace closure when only an advisory retirement cancellation or denial awaits Server delivery. Active Core operations, completed wallet mutations, uncertain outcomes and signing results retain their close barriers. Build 99's Agent-owned direct discovery and complete Extinct merge protocol remain in place.
 
-[Build 99 protocol, changes and validation](AGENT_BUILD99_DIRECT_WALLET_DISCOVERY.md).
+[Build 100 changes and validation](AGENT_BUILD100_SAFE_CLOSE_NOTICES.md).
 
 The source tree now contains maintained code, current feature tests, protocol/data documentation and Build 88's reference notes. Historical releases are available in Git history rather than accumulated in the current distribution. New packaging builds only the current version and reuses an installer only after verifying its source-input and artifact hashes.
 
