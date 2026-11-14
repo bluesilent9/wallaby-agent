@@ -37,7 +37,7 @@ def finish(core,store):
         try:
             owner=Retirement(core,store);review=owner.review(key)
             if review['retirement'].get('history_required'):raise ValueError('Recovered history has not passed extinction verification. Original wallets were retained.')
-            owner.approve(key)
+            if review['retirement'].get('phase')!='preserved':owner.approve(key)
         except Exception:
             with store.edit() as s:
                 if key in s.get('retirement_continuations',{}):s['retirement_continuations'][key]['state']='uncertain'

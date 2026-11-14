@@ -29,6 +29,7 @@ def delivery_pending(state):
         # receiver may close while this advisory notice awaits delivery. Actual
         # mutations, uncertain results and active Core work remain barriers.
         if item['kind']=='wallet_retirement_result':
+            if payload.get('status')=='complete' and payload.get('wallet_deleted') is False and payload.get('archive_verified') is True and any(r.get('kind')=='wallet_retire' and r.get('verification_basis') in ('verified_archive','local_original_comparison') and r.get('result')==payload for r in state.get('completed',{}).values()):continue
             if payload.get('status') in ('cancelled','denied') and set(payload)<={'request_hash','status','message','phase','manifest_hash'}:continue
             return True
         signed=payload.get('message',{})

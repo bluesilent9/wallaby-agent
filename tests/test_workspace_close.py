@@ -39,3 +39,11 @@ class Close(unittest.TestCase):
   self.assertFalse(self.w.busy())
   with patch('activity_log.event'):self.w.begin_close()
   self.assertTrue(self.w.closing)
+
+ def test_only_matching_read_only_preservation_receipt_may_close_without_server(self):
+  payload={'request_hash':'a'*64,'status':'complete','wallet_deleted':False,'archive_verified':True}
+  completed={'kind':'wallet_retire','verification_basis':'verified_archive','result':payload}
+  state={'outbox':{'x':{'kind':'wallet_retirement_result','payload':payload}},'completed':{'done':completed}}
+  self.assertFalse(delivery_pending(state))
+  for altered in ({**completed,'verification_basis':None},{**completed,'result':{**payload,'wallet_deleted':True}}):
+   self.assertTrue(delivery_pending({**state,'completed':{'done':altered}}))

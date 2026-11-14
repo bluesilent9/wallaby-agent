@@ -81,4 +81,5 @@ def install_packet(core,store,key,p,details,packet):
     old=snapshot(core,name)
     if (old['marker'] or {}).get('basis')=='trusted_direct_snapshot':basis='trusted_direct_snapshot'
     certify(core,store,name,covered,basis=basis)
+    store.preservation_rechecks={} # New verified Core data invalidates deferred comparisons.
     return name

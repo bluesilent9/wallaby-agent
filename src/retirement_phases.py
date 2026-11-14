@@ -173,10 +173,17 @@ def review(core,store,p):
             matched=True
         except ValueError:matched=False
         source=local_facts(core,store,p,True) if matched else None
+        from activity_log import event
+        event('extinction.compare','Existing archive comparison · addresses='+str(len(p['manifest']['addresses']))+' · transactions='+str(len(p['manifest']['transactions']))+' · records_match='+str(matched).lower()+' · coverage_verified='+str(not whole['required']).lower()+' · local_original='+str(source is not None).lower())
         if source is not None:
             from retirement_evidence import compare
             evidence=compare(core,p,source,[p['wallet']],archive=p['wallet'])
             return {'phase':'preserve','wallet':p['public_wallet'].get('wallet_name','Retiring wallet'),'archive':p['wallet'],'addresses':p['manifest']['addresses'],'transactions':len(p['manifest']['transactions']),'blocks':chain['blocks'],'manifest_hash':p['manifest_hash'],'delete_wallet':False,'local_wallets':source['local_wallets'],'retained_signers':source['retained_signers'],'history_method':'existing','native_sources':[],'archive_upgrade':whole,'existing_preservation_verified':True,'history_comparison':evidence}
+        if matched and source is None and not whole['required']:
+            # A native archive received from a paired Agent can already satisfy
+            # a late Server indication after the active original was deleted.
+            # This reports existing public records only; it grants no deletion.
+            return {'phase':'preserve','wallet':p['public_wallet'].get('wallet_name','Retiring wallet'),'archive':p['wallet'],'addresses':p['manifest']['addresses'],'transactions':len(p['manifest']['transactions']),'blocks':chain['blocks'],'manifest_hash':p['manifest_hash'],'delete_wallet':False,'local_wallets':[],'retained_signers':[],'history_method':'existing','native_sources':[],'archive_upgrade':whole,'existing_preservation_verified':True,'preservation_basis':'verified_archive'}
         if whole['mode']=='download':
             from wallet_retirement import MissingHistory
             raise MissingHistory('The existing Extinct wallet has no valid whole-history verification record. This does not prove its transaction data is missing. A download completed outside a tracked Agent recovery cannot by itself certify every older entry. Keep the original wallets; prepare and review recovery options before authorising another download.')
@@ -220,14 +227,21 @@ def imports(core,p,timestamp=0,only_missing=False):
     if len(results)!=len(requests) or not all(r.get('success') for r in results):raise ValueError('Historical import was incomplete; no wallet was deleted.')
 
 def readback(core,p):
+    def fail(reason,message):
+        from activity_log import event
+        event('extinction.compare','Existing archive mismatch · reason='+reason+' · no_wallet_mutation=true')
+        raise ValueError(message)
     check_chain(core,p);existing_archive(core,p['wallet']);chain=rpc(core,'getblockchaininfo');info=rpc(core,'getwalletinfo',[],p['wallet'])
-    if info.get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('The Extinct archive has not processed the current local chain.')
+    if info.get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:fail('archive_not_current','The Extinct archive has not processed the current local chain.')
     for r in p['manifest']['addresses']:
         own=rpc(core,'getaddressinfo',[r['address']],p['wallet'])
-        if not (own.get('ismine') or own.get('iswatchonly')) or own.get('labels')!=[r['label']]:raise ValueError('Extinct address/label readback failed.')
+        if not (own.get('ismine') or own.get('iswatchonly')):fail('address_missing','Extinct address/label readback failed.')
+        if own.get('labels')!=[r['label']]:fail('label_conflict','Extinct address/label readback failed.')
     for r in p['manifest']['transactions']:
-        tx=rpc(core,'gettransaction',[r['txid'],True],p['wallet'])
-        if tx.get('confirmations',0)<=0 or tx.get('blockhash')!=r['blockhash']:raise ValueError('Extinct transaction readback failed. Recover complete history before preservation can complete.')
+        try:tx=rpc(core,'gettransaction',[r['txid'],True],p['wallet'])
+        except ValueError:fail('transaction_missing','Extinct transaction readback failed. Recover complete history before preservation can complete.')
+        if tx.get('confirmations',0)<=0 or tx.get('blockhash')!=r['blockhash']:fail('transaction_chain_mismatch','Extinct transaction readback failed. Recover complete history before preservation can complete.')
+
 
 def preservation_outcome(store,p,key):
     from setup_messages import sign
@@ -246,10 +260,10 @@ def report_existing(owner,key,p,facts):
         if not row or row['state']!='pending' or row['proposal']!=p or row.get('withdrawn') or row.get('cancel_requested') or s.get('retirement_cancel_pending',{}).get(key) or blocked(s,p):raise ValueError('Extinction request changed during existing-history verification.')
         if len(s['outbox'])>=128:raise ValueError('Connect Wallet Server before reporting existing preservation.')
         s['outbox'][digest(item)]=item
-        s['completed'][key]={'kind':'wallet_retire','at':time.time(),'result':outcome};s['pending'].pop(key);s.get('retirement_continuations',{}).pop(key,None)
+        s['completed'][key]={'kind':'wallet_retire','at':time.time(),'result':outcome,'verification_basis':facts.get('preservation_basis','local_original_comparison')};s['pending'].pop(key);s.get('retirement_continuations',{}).pop(key,None)
     from activity_log import event
-    event('extinction.preserve','Existing original and archive records matched; preservation receipt reported without importing or deleting')
-    return dict(facts,phase='preserved',message='All relevant original wallet records match the local Extinct wallet. Verified preservation reported to Wallet Server; waiting for its separate deletion request. Original wallets remain intact.')
+    event('extinction.preserve','Existing history matched · basis='+facts.get('preservation_basis','local_original_comparison')+' · addresses='+str(len(p['manifest']['addresses']))+' · transactions='+str(len(p['manifest']['transactions']))+' · no_wallet_mutation=true; preservation receipt reported')
+    return dict(facts,phase='preserved',message='The requested public history already matches the locally verified Extinct archive. Preservation was reported without importing history or deleting any wallet. Any original-wallet deletion still requires a separate local approval.')
 
 
 def approve(owner,key,fingerprint_value=None,history_elsewhere_confirmed=False):

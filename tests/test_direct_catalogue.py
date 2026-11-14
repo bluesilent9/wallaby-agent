@@ -95,11 +95,27 @@ class DirectDiscovery(DirectCore):
    for _ in range(3):
     self.discover();self.assertEqual(self.incoming('Wallaby Extinct'),key);self.assertTrue(self.store.read()['sync_choices'][key]['selected']);self.assertTrue(any(key in g['keys'] for g in groups(self.store)))
    view=self.receive.state();rows=view['wallets'];self.assertFalse(any(__import__('wallet_visibility').internal(r['wallet_name']) for r in rows));self.assertEqual(next(r for r in rows if r['policy_id']==__import__('sync_preferences').policy_id(p))['availability'],'ready');self.assertEqual([r['wallet_name'] for r in rows if r['availability']=='ready'],['Wallaby Extinct']);self.assertTrue(all(r['availability']=='denied' for r in rows if r['wallet_name']!='Wallaby Extinct'))
+  if getattr(self,'late_preservation',False):
+   from fixture_retirement import proposal
+   from direct_wallet_catalogue import reconcile_preservation
+   ids=[r['txid'] for r in rpc(self.core,'listtransactions',['*',100,0,True],'extinct_watch') if r.get('address')==old]
+   history={'addresses':[{'address':old,'label':lost}],'transactions':[{'txid':i,'blockhash':rpc(self.core,'gettransaction',[i,True],'extinct_watch')['blockhash']} for i in sorted(set(ids))]}
+   request=proposal(self.raw,history,'preserve','Wallaby Extinct',operation='e'*64);waiting=digest(request);self.store.receive(request);reconcile_preservation(self.receiver.core,self.store)
+   self.assertIn(waiting,self.store.read()['pending']);self.assertGreater(self.store.preservation_rechecks[waiting],time.monotonic())
   self.approve(key,True)
+  if getattr(self,'late_preservation',False):self.assertEqual(self.store.preservation_rechecks,{})
   from extinct_upgrade import snapshot as snap
   source=snap(self.core,'extinct_watch');received=snap(self.receiver.core,'Wallaby Extinct')
   self.assertEqual(source['addresses'],received['addresses']);self.assertEqual(source['txids'],received['txids']);self.assertEqual(rpc(self.receiver.core,'getaddressinfo',[old],'Wallaby Extinct')['labels'],[lost])
   self.discover();self.assertIsNone(self.incoming('Wallaby Extinct'))
+  if getattr(self,'late_preservation',False):
+   from fixture_retirement import proposal
+   from direct_wallet_catalogue import reconcile_preservation
+   txids=[r['txid'] for r in rpc(self.receiver.core,'listtransactions',['*',100,0,True],'Wallaby Extinct') if r.get('address')==old]
+   history={'addresses':[{'address':old,'label':lost}],'transactions':[{'txid':txid,'blockhash':rpc(self.receiver.core,'gettransaction',[txid,True],'Wallaby Extinct')['blockhash']} for txid in sorted(set(txids))]}
+   request=proposal(self.raw,history,'preserve','Wallaby Extinct',operation='e'*64);request_key=digest(request);self.store.receive(request)
+   with patch('retirement_phases.imports',side_effect=AssertionError('No import permitted')),patch('core_history.install',side_effect=AssertionError('No archive replacement permitted')):reconcile_preservation(self.receiver.core,self.store)
+   saved=self.store.read();self.assertNotIn(request_key,saved['pending']);self.assertEqual(saved['completed'][request_key]['verification_basis'],'verified_archive');self.assertFalse(saved['completed'][request_key]['result']['wallet_deleted']);self.assertFalse(saved.get('history_jobs'))
   if getattr(self,'denial_growth',False):
    from sync_preferences import change
    def add():
@@ -124,6 +140,8 @@ class DirectDiscovery(DirectCore):
   self.source=Regtest(['-prune=1','-txindex=0','-fastprune=1']);self.receiver=Regtest(['-prune=1','-txindex=0','-fastprune=1']);self.addCleanup(self.source.close);self.addCleanup(self.receiver.close);self.core=self.source.core
   rpc(self.core,'createwallet',{'wallet_name':'Miner'});rpc(self.core,'generatetoaddress',[1,rpc(self.core,'getnewaddress',[],'Miner')])
   self.pruned_nodes=True;self.test_whole_extinct_history_updates_partial_receiver_and_keeps_lost_labels()
+ def test_pruned_received_archive_satisfies_late_preservation_without_an_original(self):
+  self.late_preservation=True;self.test_pruned_agents_offer_and_merge_complete_extinct_history_without_server_jobs()
  def test_extinct_denial_survives_real_source_archive_growth(self):
   self.denial_growth=True;self.test_whole_extinct_history_updates_partial_receiver_and_keeps_lost_labels()
  def test_managed_monitor_subset_does_not_appear_as_a_separate_wallet(self):

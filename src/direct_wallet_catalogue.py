@@ -41,15 +41,34 @@ def activate(store):
         s['sync_offers']={};s['sync_offers_received']=True
 
 def reconcile_preservation(core,store):
-    """Actual directory absence cancels stale preservation, never completes it."""
+    """Reconcile Server indications against Core; never import or delete data."""
     saved=store.read()
     rows=[(k,r) for k,r in saved['pending'].items() if r['proposal'].get('kind')=='wallet_retire' and r['proposal'].get('phase')=='preserve' and r['state']=='pending']
     if not rows:return
     names={r['name'] for r in rpc(core,'listwalletdir')['wallets']}
     for key,row in rows:
         p=row['proposal']
-        if p['wallet'] in names:continue # Unloaded is not deleted.
         if saved.get('retirement_continuations',{}).get(key) or digest({'local_retirement_history':key}) in saved.get('history_jobs',{}):continue
+        if p['wallet'] in names:
+            if saved.get('active_transfer') or saved.get('sync_batch') or saved.get('history_jobs') or saved.get('recovery',{}).get('state') in ('starting','stopping','downloading','rescanning') or row.get('withdrawn') or row.get('cancel_requested'):continue
+            from retirement_phases import validate as validate_retirement
+            try:validate_retirement(p)
+            except ValueError:continue
+            from lifecycle_preferences import blocked
+            if blocked(saved,p):continue
+            checks=getattr(store,'preservation_rechecks',{});now=time.monotonic()
+            if checks.get(key,0)>now:continue
+            store.preservation_rechecks={k:v for k,v in checks.items() if k in saved['pending']};store.preservation_rechecks[key]=now+30
+            from wallet_retirement import Retirement
+            from activity_log import event
+            try:
+                # review reports a receipt only after complete existing-data
+                # validation. No approve/import/recovery/deletion action runs.
+                response=Retirement(core,store).review(key)
+                if response.get('retirement',{}).get('phase')=='preserved':event('extinction.reconcile','Existing verified archive satisfied pending preservation · no_wallet_mutation=true · request='+key[:12])
+            except ValueError as error:
+                event('extinction.reconcile','Existing-history comparison deferred · exception='+type(error).__name__+' · no_wallet_mutation=true · request='+key[:12])
+            break # At most one bounded public-history comparison per idle pass.
         from retirement_phases import result
         outcome=result(p,'cancelled',message='Preservation superseded: its local Extinct archive was deleted. No preservation or deletion was performed.')
         with store.edit() as s:

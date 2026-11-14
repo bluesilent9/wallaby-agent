@@ -126,7 +126,7 @@ class Retirement:
     def review(self,key):
         p=self.store.read()['pending'][key]['proposal']
         from wallet_loading import ownership_wallets
-        with ownership_wallets(self.core,names={p['wallet']} if p.get('phase')=='preserve' else set()):return self._review(key)
+        with ownership_wallets(self.core,names=None if p.get('phase')=='preserve' else set()):return self._review(key)
     def _review(self,key):
         p=self.store.read()['pending'][key]['proposal']
         try:
