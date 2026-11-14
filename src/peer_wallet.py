@@ -323,7 +323,7 @@ class Transfer:
             from signer_restoration import requested,offer,verify_received,finish as finish_restoration,candidates
             if candidates(self.store.read(),p['public_wallet']) and not requested(p):raise ValueError('This wallet needs a Build 65 restoration invitation and signed restoration preview.')
             restoration_offer=offer(self.store,p,watch)
-            ready={'status':'ready','features':['chain_sync_v1','core_history_v1','restore_roles_v1','core_history_v2','core_history_v3']}
+            ready={'status':'ready','features':['chain_sync_v1','core_history_v1','restore_roles_v1','core_history_v2','core_history_v3','core_history_v4']}
             if restoration_offer:ready['restoration']=restoration_offer
             if p.get('transfer_version') in (2,3):ready['watch_only']=watch
             frame_write(stream,ready)

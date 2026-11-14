@@ -62,7 +62,7 @@ def collect(core,names,txids,folder):
     return [found[k] for k in sorted(found)]
 
 
-def validate_rows(core,rows,manifest,*,allow_unfunded=False):
+def validate_rows(core,rows,manifest,*,allow_unfunded=False,trusted_inventory=False):
     if not isinstance(rows,list) or not rows and not allow_unfunded or len(rows)>10000:raise ValueError('Invalid native history record count.')
     expected={r['txid']:r['blockhash'] for r in manifest['transactions']};found={};outputs={};transactions=[]
     for row in rows:
@@ -79,7 +79,10 @@ def validate_rows(core,rows,manifest,*,allow_unfunded=False):
             if address in {r['address'] for r in manifest['addresses']}:outputs[(row['txid'],out['n'])]=address
         found[row['txid']]=value
     if set(found)!=set(expected) or not allow_unfunded and set(outputs.values())!={r['address'] for r in manifest['addresses']}:raise ValueError('Native history does not cover every approved address and transaction.')
-    for tx in transactions:
+    # Direct V4 snapshots preserve Core archive records even when their watched
+    # address/parent record is no longer in the fixed-address manifest. This
+    # accepts pinned-source inventory provenance, not independent ownership proof.
+    for tx in ([] if trusted_inventory else transactions):
         if not any((tx['txid'],v['n']) in outputs for v in tx['vout']) and not any((i.get('txid'),i.get('vout')) in outputs for i in tx['vin']):raise ValueError('An unrelated transaction was included in the native history.')
     return found
 
@@ -112,8 +115,8 @@ def archive_order(value,offset):
     rebuilt=compact_write(len(pairs))+b''.join(compact_write(len(k))+k+compact_write(len(v))+v for k,v in pairs)
     return value[:begin]+rebuilt+value[end:]
 
-def merge_backup(core,path,rows,manifest,*,allow_unfunded=False):
-    supported(core);found=validate_rows(core,rows,manifest,allow_unfunded=allow_unfunded)
+def merge_backup(core,path,rows,manifest,*,allow_unfunded=False,trusted_inventory=False):
+    supported(core);found=validate_rows(core,rows,manifest,allow_unfunded=allow_unfunded,trusted_inventory=trusted_inventory)
     from wallet_labels import fixed_address
     with database(path,True) as db:
         for key,value in db.execute('select key,value from main').fetchall():
@@ -144,7 +147,7 @@ def merge_backup(core,path,rows,manifest,*,allow_unfunded=False):
     return len(found)
 
 
-def install(core,store,archive,rows,manifest,coverage=None,*,allow_unfunded=False):
+def install(core,store,archive,rows,manifest,coverage=None,*,allow_unfunded=False,trusted_inventory=False):
     from peer_wallet import work_dir
     from core_ram_path import for_core
     from wallet_deletion import target,delete
@@ -159,7 +162,7 @@ def install(core,store,archive,rows,manifest,coverage=None,*,allow_unfunded=Fals
         backup=Path(d)/'archive.dat';rpc(core,'backupwallet',[for_core(core,backup)],archive)
         # Preserve the entire old archive, including unrelated children and LOST
         # labels. Add only exact public tx records to this non-swapping copy.
-        if rows:merge_backup(core,backup,rows,manifest,allow_unfunded=allow_unfunded)
+        if rows:merge_backup(core,backup,rows,manifest,allow_unfunded=allow_unfunded,trusted_inventory=trusted_inventory)
         if coverage is not None:
             with database(backup,True) as db:db.execute('insert or replace into main(key,value) values(?,?)',(HISTORY_KEY,json.dumps(coverage,sort_keys=True,separators=(',',':')).encode()))
         rpc(core,'restorewallet',{'wallet_name':stage,'backup_file':for_core(core,backup),'load_on_startup':False},timeout=86400)

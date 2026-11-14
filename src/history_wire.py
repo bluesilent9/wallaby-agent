@@ -9,8 +9,8 @@ NAMESPACE='wallaby-core-history-v1'
 
 
 def export(core,store,p,details,folder,version=1):
-    if type(version) is not int or version not in (1,2,3):raise ValueError('Unsupported direct history version.')
-    if version==3 and p.get('transfer_version')!=3:raise ValueError('Trusted historical snapshots require a paired direct Agent transfer.')
+    if type(version) is not int or version not in (1,2,3,4):raise ValueError('Unsupported direct history version.')
+    if version>=3 and p.get('transfer_version')!=3:raise ValueError('Trusted historical snapshots require a paired direct Agent transfer.')
     from peer_wallet import source_wallet
     name=source_wallet(core,p);wanted={fixed_address(r['desc']) for r in p['public_wallet']['descriptors']}
     if None in wanted:raise ValueError('Extinct history contains a non-fixed policy.')
@@ -24,7 +24,8 @@ def export(core,store,p,details,folder,version=1):
         # Core summary rows can omit internal-only transactions. The consistent
         # public CWalletTx inventory, not listtransactions pagination, is complete.
         from extinct_upgrade import snapshot
-        for txid in snapshot(core,name)['txids']:remember(txid)
+        initial=snapshot(core,name)
+        for txid in initial['txids']:remember(txid)
     else:
         offset=0
         while True:
@@ -34,19 +35,32 @@ def export(core,store,p,details,folder,version=1):
             if offset>100000:raise ValueError('Extinct history exceeds one transfer’s bounded record count.')
     own={(txid,o['n']) for txid,(tx,decoded) in alltx.items() for o in decoded['vout'] if o['scriptPubKey'].get('address') in wanted}
     ids={txid for txid,(tx,decoded) in alltx.items() if any((txid,o['n']) in own for o in decoded['vout']) or any((i.get('txid'),i.get('vout')) in own for i in decoded['vin'])}
+    whole=version>=2 and wanted==set(initial['addresses'])
+    if version>=4 and whole:ids=set(alltx)
     labels={r['address']:r['label'] for r in details['address_labels']}
     if not wanted<=labels.keys():raise ValueError('Source Extinct labels are incomplete.')
     manifest={'addresses':[{'address':a,'label':labels[a]} for a in sorted(wanted)],'transactions':[{'txid':i,'blockhash':alltx[i][0]['blockhash']} for i in sorted(ids)]}
-    rows=collect(core,[name],ids,folder);validate_rows(core,rows,manifest,allow_unfunded=version>=2)
+    rows=collect(core,[name],ids,folder);validate_rows(core,rows,manifest,allow_unfunded=version>=2,trusted_inventory=version>=4 and whole)
     packet={'version':version,'public_identity':digest(sorted(__import__('public_policy').descriptors(p['public_wallet']))),'manifest':manifest,'records':rows}
     if version>=2:
+        final=snapshot(core,name)
+        from activity_log import event
+        if initial['addresses']!=final['addresses'] or initial['txids']!=final['txids']:
+            event('sync.history','Export changed · addresses_changed='+str(initial['addresses']!=final['addresses']).lower()+' · records_changed='+str(initial['txids']!=final['txids']).lower()+' · initial_records='+str(len(initial['txids']))+' · current_records='+str(len(final['txids'])))
+            raise ValueError('The complete source history changed or contains records absent from this transfer. Review the archive again; no complete update was sent.')
+        from wallet_labels import read_labels
+        current_labels={r['address']:r['label'] for r in read_labels(core,name,final['raw'],[])}
+        if any(current_labels.get(a)!=labels[a] for a in wanted):
+            event('sync.history','Export changed · labels_changed=true')
+            raise ValueError('The complete source history changed or contains records absent from this transfer. Review the archive again; no complete update was sent.')
+        event('sync.history','Export inventory · scope='+('whole' if whole else 'subset')+' · source_addresses='+str(len(initial['addresses']))+' · requested_addresses='+str(len(wanted))+' · source_records='+str(len(initial['txids']))+' · exported_records='+str(len(ids)))
         from extinct_history_sync import coverage
         try:packet['coverage']=coverage(core,name,wanted,ids)
         except ValueError as error:
-            if version!=3 or str(error)!='Upgrade and verify the source Extinct archive before sending a complete history update.':raise
+            if version<3 or str(error)!='Upgrade and verify the source Extinct archive before sending a complete history update.':raise
             from extinct_upgrade import snapshot
-            state=snapshot(core,name);chain=rpc(core,'getblockchaininfo')
-            if wanted!=set(state['addresses']) or ids!=set(state['txids']):raise ValueError('The complete source history changed or contains records absent from this transfer. Review the archive again; no complete update was sent.')
+            state=final;chain=rpc(core,'getblockchaininfo')
+            if version==3 and (wanted!=set(state['addresses']) or ids!=set(state['txids'])):raise ValueError('The complete source history changed or contains records absent from this transfer. Review the archive again; no complete update was sent.')
             if chain.get('initialblockdownload') or chain['blocks']!=chain['headers'] or state['info'].get('lastprocessedblock',{}).get('height',-1)<chain['blocks']:raise ValueError('Wait for the source Extinct archive to process its chain before synchronising.')
             # The approved pinned Agent supplies its current complete stored
             # snapshot. This provenance never claims a local historical rescan.
@@ -75,8 +89,8 @@ def receive(core,store,p,details,header,stream,read_exact,folder):
             block=read_exact(stream,min(65536,remaining));f.write(block);hasher.update(block);remaining-=len(block)
     if hasher.hexdigest()!=message['sha256']:raise ValueError('Public history checksum mismatch. No archive was updated.')
     packet=json.loads(path.read_text())
-    if not isinstance(packet,dict) or type(packet.get('version')) is not int or packet['version'] not in (1,2,3) or set(packet)!=({'version','public_identity','manifest','records','coverage'} if packet['version']>=2 else {'version','public_identity','manifest','records'}) or packet['public_identity']!=digest(sorted(__import__('public_policy').descriptors(p['public_wallet']))):raise ValueError('Public historical policy identity differs from the authorised archive.')
-    if packet['version']==3 and p.get('transfer_version')!=3:raise ValueError('Trusted historical snapshots require a paired direct Agent transfer.')
+    if not isinstance(packet,dict) or type(packet.get('version')) is not int or packet['version'] not in (1,2,3,4) or set(packet)!=({'version','public_identity','manifest','records','coverage'} if packet['version']>=2 else {'version','public_identity','manifest','records'}) or packet['public_identity']!=digest(sorted(__import__('public_policy').descriptors(p['public_wallet']))):raise ValueError('Public historical policy identity differs from the authorised archive.')
+    if packet['version']>=3 and p.get('transfer_version')!=3:raise ValueError('Trusted historical snapshots require a paired direct Agent transfer.')
     if packet['version']==1:
         from retirement_phases import manifest
         manifest(packet['manifest'])
@@ -87,7 +101,7 @@ def receive(core,store,p,details,header,stream,read_exact,folder):
     if packet['version']>=2:
         from extinct_history_sync import validate_coverage
         validate_coverage(core,packet['coverage'],wanted,{r['txid'] for r in packet['manifest']['transactions']})
-    validate_rows(core,packet['records'],packet['manifest'],allow_unfunded=packet['version']>=2);return packet
+    validate_rows(core,packet['records'],packet['manifest'],allow_unfunded=packet['version']>=2,trusted_inventory=packet['version']>=4);return packet
 
 
 def validate_manifest(value):

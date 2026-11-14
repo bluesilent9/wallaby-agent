@@ -26,6 +26,22 @@ class ReceiverPull(DirectCore):
    desc=p['public_wallet']['descriptors'][0]['desc'];self.old_address=rpc(self.core,'deriveaddresses',[desc,*([[0,0]] if '*' in desc else [])])[0];miner=rpc(self.core,'getnewaddress',[],'Miner');rpc(self.core,'generatetoaddress',[1,self.old_address]);rpc(self.core,'generatetoaddress',[101,miner]);rpc(self.core,'walletpassphrase',[PASSWORD,60],'Original');rpc(self.core,'sendall',{'recipients':[miner]},'Original');rpc(self.core,'walletlock',[],'Original');rpc(self.core,'generatetoaddress',[1,miner])
    rpc(self.core,'createwallet',{'wallet_name':'Wallaby Extinct','disable_private_keys':True,'blank':True});desc='addr('+self.old_address+')';self.lost='Retired Treasury | LOST:06/11/2026 01:02:03 UTC';rpc(self.core,'importdescriptors',[[{'desc':desc+'#'+checksum(desc),'timestamp':0,'label':self.lost}]],'Wallaby Extinct');p['public_wallet']=rpc(self.core,'listdescriptors',[False],'Wallaby Extinct');p['source_has_private_keys']=False;source_watch=True
   if getattr(self,'active_archive_owner',False):self.wallet(self.receiver.core,'Active local copy',kind)
+  if getattr(self,'archive_subset',False):
+   from vendor.embit.descriptor.checksum import checksum
+   extra=rpc(self.core,'getnewaddress',[],'Miner');body='addr('+extra+')'
+   rpc(self.core,'importdescriptors',[[{'desc':body+'#'+checksum(body),'timestamp':'now','label':'Other retired history'}]],'Wallaby Extinct')
+  if getattr(self,'archive_extra_record',False):
+   # Legacy native archives can retain CWalletTx rows beyond the currently
+   # watched fixed-address set. Preserve that public history, not just rows
+   # rediscovered by decoding a direct address match.
+   from core_history import collect,install,validate_rows
+   from approval_store import Store
+   txid=rpc(self.core,'listtransactions',['*',1000,0,True],'Miner')[0]['txid']
+   rows=collect(self.core,['Miner'],{txid},self.root)
+   manifest={'addresses':[{'address':self.old_address,'label':self.lost}],'transactions':[{'txid':r['txid'],'blockhash':r['blockhash']} for r in rows]}
+   with self.assertRaisesRegex(ValueError,'unrelated'):validate_rows(self.core,rows,manifest,allow_unfunded=True)
+   install(self.core,Store(self.root/'legacy-fixture'), 'Wallaby Extinct',rows,manifest,allow_unfunded=True,trusted_inventory=True)
+   self.extra_txid=txid
   if getattr(self,'pruned_history',False):
    # Download and validate once, then genuinely discard the historical block
    # files on BOTH nodes before transferring any archive history.
@@ -81,6 +97,7 @@ class ReceiverPull(DirectCore):
     state=snapshot(self.receiver.core,name);self.assertTrue(valid(self.receiver.core,state));self.assertEqual(state['marker']['basis'],'trusted_direct_snapshot');self.assertFalse(self.store.read().get('history_jobs'))
     from extinct_history_sync import coverage
     self.assertEqual(coverage(self.receiver.core,name,state['addresses'],state['txids'])['basis'],'trusted_direct_snapshot')
+   if getattr(self,'archive_extra_record',False):self.assertEqual(rpc(self.receiver.core,'gettransaction',[self.extra_txid,True],name)['hex'],rpc(self.core,'gettransaction',[self.extra_txid,True],'Wallaby Extinct')['hex'])
   if restoration:self.assertEqual(self.store.read()['local_retirements'][ident]['state'],'restored')
 
  def test_source_export_failure_wakes_receiver_and_releases_authorisation(self):
@@ -89,6 +106,25 @@ class ReceiverPull(DirectCore):
  def test_trusted_existing_extinct_records_copy_without_claiming_a_local_scan(self):
   self.extinct_source=True;self.uncertified=True
   with patch('wallet_recovery.Recovery.register_watch_history',side_effect=AssertionError('No historical rescan is needed for a trusted snapshot.')):self.relay(watch=True)
+ def test_existing_archive_inventory_preserves_records_without_a_direct_address_match(self):
+  self.extinct_source=True;self.uncertified=True;self.archive_extra_record=True;self.relay(watch=True)
+ def test_requested_archive_subset_is_not_mistaken_for_a_source_mutation(self):
+  self.extinct_source=True;self.uncertified=True;self.archive_subset=True;self.relay(watch=True)
+ def test_actual_archive_inventory_change_during_export_still_stops_before_import(self):
+  self.extinct_source=True;self.uncertified=True;self.source_export_failed=True
+  from history_wire import collect
+  from wallet_ops import rpc
+  from vendor.embit.descriptor.checksum import checksum
+  def changing(*args,**kwargs):
+   rows=collect(*args,**kwargs);body='addr('+rpc(self.core,'getnewaddress',[],'Miner')+')';rpc(self.core,'importdescriptors',[[{'desc':body+'#'+checksum(body),'timestamp':'now'}]],'Wallaby Extinct');return rows
+  with patch('history_wire.collect',side_effect=changing):self.relay(watch=True)
+ def test_changed_lost_label_during_export_still_stops_before_import(self):
+  self.extinct_source=True;self.uncertified=True;self.source_export_failed=True
+  from history_wire import collect
+  from wallet_ops import rpc
+  def changing(*args,**kwargs):
+   rows=collect(*args,**kwargs);rpc(self.core,'setlabel',[self.old_address,self.lost+' changed'],'Wallaby Extinct');return rows
+  with patch('history_wire.collect',side_effect=changing):self.relay(watch=True)
  def test_trusted_snapshot_still_refuses_active_local_wallet_ownership(self):
   self.extinct_source=True;self.uncertified=True;self.active_archive_owner=True;self.relay(watch=True)
  def test_trusted_snapshot_does_not_export_malformed_transaction_records(self):

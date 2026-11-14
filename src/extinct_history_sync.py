@@ -72,7 +72,7 @@ def install_packet(core,store,key,p,details,packet):
     from extinct_upgrade import certify
     covered=preflight(core,store,p,packet)
     name,_,merged=import_watch(core,store,key,p,details,native=True,coverage=packet['coverage'])
-    install(core,store,name,packet['records'],packet['manifest'],allow_unfunded=True)
+    install(core,store,name,packet['records'],packet['manifest'],allow_unfunded=True,trusted_inventory=packet['version']>=4)
     # Native install preserves the entire receiving database. Certify only the
     # independently covered union after Core has read back every incoming row.
     basis=packet['coverage'].get('basis','local_scan')
