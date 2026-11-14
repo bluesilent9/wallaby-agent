@@ -50,6 +50,8 @@ def guard(core,p,store=None,actual_name=None,*,public_preview=False,restoration_
     from wallet_ops import rpc
     state=store.read() if store is not None else getattr(core,'managed_store',None).read() if getattr(core,'managed_store',None) is not None else {}
     from signer_restoration import requested,validate_offer
+    if state.get('direct_wallet_discovery') and not p.get('source_has_private_keys') and __import__('direct_wallet_catalogue').local_request(state,p):
+        return # Locally scoped public-only policy export; cannot enter private backup path.
     if requested(p):
         if public_preview:return
         if restoration_permit is not None:

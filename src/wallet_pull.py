@@ -79,6 +79,7 @@ class Pull:
             if len(candidates)!=1:raise ValueError()
             key,row=candidates[0];p=row['proposal']
             if self.peers.binding(p) is not channel:raise ValueError()
+            if s.get('direct_wallet_discovery') and not __import__('direct_wallet_catalogue').local_request(s,p):raise ValueError()
             from sync_table import sender_enabled
             if not sender_enabled(s,p):raise ValueError()
             reason='preview_changed';payload=s.get('transfer_previews',{}).get(key)

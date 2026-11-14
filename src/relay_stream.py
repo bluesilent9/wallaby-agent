@@ -59,6 +59,16 @@ class Bridge:
         try:
             stream.timeout=20;stream.message('stream_open',{'transfer_id':p['transfer_id']});stream.wait(stream.opened);stream.timeout=2400;return stream
         except Exception:self.abort(stream);raise
+    def open_catalogue(self,channel):
+        self.peers.direct.require(channel)
+        if channel.peer['role']!='agent':raise ValueError('Only paired Agents can discover wallets.')
+        token=secrets.token_hex(32);stream=Stream(self,channel,digest({'wallet_catalogue_v1':token}),secrets.token_hex(32));stream.timeout=30
+        with self.lock:
+            if len(self.streams)>=4:raise ValueError('Direct connection is busy.')
+            self.streams[stream.id]=stream
+        try:
+            stream.message('stream_open',{'catalogue_request':token});stream.wait(stream.opened);return stream
+        except Exception:self.abort(stream);raise
     def open_blocks(self,channel,cancel=None,*,clone=False):
         self.peers.direct.require(channel)
         if channel.peer['role']!='agent':raise ValueError('Block transfer requires paired Agent permission.')
@@ -124,6 +134,14 @@ class Bridge:
         if not stream and retired and retired[0] is channel and retired[1]==record['operation_hash'] and time.monotonic()-retired[2]<60 and kind in ('stream_ack','stream_data','stream_ready','stream_close'):return True
         if kind=='stream_open' and retired:raise ValueError('A closed stream identity cannot be reused.')
         if kind=='stream_open':
+            if set(body)=={'stream_id','catalogue_request'}:
+                token=body['catalogue_request']
+                if stream or not hexid(token) or record['operation_hash']!=digest({'wallet_catalogue_v1':token}) or len(self.streams)>=4:raise ValueError('Invalid direct wallet inventory stream.')
+                stream=Stream(self,channel,record['operation_hash'],ident);self.streams[ident]=stream
+                service=getattr(self.peers,'catalogue',None)
+                if not service or not service.accept(stream):self.abort(stream)
+                else:stream.message('stream_ready',{})
+                return True
             if set(body)=={'stream_id','comparison_request'}:
                 token=body['comparison_request']
                 if stream or not hexid(token) or record['operation_hash']!=digest({'extinct_compare_v1':token}):raise ValueError('Invalid optional comparison request.')

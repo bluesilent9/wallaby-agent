@@ -123,7 +123,8 @@ def prepare(core,store,key,p):
             # for one immutable request (even when only the timestamp differs).
             return existing
         s.setdefault('transfer_previews',{})[key]=payload;s.get('preview_errors',{}).pop(key,None)
-    store.queue('wallet_transfer_preview',{'request_hash':key,**payload});return payload
+    if not store.read().get('direct_wallet_discovery'):store.queue('wallet_transfer_preview',{'request_hash':key,**payload})
+    return payload
 
 def receive(store,payload):
     state=store.read();transfer_id=payload.get('preview',{}).get('transfer_id')

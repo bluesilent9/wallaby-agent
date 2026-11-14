@@ -25,6 +25,7 @@ def export(core,store,p,details,folder,version=1):
         # public CWalletTx inventory, not listtransactions pagination, is complete.
         from extinct_upgrade import snapshot
         initial=snapshot(core,name)
+        if store.read().get('direct_wallet_discovery') and wanted!=set(initial['addresses']):raise ValueError('The complete source history changed or contains records absent from this transfer. Review the archive again; no complete update was sent.')
         for txid in initial['txids']:remember(txid)
     else:
         offset=0

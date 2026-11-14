@@ -9,6 +9,7 @@ class RevisionError(ValueError):
 
 
 def apply_snapshot(store,revision,requests,session=None):
+    if store.read().get('direct_wallet_discovery'):return # Server has no wallet discovery/scope authority.
     from vault_policy import validate_proposal
     if type(revision) is not int or revision<0:raise ValueError('Invalid synchronisation revision.')
     if not isinstance(requests,list) or len(requests)>MAX_ITEMS:raise ValueError('Too many synchronisation requests.')

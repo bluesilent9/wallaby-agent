@@ -1,3 +1,15 @@
+# Current wallet synchronisation: Build 99
+
+`wallet_catalogue_v1` uses the authenticated Agent-only direct SSH stream after QR pairing. Both Agents must run Build 99. Public source inventory, including complete Extinct transaction-id/address/label sets, is compared against the receiving Agent inventory. The source generates a signed whole-wallet preview bound to both paired identities. The receiver independently verifies it, selects watch/private mode where permitted, and explicitly authorises receiving. The source serves automatically only on the pinned direct receiving request. Assigned multisig/vault signer secrets are not cloned by ordinary policy sync; their public policies are watch-only offers.
+
+The Server supplies connection signalling only for this workflow. Server wallet transfer queues, offers and preview deliveries are ignored before applying or validating them. Locally created direct requests use the existing v3 signed-preview/stream format, v4 native Extinct history packets, complete source scope checks, local chain validation, active-owner checks, label checks and hash verification. No bulk data uses the relay. A direct connection does not bypass receiver approval.
+
+Receiver denials are local and sent directly in the authenticated inventory. Extinct denial identity is stable as archive contents grow. Earlier exact-container denials migrate without enabling receiving. Denied wallets remain visible; enabled missing wallets require a live direct source. Completed outcomes never suppress a new direct generation after genuine deletion. Failed reads never prove absence. Unloaded wallets are inspected temporarily with their original loaded state restored.
+
+Extinct updates merge, retain receiver-only history and LOST metadata, and never claim a historical rescan occurred. Full blockchain download is not required solely for copying native history whose block references can be validated against retained headers.
+
+The remaining sections describe other Agent operations and retained wire primitives; their references to Server-created wallet transfer jobs are superseded by the above.
+
 # Current communication protocols
 
 The supported deployment baseline is Build 88 and newer. Protocol version numbers describe individual message/data formats, not Agent release numbers. A version-1 envelope can therefore still be the current format.

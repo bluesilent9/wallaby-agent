@@ -2,14 +2,17 @@
 from approval_store import digest
 from public_policy import descriptors
 
-def policy_id(proposal):return digest(sorted(descriptors(proposal['public_wallet'])))
+def policy_id(proposal):
+    from extinct_sync import grouped
+    if grouped(proposal['public_wallet']):return digest({'wallet_sync':'extinct_archive_v1'})
+    return digest(sorted(descriptors(proposal['public_wallet'])))
 
 def change(store,key,disable):
     with store.edit() as s:
         if s.get('active_transfer') or s.get('sync_batch'):raise ValueError('Finish or end the active transfer before changing synchronisation requests.')
         p=s['pending'].get(key,{}).get('proposal')
         if p is None:
-            offer=s.get('sync_offers',{}).get(key)
+            offer=(s.get('direct_sync_offers',{}) if s.get('direct_wallet_discovery') else s.get('sync_offers',{})).get(key)
             if offer and offer['direction']=='receive':p={'kind':'wallet_transfer','direction':'receive','public_wallet':offer['public_wallet']}
         if not p or p['kind']!='wallet_transfer' or p['direction']!='receive':raise ValueError('Only incoming wallet synchronisation can be disabled. Signing authority is unchanged.')
         ident=policy_id(p)
@@ -26,7 +29,7 @@ def enable(store,ident):
     with store.edit() as s:
         if s.get('active_transfer') or s.get('sync_batch'):raise ValueError('Finish the active transfer first.')
         s.setdefault('sync_exclusions',{}).pop(ident,None);s['sync_preferences_changed']=True
-        for p in s.get('sync_snapshot_requests',[]):
+        for p in ([] if s.get('direct_wallet_discovery') else s.get('sync_snapshot_requests',[])):
             key=digest(p)
             if p['direction']=='receive' and policy_id(p)==ident and key not in s['completed']:
                 if key not in s['pending']:restored+=1
@@ -34,7 +37,7 @@ def enable(store,ident):
         disabled=len(s['sync_exclusions'])
     from activity_log import event
     event('sync.permissions','Incoming policy enabled · disabled_remaining='+str(disabled)+' · restored_requests='+str(restored))
-    return {'message':'Synchronisation enabled for that wallet again.'+(' Its current request is available on Synchronisation.' if restored else ' Waiting for the Wallet Server to offer an active request; no wallet data was imported.')}
+    return {'message':'Synchronisation enabled for that wallet again.'+(' Its current request is available on Synchronisation.' if restored else ' Waiting for the directly paired Agent to refresh its offer; no wallet data was imported.')}
 
 def cancel(store,key):
     with store.edit() as s:

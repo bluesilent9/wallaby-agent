@@ -21,6 +21,7 @@ def validate(p):
     return p
 
 def apply(store,p,session):
+    if store.read().get('direct_wallet_discovery'):return
     validate(p)
     with store.edit() as s:
         new=session!=s.get('sync_offer_session')
@@ -58,7 +59,7 @@ def rows(store):
         p=row['proposal']
         if p.get('kind')=='wallet_transfer' and not row.get('withdrawn'):
             identity=(p.get('transfer_id'),p['direction'],p['peer']['node_id'],policy_id(p));indexed.setdefault(identity,[]).append(key)
-    for offer in saved.get('sync_offers',{}).values():
+    for offer in (saved.get('direct_sync_offers',{}) if saved.get('direct_wallet_discovery') else saved.get('sync_offers',{})).values():
         policy=policy_id(offer)
         linked=indexed.get((offer['transfer_id'],offer['direction'],offer['peer']['node_id'],policy),[])
         result.append({**copy.deepcopy(offer),'request_id':linked[0] if len(linked)==1 else None})
@@ -66,7 +67,10 @@ def rows(store):
 
 
 def receive_blocker(saved,p):
-    matches=[o for o in saved.get('sync_offers',{}).values() if o['direction']=='receive' and o['transfer_id']==p['transfer_id'] and o['peer']['node_id']==p['peer']['node_id']]
+    if saved.get('direct_wallet_discovery'):
+        from direct_wallet_catalogue import local_request
+        return None if local_request(saved,p) else 'This wallet needs a current offer from the directly paired source Agent.'
+    matches=[o for o in (saved.get('direct_sync_offers',{}) if saved.get('direct_wallet_discovery') else saved.get('sync_offers',{})).values() if o['direction']=='receive' and o['transfer_id']==p['transfer_id'] and o['peer']['node_id']==p['peer']['node_id']]
     states={o['status'] for o in matches}
     if not states or states=={'ready'}:return None
     if states & {'preview_changed','preview_expired','peer_changed'}:

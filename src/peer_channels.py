@@ -60,7 +60,7 @@ class Channel:
             if self.local_grant:
                 if not self.ready:
                     self.owner.persist(self);self.ready=True
-                    self.send('ping',digest(self.prologue),{'nonce':secrets.token_hex(16),'device_name':self.owner.device_name,'features':['extinct_compare_v1']})
+                    self.send('ping',digest(self.prologue),{'nonce':secrets.token_hex(16),'device_name':self.owner.device_name,'features':['extinct_compare_v1','wallet_catalogue_v1']})
             return
         if not self.ready or not self.local_grant:raise ValueError('Peer has not been granted application authority locally.')
         if kind=='ping':self.owner.peer_name(self,record['body']);self.send('pong',record['operation_hash'],record['body']);return
@@ -132,7 +132,7 @@ class Peers:
     def peer_name(self,c,body):
         # Authenticated display metadata only; roles and pinned keys cannot change.
         if not isinstance(body,dict) or 'device_name' not in body:return
-        if 'features' in body:c.features={'extinct_compare_v1'} if isinstance(body['features'],list) and 'extinct_compare_v1' in body['features'] else set()
+        if 'features' in body:c.features=set(body['features'])&{'extinct_compare_v1','wallet_catalogue_v1'} if isinstance(body['features'],list) and all(isinstance(f,str) for f in body['features']) else set()
         name=self.valid_name(body['device_name']);saved=self.persistence.read();row=saved['pairs'].get(c.peer['endpoint_id'])
         if row and row['peer']==c.peer and row['name']!=name:
             row['name']=name;saved['revision']+=1;self.persistence.commit(saved['revision']-1,saved)
@@ -159,7 +159,7 @@ class Peers:
             c.local_grant=True
             if c.remote_grant:self.persist(c)
             c.send('grant',digest(c.prologue),{'accepted':True});c.ready=c.remote_grant
-            if c.ready:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name,'features':['extinct_compare_v1']})
+            if c.ready:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name,'features':['extinct_compare_v1','wallet_catalogue_v1']})
             return {'message':'Local peer permission granted. Compare the same channel code on both devices.'}
     def revoke(self,ident):
         with self.lock:
@@ -322,7 +322,7 @@ class Peers:
                 if value['id'] not in self.acks:self.acks.append(value['id'])
         if self.acks:self.rpc({'action':'ack','ids':self.acks[:16]});self.acks=self.acks[16:]
         for c in list(self.channels.values()):
-            if c.ready and time.monotonic()>=self.backpressured_until and time.monotonic()-getattr(c,'pinged',0)>20:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name,'features':['extinct_compare_v1']});c.pinged=time.monotonic()
+            if c.ready and time.monotonic()>=self.backpressured_until and time.monotonic()-getattr(c,'pinged',0)>20:c.send('ping',digest(c.prologue),{'nonce':secrets.token_hex(16),'device_name':self.device_name,'features':['extinct_compare_v1','wallet_catalogue_v1']});c.pinged=time.monotonic()
             if c.ready and any(r.get('endpoint_id')==c.peer['endpoint_id'] and r.get('noise_public_key')==c.peer['noise_public_key'] for r in directory) and time.monotonic()-getattr(c,'reported',0)>30:
                 self.control('channel',{'peer_id':c.peer['endpoint_id'],'peer_role':c.peer['role'],'peer_noise_public_key':c.peer['noise_public_key'],'channel_id':c.id,'handshake_hash':c.handshake_hash,'state':'ready' if time.monotonic()-c.seen<=75 else 'closed','paired_by_qr':True});c.reported=time.monotonic()
                 if getattr(self,'direct',None):

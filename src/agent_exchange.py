@@ -89,6 +89,8 @@ class Exchange:
         proposals=[]
         self.phase='proposal_validation'
         for p in r['proposals']:
+            from direct_wallet_catalogue import SERVER_KINDS
+            if self.store.read().get('direct_wallet_discovery') and isinstance(p,dict) and p.get('kind') in SERVER_KINDS:continue
             # Record only a fixed known kind, never remote strings or payloads.
             known={'wallet_sync_offers','wallet_mobile_verification','wallet_rename','wallet_rename_queue','builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc','archive_cancel'}
             self.proposal_kind=p.get('kind') if isinstance(p,dict) and p.get('kind') in known else 'unknown'

@@ -38,6 +38,8 @@ class Workspace:
         from node_recovery import Recovery
         self.recovery=Recovery();self.node_epoch=0;self.node_control_lock=threading.RLock();self.node_controller=None;self.peer_start_lock=threading.Lock()
         self.store=Store(root()/ 'state');self.store.identity_root=Config().root
+        from direct_wallet_catalogue import activate
+        activate(self.store)
         # Never replay the legacy non-volatile approvals.json into a new workspace.
         # Only the schema-limited denial store survives workspace shutdown.
         self.node=None;self.node_port=None;self.node_generation=None;self.node_stop=None;self.node_status={'color':'red','message':'Node interface is off.'};self.view_server=None;self.view_token=None;self.viewers=[];self.window_required=False;self.closing=False;self.lock=threading.RLock();self.ops=None;self.transfer=None;self.setup=None;self.retirement=None;self.cancellations=None;self.archives=None;self.messages=None;self.environment={};self.archive_ops=None;self.refresh_ops=None;self.renames=None
@@ -86,6 +88,7 @@ class Workspace:
             agent_exchange.LOCAL_BROADCASTS=self.broadcasts
         if getattr(getattr(self,'peers',None),'blocks',None):
             if getattr(self.peers,'wallet_pull',None):self.peers.wallet_pull.transfer=self.transfer
+            if getattr(self.peers,'catalogue',None):self.peers.catalogue.transfer=self.transfer;self.peers.catalogue.core=self.ops.core;self.peers.catalogue.cache=None
             self.peers.blocks.core=self.ops.core;self.peers.blocks.clones.core=self.ops.core;self.peers.blocks.clones.recovery=self.transfer.recovery
         self.start_peer_support()
         self.setup.environment=self.environment
@@ -111,6 +114,8 @@ class Workspace:
                 candidate.wallet_pull=Pull(candidate,self.transfer,self.lock,lambda:bool(self.closing or self.busy() or self.archives.reading or self.ops.prepared))
                 from retirement_remote import Comparisons
                 candidate.retirement_compare=Comparisons(candidate,self.ops.core,self.lock,lambda:bool(self.closing or self.busy() or self.archives.reading or self.ops.prepared))
+                from direct_wallet_catalogue import Catalogue
+                candidate.catalogue=Catalogue(candidate,self.transfer,self.lock,lambda:bool(self.closing or self.busy() or self.archives.reading or self.ops.prepared))
                 candidate.blocks.clones.operation_lock=self.lock
                 candidate.blocks.clones.recovery=self.transfer.recovery
                 candidate.blocks.clones.handoff_guard=lambda:bool(self.busy(ignore_history=True) or self.archives.loaded or self.archives.staged or self.ops.prepared)
@@ -118,7 +123,7 @@ class Workspace:
                 with self.lock:
                     if self.closing:
                         candidate.close();self.store.peers=None;return
-                    self.peers=candidate;self.peer_error='';direct.start()
+                    self.peers=candidate;self.peer_error='';direct.start();candidate.catalogue.start()
             except Exception:
                 if candidate:
                     try:candidate.close()
@@ -209,6 +214,9 @@ class Workspace:
         for row in result.get('queue',[]):row['archive_request']=bool(jobs.get(row['id'],{}).get('request') and jobs[row['id']]['phase']=='queued')
         return result
     def state(self):
+        if self.node_status.get('color')=='green' and not self.busy():
+            from direct_wallet_catalogue import reconcile_preservation
+            reconcile_preservation(self.ops.core,self.store)
         if getattr(getattr(self,'archive_ops',None),'cancellations',None):self.archive_ops.cancellations.observe()
         saved=self.store.read()
         connected=self.node_status['color']=='green'

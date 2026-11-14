@@ -86,26 +86,33 @@ def readiness(p):
             'firewall_remove_command':f'sudo ufw delete allow proto tcp from {peer} to any port 22',
             'network_note':'The receiving SSH server must permit this local account and password authentication. Never enable root login. If UFW is active, its IPv6 support must be enabled (IPV6=yes in /etc/default/ufw). On the receiving modem, allow incoming IPv6 TCP 22 to this computer from the sending IPv6 address. IPv6 normally needs a firewall exception, not IPv4 port forwarding. The Agent cannot reliably inspect your modem or distinguish a modem block from a host firewall or routing failure. System SSH remains controlled by you; closing this transfer closes its direct connection and the Agent receiving socket, not an existing SSH server.'}
 
+def store_direct_public(core,p):
+    store=getattr(core,'managed_store',None)
+    if store is None:return False
+    saved=store.read()
+    return saved.get('direct_wallet_discovery') and __import__('direct_wallet_catalogue').local_request(saved,p)
+
 def source_wallet(core,p,require_encrypted=False,*,public_preview=False,restoration_permit=None):
     from managed_accounts import guard
     guard(core,p,public_preview=public_preview,restoration_permit=restoration_permit)
-    wanted=descriptors(p['public_wallet']);matches=[]
+    wanted=descriptors(p['public_wallet']);matches=[];complete_scope=store_direct_public(core,p)
     from extinct_sync import grouped,ARCHIVE
     if grouped(p['public_wallet']) and not p['source_has_private_keys'] and ARCHIVE in rpc(core,'listwallets'):
         raw=rpc(core,'listdescriptors',[False],ARCHIVE);info=rpc(core,'getwalletinfo',[],ARCHIVE)
-        if wanted<=descriptors(raw) and not info.get('private_keys_enabled') and not info.get('scanning'):return ARCHIVE
+        if (wanted==descriptors(raw) if complete_scope else wanted<=descriptors(raw)) and not info.get('private_keys_enabled') and not info.get('scanning'):return ARCHIVE
     for name in rpc(core,'listwallets'):
         try:
             raw=rpc(core,'listdescriptors',[False],name)
             from wallet_labels import address_only
             actual=descriptors(raw)
-            if actual==wanted or (not p['source_has_private_keys'] and address_only(p['public_wallet']) and wanted<=actual):matches.append(name)
+            if actual==wanted or (not complete_scope and not p['source_has_private_keys'] and address_only(p['public_wallet']) and wanted<=actual):matches.append(name)
         except ValueError:continue
     if len(matches)>1 and __import__('signer_restoration').requested(p):matches=[n for n in matches if n==p['public_wallet']['wallet_name']]
     if len(matches)!=1:raise ValueError('The local public descriptors must identify exactly one loaded source wallet. Load the wallet and resolve duplicate replicas first.')
     guard(core,p,actual_name=matches[0],public_preview=public_preview,restoration_permit=restoration_permit)
     info=rpc(core,'getwalletinfo',[],matches[0])
-    if info.get('private_keys_enabled')!=p['source_has_private_keys'] or info.get('scanning'):raise ValueError('Source wallet key capability changed or its scan is incomplete.')
+    direct_public=not require_encrypted and not p['source_has_private_keys'] and store_direct_public(core,p)
+    if (info.get('private_keys_enabled')!=p['source_has_private_keys'] and not direct_public) or info.get('scanning'):raise ValueError('Source wallet key capability changed or its scan is incomplete.')
     if require_encrypted and info.get('wallaby_storage')=='disc':raise ValueError('A physical-only disc signer cannot be copied into a persistent node wallet. Use its verified physical backup/recovery workflow; no private wallet file was sent.')
     if require_encrypted and info.get('private_keys_enabled') and ('unlocked_until' not in info or info['unlocked_until']!=0):raise ValueError('Lock this encrypted wallet in Bitcoin Core before sending. Unencrypted private-key wallets cannot be transferred; encrypt and back up the wallet in Core first.')
     return matches[0]
@@ -255,8 +262,10 @@ class Transfer:
         if listener:
             listener.close();socket_path(self.store).unlink(missing_ok=True)
     def complete(self,key):
-        self.store.queue('wallet_transfer_result',{'request_hash':key,'status':'complete'})
-        with self.store.edit() as s:s['pending'].pop(key,None);s['completed'][key]={'kind':'wallet_transfer','at':time.time()};s.pop('active_transfer',None)
+        if not self.store.read().get('direct_wallet_discovery'):self.store.queue('wallet_transfer_result',{'request_hash':key,'status':'complete'})
+        catalogue=getattr(getattr(self.store,'peers',None),'catalogue',None)
+        if catalogue:catalogue.cache=None
+        with self.store.edit() as s:s['pending'].pop(key,None);s['completed'][key]={'kind':'wallet_transfer','at':time.time()};s.pop('active_transfer',None);s.get('direct_sync_keys',{}).pop(key,None);s.get('direct_sync_offers',{}).pop(key,None)
         self.success_until=time.time()+5;self.details=None
     def resume_network(self):
         if self.connection:raise ValueError('Wait for the current SSH transfer before resuming Internet peers.')
@@ -265,7 +274,7 @@ class Transfer:
     def pending_recovery(self,key):
         with self.store.edit() as s:
             s['pending'][key]['state']='recovery_required';s.pop('active_transfer',None)
-        self.store.queue('wallet_transfer_result',{'request_hash':key,'status':'recovery_required','message':'Wallet data received; local history recovery and verification are still required.'})
+        if not self.store.read().get('direct_wallet_discovery'):self.store.queue('wallet_transfer_result',{'request_hash':key,'status':'recovery_required','message':'Wallet data received; local history recovery and verification are still required.'})
     def cancel(self,key):
         # Never claim a failed/uncertain restore succeeded or automatically replay it.
         current,row=active(self.store)

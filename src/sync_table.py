@@ -44,13 +44,16 @@ def sender_enabled(saved,p):
     request, but cannot grant signing/import authority. Re-enabling returns the
     same request after the receiver's current signed preferences are observed.
     """
+    if saved.get('direct_wallet_discovery'):
+        from direct_wallet_catalogue import local_request
+        return local_request(saved,p) and saved.get('direct_sync_keys',{}).get(__import__('approval_store').digest(p),{}).get('enabled') is True
     if p.get('direction')!='send':return True
     if not saved.get('sync_offers_received'):return False
     ident=policy_id(p)
     return any(o['direction']=='send' and o['transfer_id']==p['transfer_id']
         and o['peer']['node_id']==p['peer']['node_id'] and policy_id(o)==ident
         and o['status'] not in ('disabled','permissions_pending')
-        for o in saved.get('sync_offers',{}).values())
+        for o in (saved.get('direct_sync_offers',{}) if saved.get('direct_wallet_discovery') else saved.get('sync_offers',{})).values())
 
 def state(store,requests):
     saved=store.read();groups={};denials=saved.get('sync_exclusions',{})
@@ -65,7 +68,7 @@ def state(store,requests):
         row['multisig']=row.get('multisig',False) or local.get('multisig',False)
         if local.get('private_keys_enabled') is True:row['signers'].append({'account':name,'label':managed.get('role_name') or name})
         row['local_private']=row.get('local_private',False) or local.get('private_keys_enabled') is True
-    for offer in saved.get('sync_offers',{}).values():
+    for offer in (saved.get('direct_sync_offers',{}) if saved.get('direct_wallet_discovery') else saved.get('sync_offers',{})).values():
         if offer['direction']=='send' and offer['status'] in ('disabled','permissions_pending'):continue
         ident=policy_id(offer);row=group(ident,offer['public_wallet']['wallet_name'])
         row['multisig']=row.get('multisig',False) or multisig(offer['public_wallet'])
