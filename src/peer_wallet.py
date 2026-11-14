@@ -96,11 +96,15 @@ def source_wallet(core,p,require_encrypted=False,*,public_preview=False,restorat
     from managed_accounts import guard
     guard(core,p,public_preview=public_preview,restoration_permit=restoration_permit)
     wanted=descriptors(p['public_wallet']);matches=[];complete_scope=store_direct_public(core,p)
-    from extinct_sync import grouped,ARCHIVE
-    if grouped(p['public_wallet']) and not p['source_has_private_keys'] and ARCHIVE in rpc(core,'listwallets'):
-        raw=rpc(core,'listdescriptors',[False],ARCHIVE);info=rpc(core,'getwalletinfo',[],ARCHIVE)
-        if (wanted==descriptors(raw) if complete_scope else wanted<=descriptors(raw)) and not info.get('private_keys_enabled') and not info.get('scanning'):return ARCHIVE
+    from extinct_sync import grouped,archive_name
+    if grouped(p['public_wallet']) and not p['source_has_private_keys']:
+        name=archive_name(core)
+        if name not in rpc(core,'listwallets'):raise ValueError('Load the exact local Extinct archive before sending history.')
+        raw=rpc(core,'listdescriptors',[False],name);info=rpc(core,'getwalletinfo',[],name)
+        if (wanted==descriptors(raw) if complete_scope else wanted<=descriptors(raw)) and info.get('private_keys_enabled') is False and not info.get('scanning'):return name
+        raise ValueError('The exact local Extinct archive differs from the requested public history.')
     for name in rpc(core,'listwallets'):
+        if __import__('wallet_visibility').internal(name):continue
         try:
             raw=rpc(core,'listdescriptors',[False],name)
             from wallet_labels import address_only

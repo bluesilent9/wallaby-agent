@@ -81,4 +81,4 @@ def receive_blocker(saved,p):
 def advisory_rows(saved):
     """Short-lived Server hints never establish an executable direct request."""
     if not saved.get('direct_wallet_discovery') or __import__('time').monotonic()-saved.get('sync_offer_observed_at',-1000)>45:return []
-    return [o for o in saved.get('sync_offers',{}).values() if o['direction']=='receive' and o.get('source_online') is True and o['status'] not in ('peer_offline','invalid_pair')]
+    return [o for o in saved.get('sync_offers',{}).values() if not __import__('wallet_visibility').internal(o['public_wallet']['wallet_name']) and o['direction']=='receive' and o.get('source_online') is True and o['status'] not in ('peer_offline','invalid_pair')]

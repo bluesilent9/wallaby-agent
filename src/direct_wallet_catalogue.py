@@ -65,9 +65,12 @@ def snapshot(core,store):
     from wallet_labels import read_labels
     from extinct_sync import grouped,ARCHIVE
     reconcile_preservation(core,store)
+    from wallet_visibility import internal
     entries=[];seen=set()
-    with ownership_wallets(core):
+    names={r['name'] for r in rpc(core,'listwalletdir')['wallets'] if not internal(r['name'])}
+    with ownership_wallets(core,names):
         for name in sorted(rpc(core,'listwallets')):
+            if internal(name):continue
             info=rpc(core,'getwalletinfo',[],name);raw=rpc(core,'listdescriptors',[False],name)
             if not raw.get('descriptors'):continue
             raw={'wallet_name':name,'descriptors':copy.deepcopy(raw['descriptors'])};ident=digest(sorted(descriptors(raw)))
@@ -86,8 +89,6 @@ def snapshot(core,store):
                 from extinct_upgrade import snapshot as archive_snapshot
                 state=archive_snapshot(core,name);row['txids']=state['txids'];row['labels']=read_labels(core,name,raw,[])
             entries.append(row)
-    from managed_accounts import POLICY
-    entries=[row for row in entries if not (POLICY.fullmatch(row['public_wallet']['wallet_name']) and any(other is not row and not POLICY.fullmatch(other['public_wallet']['wallet_name']) and descriptors(row['public_wallet'])<=descriptors(other['public_wallet']) for other in entries))]
     if len(entries)>MAX_ITEMS:raise ValueError('Direct wallet inventory exceeds the supported wallet count.')
     return {'version':1,'name':__import__('socket').gethostname(),'wallets':entries,'denied':sorted(store.read().get('sync_exclusions',{}))}
 
@@ -146,7 +147,7 @@ class Catalogue:
             from wallet_loading import ownership_wallets
             with ownership_wallets(self.core):
                 for row in sorted(origin['wallets'],key=lambda r:(not r['archive'],r['public_wallet']['wallet_name'].casefold())):
-                    if not row['available'] or not missing(row,destination):continue
+                    if __import__('wallet_visibility').internal(row['public_wallet']['wallet_name']) or not row['available'] or not missing(row,destination):continue
                     raw=row['public_wallet'];policy=__import__('sync_preferences').policy_id({'public_wallet':raw})
                     if policy in destination['denied']:continue
                     own=self.peers.identity;other=channel.peer
@@ -186,6 +187,7 @@ class Catalogue:
         keep=set()
         with self.store.edit() as state:
             for row in origin['wallets']:
+                if __import__('wallet_visibility').internal(row['public_wallet']['wallet_name']):continue
                 policy=__import__('sync_preferences').policy_id(row)
                 if not missing(row,destination):continue
                 key=digest({'direct_denied':policy,'peer':channel.peer['endpoint_id']});keep.add(key)
@@ -193,6 +195,7 @@ class Catalogue:
         for offer in offers:
             if not isinstance(offer,dict) or set(offer)!={'proposal','preview'}:raise ValueError('Invalid direct offer.')
             p=copy.deepcopy(validate_proposal(offer['proposal']));payload=offer['preview']
+            if __import__('wallet_visibility').internal(p['public_wallet']['wallet_name']):continue
             matches=[r for r in origin['wallets'] if r['public_wallet']==p['public_wallet'] and r['private']==p['source_has_private_keys']]
             if p['direction']!='send' or len(matches)!=1 or not missing(matches[0],destination):raise ValueError('Direct offer does not describe a complete source wallet missing here.')
             if p['transport']['sender_endpoint']!=channel.peer['endpoint_id'] or p['transport']['receiver_endpoint']!=self.peers.identity['endpoint_id']:raise ValueError('Offer belongs to another direct peer.')

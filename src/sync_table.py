@@ -60,7 +60,9 @@ def state(store,requests):
     def group(ident,name):
         return groups.setdefault(ident,{'policy_id':ident,'wallet_name':name,'local_wallets':[],
             'send':[],'receive':[],'offers':[],'signers':[],'traits':{'vault':False,'multisig':False,'smsf':'smsf' in name.casefold(),'extinct':False,'disc':False},'denied':ident in denials,'deny_id':None})
+    from wallet_visibility import internal
     for name,local in saved.get('sync_local_wallets',{}).items():
+        if internal(name):continue
         row=group(local.get('policy_id','local:'+name),name);row['local_wallets'].append(name)
         for key,value in local.get('traits',{}).items():row['traits'][key]|=value
         row['traits']['disc']|=local.get('disc',False)
@@ -69,6 +71,7 @@ def state(store,requests):
         if local.get('private_keys_enabled') is True:row['signers'].append({'account':name,'label':managed.get('role_name') or name})
         row['local_private']=row.get('local_private',False) or local.get('private_keys_enabled') is True
     for offer in (saved.get('direct_sync_offers',{}) if saved.get('direct_wallet_discovery') else saved.get('sync_offers',{})).values():
+        if internal(offer['public_wallet']['wallet_name']):continue
         if offer['direction']=='send' and offer['status'] in ('disabled','permissions_pending'):continue
         ident=policy_id(offer);row=group(ident,offer['public_wallet']['wallet_name'])
         row['multisig']=row.get('multisig',False) or multisig(offer['public_wallet'])
@@ -82,7 +85,7 @@ def state(store,requests):
     from managed_accounts import POLICY
     direct_policies={policy_id(o) for o in saved.get('direct_sync_offers',{}).values()}
     for offer in advisory_rows(saved):
-        if POLICY.fullmatch(offer['public_wallet']['wallet_name']):continue
+        if internal(offer['public_wallet']['wallet_name']):continue
         ident=policy_id(offer)
         if ident in direct_policies:continue
         row=group(ident,offer['public_wallet']['wallet_name'])
@@ -92,7 +95,9 @@ def state(store,requests):
         row['deny_id']=offer['id'];row['server_hint']=True
         for key,value in __import__('wallet_traits').sync_traits(offer['public_wallet']).items():row['traits'][key]|=value
     for r in requests:
-        p=saved['pending'][r['id']]['proposal'];enabled=sender_enabled(saved,p)
+        p=saved['pending'][r['id']]['proposal']
+        if r['state']=='pending' and internal(p['public_wallet']['wallet_name']):continue
+        enabled=sender_enabled(saved,p)
         if r['state']=='pending' and not enabled:continue
         ident=policy_id(p);row=group(ident,r['wallet_name'])
         if r['direction']=='receive':
@@ -104,7 +109,8 @@ def state(store,requests):
         row['traits']['disc']|=preview.get('source_storage')=='disc'
         option=copy.deepcopy(r);option['source_storage']=preview.get('source_storage','node');option['signer_label']=preview.get('public_wallet',{}).get('wallet_name');option['direct_ready']=enabled and direct_ready(store,p)
         row[r['direction']].append(option)
-    for ident,d in denials.items():group(ident,d['wallet_name'])
+    for ident,d in denials.items():
+        if not internal(d['wallet_name']):group(ident,d['wallet_name'])
     for row in groups.values():
         row['traits']['smsf']='smsf' in row['wallet_name'].casefold()
         row['signers'].sort(key=lambda r:(r['label'].casefold(),r['account'].casefold()))

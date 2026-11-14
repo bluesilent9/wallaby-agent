@@ -69,6 +69,15 @@ class DirectDiscovery(DirectCore):
   second=rpc(self.core,'getnewaddress',[],'Miner')
   requests=[{'desc':'addr('+a+')#'+checksum('addr('+a+')'),'timestamp':0,'label':label} for a,label in ((old,lost),(second,'Other old wallet'))]
   rpc(self.core,'importdescriptors',[requests],'extinct_watch')
+  if getattr(self,'retained_stage',False):
+   stage='.wallaby-history-'+'a'*24;rpc(self.core,'createwallet',{'wallet_name':stage,'disable_private_keys':True,'blank':True})
+   rpc(self.core,'importdescriptors',[[{**r,'timestamp':'now','label':'Stale retained staging label'} for r in requests]],stage)
+   self.retained_stage_name=stage
+   from sync_preferences import policy_id
+   others=[r for r in snapshot(self.core,self.sender)['wallets'] if not r['archive']]
+   with self.store.edit() as saved:
+    for row in others:
+     ident=policy_id(row);saved.setdefault('sync_exclusions',{})[ident]={'policy_id':ident,'wallet_name':row['public_wallet']['wallet_name']}
   # Old receiver subset exists before direct comparison; missing tx records and
   # another address must trigger the same ordinary receiving approval.
   rpc(self.receiver.core,'createwallet',{'wallet_name':'Wallaby Extinct','disable_private_keys':True,'blank':True})
@@ -79,6 +88,13 @@ class DirectDiscovery(DirectCore):
    for core in (self.core,self.receiver.core):rpc(core,'pruneblockchain',[300]);self.assertGreater(rpc(core,'getblockchaininfo')['pruneheight'],2)
   self.discover();key=self.incoming('Wallaby Extinct');self.assertIsNotNone(key)
   p=self.store.read()['pending'][key]['proposal'];self.assertEqual(len(p['public_wallet']['descriptors']),2)
+  if getattr(self,'retained_stage',False):
+   from sync_table import choose,state as table
+   from sync_approvals import groups
+   choose(self.store,key,True,True)
+   for _ in range(3):
+    self.discover();self.assertEqual(self.incoming('Wallaby Extinct'),key);self.assertTrue(self.store.read()['sync_choices'][key]['selected']);self.assertTrue(any(key in g['keys'] for g in groups(self.store)))
+   view=self.receive.state();rows=view['wallets'];self.assertFalse(any(__import__('wallet_visibility').internal(r['wallet_name']) for r in rows));self.assertEqual(next(r for r in rows if r['policy_id']==__import__('sync_preferences').policy_id(p))['availability'],'ready');self.assertEqual([r['wallet_name'] for r in rows if r['availability']=='ready'],['Wallaby Extinct']);self.assertTrue(all(r['availability']=='denied' for r in rows if r['wallet_name']!='Wallaby Extinct'))
   self.approve(key,True)
   from extinct_upgrade import snapshot as snap
   source=snap(self.core,'extinct_watch');received=snap(self.receiver.core,'Wallaby Extinct')
@@ -91,6 +107,10 @@ class DirectDiscovery(DirectCore):
    add();self.discover();key=self.incoming('Wallaby Extinct');self.assertIsNotNone(key);change(self.store,key,True)
    add();self.discover();self.assertIsNone(self.incoming('Wallaby Extinct'))
    self.assertTrue(any(o['public_wallet']['wallet_name']=='Wallaby Extinct' and o['status']=='disabled' for o in self.store.read()['direct_sync_offers'].values()))
+ def test_retained_history_stage_never_shadows_extinct_or_loses_receive_selection(self):
+  self.retained_stage=True;self.test_whole_extinct_history_updates_partial_receiver_and_keeps_lost_labels()
+  self.assertIn(self.retained_stage_name,{r['name'] for r in rpc(self.core,'listwalletdir')['wallets']})
+  self.assertEqual(rpc(self.core,'listlabels',[],self.retained_stage_name),['Stale retained staging label'])
  def test_extinct_same_addresses_but_missing_transactions_is_offered_as_normal_sync(self):
   self.same_addresses=True;self.test_whole_extinct_history_updates_partial_receiver_and_keeps_lost_labels()
  def test_old_and_new_vault_policies_transfer_watch_only_without_private_signer_clone(self):

@@ -22,6 +22,7 @@ def local_details(core,p,store):
     from peer_wallet import wallet_details
     wanted=descriptors(p['public_wallet']);covered=set();records={};labels={};outputs={};chain=None
     for name in sorted(rpc(core,'listwallets')):
+        if __import__('wallet_visibility').internal(name):continue
         info=rpc(core,'getwalletinfo',[],name)
         if info.get('private_keys_enabled'):continue
         raw=rpc(core,'listdescriptors',[False],name)
