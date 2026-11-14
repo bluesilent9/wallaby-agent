@@ -90,7 +90,7 @@ class Exchange:
         self.phase='proposal_validation'
         for p in r['proposals']:
             from direct_wallet_catalogue import SERVER_KINDS
-            if self.store.read().get('direct_wallet_discovery') and isinstance(p,dict) and p.get('kind') in SERVER_KINDS:continue
+            if self.store.read().get('direct_wallet_discovery') and isinstance(p,dict) and p.get('kind') in SERVER_KINDS and p.get('kind')!='wallet_sync_offers':continue
             # Record only a fixed known kind, never remote strings or payloads.
             known={'wallet_sync_offers','wallet_mobile_verification','wallet_rename','wallet_rename_queue','builder_cancel','wallet_retire_cancel','wallet_sync_queue','wallet_archive_queue','wallet_transfer_preview','wallet_sync_preferences','wallet_setup_complete','wallet_setup_identity','node_identity','wallet_transfer','vault_sync','wallet_retire','wallet_setup','wallet_setup_policy','wallet_policy_refresh','sign_psbt_partial','broadcast_transaction','archive_wallet','destroy_disc','archive_cancel'}
             self.proposal_kind=p.get('kind') if isinstance(p,dict) and p.get('kind') in known else 'unknown'
@@ -231,7 +231,7 @@ class Exchange:
                 event('dashboard.exchange','Exchange failed · endpoint=/agent/v2/exchange · phase='+self.phase+' · kind='+self.proposal_kind+' · '+failure.stage+' · '+failure.code+' · retry_s='+str(delay)+' · '+str(failure))
                 if self.store is None:
                     stop.wait(delay);continue
-                with self.store.edit() as s:s['sync']=str(failure)+' Queued data retained; retry in '+str(delay)+' seconds.';s['exchange_error']={'stage':failure.stage,'code':failure.code,'phase':self.phase,'kind':self.proposal_kind}
+                with self.store.edit() as s:s.pop('sync_offer_observed_at',None);s['sync']=str(failure)+' Queued data retained; retry in '+str(delay)+' seconds.';s['exchange_error']={'stage':failure.stage,'code':failure.code,'phase':self.phase,'kind':self.proposal_kind}
             if self.store is not None and not self.cancelled():
                 if delay==2 and any(v['kind']=='wallet_setup_identity' for v in self.store.read()['outbox'].values()):delay=.1
             stop.wait(delay)

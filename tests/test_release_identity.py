@@ -12,19 +12,19 @@ class ReleaseIdentity(unittest.TestCase):
         for name in ('src/worker_upgrade.py','src/app.py','src/runtime.py','src/node_client.py','web/index.html'):
             target=self.root/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(ROOT/name,target)
     def test_current_release_is_consistent(self):
-        self.assertEqual(check.release_version(self.root),('2.0.0~dev100',100))
+        self.assertEqual(check.release_version(self.root),('2.0.0~dev101',101))
     def test_old_or_duplicate_visible_badge_is_refused(self):
         p=self.root/'web/index.html';text=p.read_text()
-        for bad in (text.replace('BUILD 100','BUILD 77'),text+' BUILD 100',text.replace('BUILD 100','')):
+        for bad in (text.replace('BUILD 101','BUILD 77'),text+' BUILD 101',text.replace('BUILD 101','')):
             p.write_text(bad)
             with self.assertRaises(ValueError):check.release_version(self.root)
     def test_old_health_monitor_or_transport_version_is_refused(self):
         for name in ('app.py','runtime.py','node_client.py'):
-            p=self.root/'src'/name;text=p.read_text();p.write_text(text.replace('2.0.0~dev100','2.0.0~dev77'))
+            p=self.root/'src'/name;text=p.read_text();p.write_text(text.replace('2.0.0~dev101','2.0.0~dev77'))
             with self.assertRaises(ValueError):check.release_version(self.root)
             p.write_text(text)
     def test_missing_or_malformed_worker_version_is_refused(self):
         p=self.root/'src/worker_upgrade.py';text=p.read_text()
-        for bad in (text.replace('2.0.0~dev100','wrong'),text.replace('VERSION=','OLD_VERSION=')):
+        for bad in (text.replace('2.0.0~dev101','wrong'),text.replace('VERSION=','OLD_VERSION=')):
             p.write_text(bad)
             with self.assertRaises(ValueError):check.release_version(self.root)

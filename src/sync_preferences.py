@@ -12,7 +12,7 @@ def change(store,key,disable):
         if s.get('active_transfer') or s.get('sync_batch'):raise ValueError('Finish or end the active transfer before changing synchronisation requests.')
         p=s['pending'].get(key,{}).get('proposal')
         if p is None:
-            offer=(s.get('direct_sync_offers',{}) if s.get('direct_wallet_discovery') else s.get('sync_offers',{})).get(key)
+            offer=s.get('direct_sync_offers',{}).get(key) or next((o for o in __import__('sync_offers').advisory_rows(s) if o['id']==key),None) or (s.get('sync_offers',{}).get(key) if not s.get('direct_wallet_discovery') else None)
             if offer and offer['direction']=='receive':p={'kind':'wallet_transfer','direction':'receive','public_wallet':offer['public_wallet']}
         if not p or p['kind']!='wallet_transfer' or p['direction']!='receive':raise ValueError('Only incoming wallet synchronisation can be disabled. Signing authority is unchanged.')
         ident=policy_id(p)

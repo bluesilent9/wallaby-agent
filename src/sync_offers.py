@@ -13,7 +13,8 @@ def validate(p):
     if len(raw.encode())>2*1024*1024 or PRIVATE.search(raw):raise ValueError('Public offers exceed the safe size or contain private material.')
     ids=set()
     for offer in p['offers']:
-        if not isinstance(offer,dict) or not {'id','transfer_id','direction','peer','public_wallet','status'}<=set(offer)<={'id','transfer_id','direction','peer','public_wallet','status','source_storage'} or not hexid(offer['id']) or not hexid(offer['transfer_id']) or offer['id'] in ids or offer['direction'] not in ('send','receive') or offer['status'] not in STATUSES:raise ValueError('Invalid public wallet offer.')
+        if not isinstance(offer,dict) or not {'id','transfer_id','direction','peer','public_wallet','status'}<=set(offer)<={'id','transfer_id','direction','peer','public_wallet','status','source_storage','source_online'} or not hexid(offer['id']) or not hexid(offer['transfer_id']) or offer['id'] in ids or offer['direction'] not in ('send','receive') or offer['status'] not in STATUSES:raise ValueError('Invalid public wallet offer.')
+        if 'source_online' in offer and type(offer['source_online']) is not bool:raise ValueError('Invalid advertised source presence.')
         if 'source_storage' in offer and offer['source_storage'] not in ('node','disc'):raise ValueError('Invalid advertised source storage.')
         peer=offer['peer']
         if not isinstance(peer,dict) or set(peer)!={'node_id','hostname'}:raise ValueError('Invalid advertised source node.')
@@ -21,7 +22,6 @@ def validate(p):
     return p
 
 def apply(store,p,session):
-    if store.read().get('direct_wallet_discovery'):return
     validate(p)
     with store.edit() as s:
         new=session!=s.get('sync_offer_session')
@@ -33,7 +33,7 @@ def apply(store,p,session):
             s['sync_offer_session']=session;s.pop('sync_offer_revision',None);s.pop('sync_offer_snapshot_hash',None)
         previous=s.get('sync_offer_revision',-1);content=digest(p['offers']);changed=new or previous!=p['revision']
         if p['revision']<previous or p['revision']==previous and content!=s.get('sync_offer_snapshot_hash'):raise ValueError('Stale or conflicting public wallet-offer snapshot.')
-        s['sync_offers']={o['id']:copy.deepcopy(o) for o in p['offers']};s['sync_offer_revision']=p['revision'];s['sync_offer_snapshot_hash']=content;s['sync_offers_received']=True
+        s['sync_offers']={o['id']:copy.deepcopy(o) for o in p['offers']};s['sync_offer_revision']=p['revision'];s['sync_offer_snapshot_hash']=content;s['sync_offers_received']=True;s['sync_offer_observed_at']=__import__('time').monotonic()
         # Withdrawal restricts an unstarted sender selection. Re-enabling may
         # restore visibility, but cannot silently restore a previously ticked
         # recipient. Frozen batches and attempted outcomes remain untouched.
@@ -76,3 +76,9 @@ def receive_blocker(saved,p):
     if states & {'preview_changed','preview_expired','peer_changed'}:
         return 'Wallet Server must renew the signed receiving request. The source or its review changed; no wallet has been received. Your direct pairing and selection are retained.'
     return 'The source is advertised, but its wallet transfer is not ready ('+', '.join(sorted(states))+'). Wait for current discovery and direct connection checks; no wallet has been received.'
+
+
+def advisory_rows(saved):
+    """Short-lived Server hints never establish an executable direct request."""
+    if not saved.get('direct_wallet_discovery') or __import__('time').monotonic()-saved.get('sync_offer_observed_at',-1000)>45:return []
+    return [o for o in saved.get('sync_offers',{}).values() if o['direction']=='receive' and o.get('source_online') is True and o['status'] not in ('peer_offline','invalid_pair')]

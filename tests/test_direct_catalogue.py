@@ -32,7 +32,9 @@ class DirectDiscovery(DirectCore):
   self.boot();self.discover();key=self.incoming();self.assertIsNotNone(key)
   from sync_queue import apply_snapshot
   from sync_offers import apply
-  apply_snapshot(self.store,999,[],session='malicious-server');apply(self.store,{'malformed':'server'},'server');self.assertIn(key,self.store.read()['pending'])
+  apply_snapshot(self.store,999,[],session='malicious-server')
+  with self.assertRaises(ValueError):apply(self.store,{'malformed':'server'},'server')
+  self.assertIn(key,self.store.read()['pending'])
   self.approve(key)
   self.assertFalse(any(r['kind'] in ('wallet_transfer_result','wallet_transfer_preview') for s in (self.sender,self.store) for r in s.read()['outbox'].values()))
  def test_denial_visible_and_reenable_works_without_server_or_sender_approval(self):
@@ -41,6 +43,13 @@ class DirectDiscovery(DirectCore):
   policy=policy_id(self.store.read()['pending'][key]['proposal']);change(self.store,key,True);self.discover();self.assertIsNone(self.incoming())
   offers=list(self.store.read()['direct_sync_offers'].values());self.assertTrue(any(o['status']=='disabled' and o['public_wallet']['wallet_name']=='Original' for o in offers))
   enable(self.store,policy);self.discover();self.assertIsNotNone(self.incoming());self.approve(self.incoming(),True)
+ def test_advisory_denial_before_first_discovery_suppresses_direct_receiving(self):
+  self.boot()
+  from sync_offers import apply
+  from sync_preferences import change,policy_id
+  offer={'id':'a'*64,'transfer_id':'b'*64,'direction':'receive','peer':{'node_id':'server-hint-source','hostname':'source'},'public_wallet':self.raw,'status':'discovery_pending','source_online':True}
+  apply(self.store,{'kind':'wallet_sync_offers','version':1,'revision':1,'offers':[offer]},'server');change(self.store,offer['id'],True)
+  self.discover();self.assertIsNone(self.incoming());self.assertIn(policy_id(offer),self.store.read()['sync_exclusions']);self.assertFalse(any(policy_id(r['proposal'])==policy_id(offer) for r in self.store.read()['pending'].values()))
  def test_unloaded_wallets_are_detected_and_restored_not_treated_as_missing(self):
   self.boot();self.wallet(self.receiver.core,'Existing copy','single');rpc(self.receiver.core,'unloadwallet',{'wallet_name':'Existing copy'});self.discover()
   self.assertNotIn('Existing copy',rpc(self.receiver.core,'listwallets'));self.assertIsNone(self.incoming())
@@ -97,6 +106,30 @@ class DirectDiscovery(DirectCore):
   self.pruned_nodes=True;self.test_whole_extinct_history_updates_partial_receiver_and_keeps_lost_labels()
  def test_extinct_denial_survives_real_source_archive_growth(self):
   self.denial_growth=True;self.test_whole_extinct_history_updates_partial_receiver_and_keeps_lost_labels()
+ def test_managed_monitor_subset_does_not_appear_as_a_separate_wallet(self):
+  self.boot('vault');name='Wallaby policy '+'a'*20
+  rpc(self.core,'createwallet',{'wallet_name':name,'disable_private_keys':True,'blank':True})
+  rpc(self.core,'importdescriptors',[[{**r,'timestamp':'now','active':False} for r in self.raw['descriptors'][:2]]],name)
+  rows=snapshot(self.core,self.sender)['wallets'];self.assertFalse(any(r['public_wallet']['wallet_name']==name for r in rows));self.discover();self.assertIsNotNone(self.incoming())
+ def test_extinct_preview_failure_keeps_exact_archive_visible_then_recovers_after_enable(self):
+  from vendor.embit.descriptor.checksum import checksum
+  from sync_preferences import change,enable,policy_id
+  self.boot();address=rpc(self.core,'getnewaddress',[],'Miner');body='addr('+address+')'
+  rpc(self.core,'createwallet',{'wallet_name':'extinct_watch','disable_private_keys':True,'blank':True});rpc(self.core,'importdescriptors',[[{'desc':body+'#'+checksum(body),'timestamp':'now','label':'Old Treasury | LOST:06/11/2026 01:02:03 UTC'}]],'extinct_watch')
+  import threading
+  held=threading.Event()
+  def inventory_read():
+   with self.a.catalogue.lock:held.set();time.sleep(.15)
+  reader=threading.Thread(target=inventory_read);reader.start();held.wait(2)
+  self.discover();reader.join(2);key=self.incoming('Wallaby Extinct');self.assertIsNotNone(key);ident=policy_id(self.store.read()['pending'][key]['proposal']);change(self.store,key,True);self.discover();self.assertIsNone(self.incoming('Wallaby Extinct'));enable(self.store,ident)
+  from wallet_preview import prepare
+  def unavailable(core,store,key,p):
+   if p['public_wallet']['wallet_name']=='Wallaby Extinct':raise ValueError('Transient local preview failure')
+   return prepare(core,store,key,p)
+  with patch('wallet_preview.prepare',side_effect=unavailable):self.discover()
+  self.assertIsNone(self.incoming('Wallaby Extinct'))
+  offers=[o for o in self.store.read()['direct_sync_offers'].values() if o['public_wallet']['wallet_name']=='Wallaby Extinct'];self.assertEqual(len(offers),1);self.assertEqual(offers[0]['status'],'discovery_pending')
+  self.discover();self.assertIsNotNone(self.incoming('Wallaby Extinct'));self.approve(self.incoming('Wallaby Extinct'),True)
  def test_source_subsets_cannot_replace_complete_direct_wallet_offer(self):
   self.boot();self.discover();origin=self.a.catalogue.inventory();dest=self.b.catalogue.inventory();offers=self.a.catalogue.proposals(self.a.channel(self.b.identity['identity_key']),origin,dest)
   offer=next(o for o in offers if o['proposal']['public_wallet']['wallet_name']=='Original');bad=copy.deepcopy(offer);bad['proposal']['public_wallet']['descriptors']=bad['proposal']['public_wallet']['descriptors'][:1]

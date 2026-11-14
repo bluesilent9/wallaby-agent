@@ -76,11 +76,28 @@ def state(store,requests):
         row['traits']['disc']|=offer.get('source_storage')=='disc'
         row['offers'].append({'direction':offer['direction'],'status':offer['status'],'peer':copy.deepcopy(offer['peer'])})
         if offer['direction']=='receive':row['deny_id']=offer['id']
+    # Server observations are display hints only. A direct row of the same
+    # policy takes precedence, including the stable whole-Extinct identity.
+    from sync_offers import advisory_rows
+    from managed_accounts import POLICY
+    direct_policies={policy_id(o) for o in saved.get('direct_sync_offers',{}).values()}
+    for offer in advisory_rows(saved):
+        if POLICY.fullmatch(offer['public_wallet']['wallet_name']):continue
+        ident=policy_id(offer)
+        if ident in direct_policies:continue
+        row=group(ident,offer['public_wallet']['wallet_name'])
+        # A Server claim cannot override locally known wallet contents or names.
+        if row['local_wallets']:continue
+        row['offers'].append({'direction':'receive','status':'advisory','peer':copy.deepcopy(offer['peer'])})
+        row['deny_id']=offer['id'];row['server_hint']=True
+        for key,value in __import__('wallet_traits').sync_traits(offer['public_wallet']).items():row['traits'][key]|=value
     for r in requests:
         p=saved['pending'][r['id']]['proposal'];enabled=sender_enabled(saved,p)
         if r['state']=='pending' and not enabled:continue
         ident=policy_id(p);row=group(ident,r['wallet_name'])
-        if r['direction']=='receive':row['deny_id']=r['id']
+        if r['direction']=='receive':
+            row['deny_id']=r['id']
+            if all(__import__('managed_accounts').POLICY.fullmatch(n) for n in row['local_wallets']):row['wallet_name']=r['wallet_name']
         row['multisig']=row.get('multisig',False) or multisig(p['public_wallet'])
         preview=saved.get('transfer_previews',{}).get(r['id'],{}).get('preview',{})
         for key,value in __import__('wallet_traits').sync_traits(p['public_wallet']).items():row['traits'][key]|=value
@@ -103,6 +120,7 @@ def state(store,requests):
         row['send']=[r for r in row['send'] if r['direct_ready'] or r['state']!='pending']
         row['offers']=[o for o in row['offers'] if o['direction']=='receive']
         row['pending']=bool(any(r['state']=='pending' for r in row['send']) or not row['denied'] and (any(r['state']=='pending' for r in row['receive']) or row['offers']))
+        row['availability']='denied' if row['denied'] else 'ready' if any(r['direct_ready'] and r['state']=='pending' for r in row['receive']) else 'advisory'
         if row['denied'] or row['receive'] or row['offers'] or row['send']:visible.append(row)
     rows=sorted(visible,key=lambda r:(r['wallet_name'].casefold(),r['policy_id']))
     return {'wallets':rows,'pending_count':sum(row['pending'] for row in rows)}

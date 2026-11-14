@@ -86,6 +86,8 @@ def snapshot(core,store):
                 from extinct_upgrade import snapshot as archive_snapshot
                 state=archive_snapshot(core,name);row['txids']=state['txids'];row['labels']=read_labels(core,name,raw,[])
             entries.append(row)
+    from managed_accounts import POLICY
+    entries=[row for row in entries if not (POLICY.fullmatch(row['public_wallet']['wallet_name']) and any(other is not row and not POLICY.fullmatch(other['public_wallet']['wallet_name']) and descriptors(row['public_wallet'])<=descriptors(other['public_wallet']) for other in entries))]
     if len(entries)>MAX_ITEMS:raise ValueError('Direct wallet inventory exceeds the supported wallet count.')
     return {'version':1,'name':__import__('socket').gethostname(),'wallets':entries,'denied':sorted(store.read().get('sync_exclusions',{}))}
 
@@ -123,7 +125,7 @@ class Catalogue:
         activate(self.store)
     def inventory(self):
         self.phase='local_inventory'
-        if not self.lock.acquire(False):raise ValueError('Local wallet operation in progress.')
+        if not self.lock.acquire(timeout=3):raise ValueError('Local wallet operation in progress.')
         try:
             if self.guard() or self.store.read().get('sync_batch'):raise ValueError('Local wallet operation in progress.')
             # Full inspection includes unloaded Core wallets and restores them.
@@ -138,12 +140,12 @@ class Catalogue:
         from managed_accounts import guard
         from wallet_preview import prepare
         result=[];keep=set()
-        if not self.lock.acquire(False):raise ValueError('Local wallet operation in progress.')
+        if not self.lock.acquire(timeout=3):raise ValueError('Local wallet operation in progress.')
         try:
             if self.guard() or self.store.read().get('sync_batch'):raise ValueError('Local wallet operation in progress.')
             from wallet_loading import ownership_wallets
             with ownership_wallets(self.core):
-                for row in origin['wallets']:
+                for row in sorted(origin['wallets'],key=lambda r:(not r['archive'],r['public_wallet']['wallet_name'].casefold())):
                     if not row['available'] or not missing(row,destination):continue
                     raw=row['public_wallet'];policy=__import__('sync_preferences').policy_id({'public_wallet':raw})
                     if policy in destination['denied']:continue
@@ -162,7 +164,8 @@ class Catalogue:
                     try:
                         guard(self.core,p,self.store,public_preview=True)
                         payload=self.store.read().get('transfer_previews',{}).get(key) or prepare(self.core,self.store,key,p)
-                    except ValueError:
+                    except ValueError as error:
+                        self.phase='archive_preview' if row['archive'] else 'wallet_preview';self.log_failure(error)
                         self.retire({key});continue
                     keep.add(key);result.append({'proposal':p,'preview':payload})
             previous={k for k,v in self.store.read().get('direct_sync_keys',{}).items() if v['peer']==channel.peer['endpoint_id'] and self.store.read()['pending'].get(k,{}).get('proposal',{}).get('direction')=='send'}
@@ -184,9 +187,9 @@ class Catalogue:
         with self.store.edit() as state:
             for row in origin['wallets']:
                 policy=__import__('sync_preferences').policy_id(row)
-                if policy not in state.get('sync_exclusions',{}) or not missing(row,destination):continue
+                if not missing(row,destination):continue
                 key=digest({'direct_denied':policy,'peer':channel.peer['endpoint_id']});keep.add(key)
-                state.setdefault('direct_sync_offers',{})[key]={'id':key,'transfer_id':key,'direction':'receive','peer':{'node_id':channel.peer['endpoint_id'],'hostname':origin['name']},'public_wallet':row['public_wallet'],'status':'disabled','source_storage':row['storage']}
+                state.setdefault('direct_sync_offers',{})[key]={'id':key,'transfer_id':key,'direction':'receive','peer':{'node_id':channel.peer['endpoint_id'],'hostname':origin['name']},'public_wallet':row['public_wallet'],'status':'disabled' if policy in state.get('sync_exclusions',{}) else 'discovery_pending','source_storage':row['storage']}
         for offer in offers:
             if not isinstance(offer,dict) or set(offer)!={'proposal','preview'}:raise ValueError('Invalid direct offer.')
             p=copy.deepcopy(validate_proposal(offer['proposal']));payload=offer['preview']
